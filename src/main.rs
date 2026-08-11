@@ -30,7 +30,7 @@ fn main() {
         .with_custom_head(format!("<style>{}</style>", STYLE_CSS))
         .with_window(
             WindowBuilder::new()
-                .with_title("ConnectedNotes - Liquid Glass Canvas (100% Pure Rust)")
+                .with_title("conNotes - Liquid Glass Canvas (100% Pure Rust)")
                 .with_inner_size(LogicalSize::new(1440.0, 900.0))
                 .with_position(LogicalPosition::new(80.0, 80.0))
                 .with_resizable(true)
@@ -2051,7 +2051,7 @@ fn App() -> Element {
                 },
                 div { class: "sidebar-header", style: "display: flex; align-items: center; gap: 8px;",
                     IconLogo {}
-                    h1 { class: "sidebar-title", style: "font-weight: bold; font-size: 16px; background: linear-gradient(90deg, #00e1ff, #a855f7); -webkit-background-clip: text; -webkit-text-fill-color: transparent;", "ConnectedNotes" }
+                    h1 { class: "sidebar-title", style: "font-weight: bold; font-size: 16px; background: linear-gradient(90deg, #00e1ff, #a855f7); -webkit-background-clip: text; -webkit-text-fill-color: transparent;", "conNotes" }
                 }
 
                 // CAMPO DE BUSCA NO TOPO DA SIDEBAR (ESTILO MOSCARO)
