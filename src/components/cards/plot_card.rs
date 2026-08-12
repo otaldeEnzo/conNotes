@@ -870,7 +870,7 @@ pub fn PlotCard(
                     button {
                         r#type: "button",
                         title: "Adicionar função",
-                        style: "background: rgba(0, 255, 170, 0.15); color: #00ffaa; border: 1px solid rgba(0, 255, 170, 0.4); border-radius: 9999px; padding: 2px 8px; font-size: 10px; font-family: monospace; font-weight: bold; cursor: pointer; display: flex; align-items: center; gap: 4px; transition: all 0.15s ease;",
+                        
                         onmousedown: move |e| e.prevent_default(),
                         onclick: add_function,
                         "+ Função"
@@ -880,7 +880,7 @@ pub fn PlotCard(
                     button {
                         r#type: "button",
                         title: "Resetar Câmera (Zoom/Pan)",
-                        style: "background: rgba(0, 225, 255, 0.15); color: #00f0ff; border: 1px solid rgba(0, 225, 255, 0.4); border-radius: 9999px; padding: 2px 8px; font-size: 10px; font-family: monospace; font-weight: bold; cursor: pointer; display: flex; align-items: center; gap: 4px; transition: all 0.15s ease;",
+                        
                         onmousedown: move |e| e.prevent_default(),
                         onclick: reset_view,
                         "Reset"

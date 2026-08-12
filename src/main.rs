@@ -1751,7 +1751,7 @@ fn App() -> Element {
     };
 
     let vc = visual_config();
-    let mut root_classes = vec!["aurora-container".to_string()];
+    let mut root_classes = vec!["aurora-container".to_string(), "moscaro".to_string()];
     if pending_card_type().is_some() {
         root_classes.push("card-insertion-active".to_string());
     }
@@ -2533,35 +2533,7 @@ fn App() -> Element {
                     }
                 }
                 
-                // CONTROLES DE ZOOM (PILL MOSCARO)
-                if !is_settings_active {
-                    div {
-                        class: "moscaro zoom-controls-pill",
-                        style: "display: flex; align-items: center; padding: 4px 8px; gap: 6px;",
-                        div {
-                            style: "cursor: pointer; padding: 4px 8px; color: #a5b4fc; font-weight: bold; border-radius: 999px; transition: 0.2s;",
-                            onclick: move |_| zoom.set((zoom() - 0.1).max(0.3)),
-                            title: "Zoom Out",
-                            "-"
-                        }
-                        div {
-                            style: "font-family: monospace; font-size: 12px; color: #fff; width: 40px; text-align: center; cursor: pointer;",
-                            onclick: move |_| {
-                                zoom.set(1.0);
-                                pan_x.set(0.0);
-                                pan_y.set(0.0);
-                            },
-                            title: "Reset Zoom/Pan",
-                            "{ (zoom() * 100.0).round() }%"
-                        }
-                        div {
-                            style: "cursor: pointer; padding: 4px 8px; color: #a5b4fc; font-weight: bold; border-radius: 999px; transition: 0.2s;",
-                            onclick: move |_| zoom.set((zoom() + 0.1).min(2.5)),
-                            title: "Zoom In",
-                            "+"
-                        }
-                    }
-                }
+
             }
 
             // 4. MODAL OMNIBAR DE BUSCA RÁPIDA (CTRL + K) ESTILO MOSCARO CLARO

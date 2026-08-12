@@ -434,7 +434,7 @@ fn render_inline_markdown(text: &str) -> Element {
                 {
                     match kind {
                         1 => rsx! { span { key: "{idx}", style: "font-weight: bold; color: #ffffff;", "{chunk}" } },
-                        2 => rsx! { span { key: "{idx}", style: "background: rgba(0, 240, 255, 0.12); border: 1px solid rgba(0, 240, 255, 0.3); border-radius: 4px; padding: 1px 5px; font-family: monospace; color: #00f0ff; font-size: 0.92em;", "{chunk}" } },
+                        2 => rsx! { span { key: "{idx}",  "{chunk}" } },
                         3 => rsx! { span { key: "{idx}", style: "font-style: italic; color: #e2e8f0;", "{chunk}" } },
                         4 => rsx! { span { key: "{idx}", style: "{extra}", "{chunk}" } },
                         _ => rsx! { span { key: "{idx}", "{chunk}" } },
@@ -553,7 +553,7 @@ fn render_typeset_content_with_tasks(
                                 rsx! {
                                     div {
                                         key: "{line_idx}",
-                                        style: "background: rgba(0, 240, 255, 0.1); border: 1px solid rgba(0, 240, 255, 0.4); border-radius: 6px; padding: 4px 12px; font-size: 11px; font-family: monospace; color: #00f0ff; box-shadow: 0 0 10px rgba(0, 240, 255, 0.15);",
+                                        
                                         "{line_str}"
                                     }
                                 }
@@ -1015,7 +1015,7 @@ pub fn TextCard(
                                                         key: "{label}",
                                                         r#type: "button",
                                                         title: "Inserir {snip}",
-                                                        style: "background: rgba(168, 85, 247, 0.15); color: #00f0ff; border: 1px solid rgba(168, 85, 247, 0.3); border-radius: 4px; padding: 2px 6px; font-size: 10px; font-family: monospace; cursor: pointer; transition: all 0.1s ease;",
+                                                        
                                                         onmousedown: move |e| e.prevent_default(),
                                                         onclick: move |_| {
                                                             insert_format(("$ ", " $", snip));

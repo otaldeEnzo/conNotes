@@ -40,7 +40,7 @@ pub fn Flashcard(card: NoteCard) -> Element {
                     div {
                         style: "position: absolute; inset: 0; width: 100%; height: 100%; backface-visibility: hidden; -webkit-backface-visibility: hidden; border-radius: 12px; padding: 12px; display: flex; flex-direction: column; background: var(--glass-bg); border: 1px solid var(--accent-cyan); backdrop-filter: blur(12px); box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);",
                         textarea {
-                            style: "width: 100%; height: 100%; background: transparent; border: none; color: var(--accent-cyan); font-weight: 600; font-size: 14px; text-align: center; resize: none; outline: none; display: flex; align-items: center; justify-content: center;",
+                            style: "width: 100%; height: 100%; background: transparent; border: none; color: var(--accent-cyan); font-weight: 600; font-size: 14px; text-align: center; resize: none; outline: none; padding-top: 36px;",
                             value: "{front_text}",
                             placeholder: "Digite a Pergunta ou Conceito...",
                             oninput: move |e: FormEvent| front_text.set(e.value())
@@ -51,7 +51,7 @@ pub fn Flashcard(card: NoteCard) -> Element {
                     div {
                         style: "position: absolute; inset: 0; width: 100%; height: 100%; backface-visibility: hidden; -webkit-backface-visibility: hidden; transform: rotateY(180deg); border-radius: 12px; padding: 12px; display: flex; flex-direction: column; background: var(--glass-bg); border: 1px solid var(--accent-emerald, #10b981); backdrop-filter: blur(12px); box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);",
                         textarea {
-                            style: "width: 100%; height: 100%; background: transparent; border: none; color: var(--accent-emerald, #10b981); font-weight: 600; font-size: 14px; text-align: center; resize: none; outline: none; display: flex; align-items: center; justify-content: center;",
+                            style: "width: 100%; height: 100%; background: transparent; border: none; color: var(--accent-emerald, #10b981); font-weight: 600; font-size: 14px; text-align: center; resize: none; outline: none; padding-top: 36px;",
                             value: "{back_text}",
                             placeholder: "Digite a Resposta ou Explicação...",
                             oninput: move |e: FormEvent| back_text.set(e.value())

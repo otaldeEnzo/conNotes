@@ -115,7 +115,7 @@ pub fn ImageCard(
                     style: "width: 100%; height: 100%; border-radius: 8px; overflow: hidden; border: 1px solid rgba(255, 255, 255, 0.15); background: rgba(0, 0, 0, 0.3); display: flex; align-items: center; justify-content: center; position: relative;",
                     img {
                         src: "{url_input}",
-                        style: "width: 100%; height: 100%; object-fit: contain; border-radius: 6px;"
+                        style: "max-width: 100%; max-height: 100%; object-fit: contain; border-radius: 6px;"
                     }
                     button {
                         style: "position: absolute; top: 6px; right: 6px; background: var(--glass-bg); border: 1px solid var(--accent-cyan); color: #fff; border-radius: 4px; padding: 2px 6px; font-size: 10px; cursor: pointer; backdrop-filter: blur(4px); display: flex; align-items: center; gap: 4px;",

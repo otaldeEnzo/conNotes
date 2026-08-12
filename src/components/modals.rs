@@ -373,7 +373,7 @@ pub fn PairingModal(
                 onclick: move |evt| evt.stop_propagation(),
                 style: "max-width: 460px; padding: 24px;",
 
-                div { style: "display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;",
+                div { 
                     h3 { style: "margin: 0; font-size: 1.25rem; font-weight: 600; display: flex; align-items: center; gap: 8px;",
                         "🔗 Pareamento de Dispositivo"
                     }
@@ -384,7 +384,7 @@ pub fn PairingModal(
                     }
                 }
 
-                div { style: "background: rgba(0, 225, 255, 0.08); border: 1px solid rgba(0, 225, 255, 0.2); border-radius: 12px; padding: 16px; margin-bottom: 20px; text-align: center;",
+                div { 
                     span { style: "display: block; font-size: 0.85rem; color: rgba(255,255,255,0.7); margin-bottom: 8px;", "PIN de Pareamento Deste Dispositivo:" }
                     div { style: "font-size: 2.2rem; font-family: monospace; font-weight: 700; letter-spacing: 4px; color: #00e1ff;",
                         "{generated_pin()}"
@@ -421,7 +421,7 @@ pub fn PairingModal(
                 }
 
                 if pairing_success() {
-                    div { style: "background: rgba(34, 197, 94, 0.15); border: 1px solid rgba(34, 197, 94, 0.3); border-radius: 8px; padding: 12px; color: #4ade80; font-size: 0.85rem; text-align: center; margin-bottom: 16px;",
+                    div { 
                         "✓ Solicitação de pareamento enviada na rede P2P!"
                     }
                 }
@@ -482,7 +482,7 @@ pub fn ProfileModal(
                 onclick: move |evt| evt.stop_propagation(),
                 style: "max-width: 440px; padding: 24px;",
 
-                div { style: "display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;",
+                div { 
                     h3 { style: "margin: 0; font-size: 1.25rem; font-weight: 600; display: flex; align-items: center; gap: 8px;",
                         "👤 Conta & Perfil Local"
                     }
@@ -524,12 +524,12 @@ pub fn ProfileModal(
                 }
 
                 if saved_feedback() {
-                    div { style: "background: rgba(34, 197, 94, 0.15); border: 1px solid rgba(34, 197, 94, 0.3); border-radius: 8px; padding: 10px; color: #4ade80; font-size: 0.85rem; text-align: center; margin-bottom: 16px;",
+                    div { 
                         "✓ Perfil local salvo no vault.db!"
                     }
                 }
 
-                div { style: "display: flex; gap: 10px; justify-content: flex-end;",
+                div { 
                     button {
                         style: "background: rgba(255,255,255,0.1); border: none; border-radius: 8px; padding: 10px 16px; color: #fff; font-size: 0.9rem; cursor: pointer;",
                         onclick: move |_| is_open.set(false),
@@ -668,7 +668,7 @@ pub fn SettingsView(
                                 div { style: "display: flex; flex-direction: column; gap: 8px;",
                                     label { style: "font-size: 0.85rem; color: rgba(255,255,255,0.8);", "Tema da Interface:" }
                                     select {
-                                        style: "background: rgba(0,0,0,0.5); border: 1px solid rgba(255,255,255,0.15); border-radius: 8px; padding: 10px; color: #fff;",
+                                        
                                         value: "{theme_mode()}",
                                         onchange: move |e| theme_mode.set(e.value().clone()),
                                         option { value: "cyberpunk", "Cyberpunk Liquid Glass (Escuro)" }
@@ -679,7 +679,7 @@ pub fn SettingsView(
                                 div { style: "display: flex; flex-direction: column; gap: 8px;",
                                     label { style: "font-size: 0.85rem; color: rgba(255,255,255,0.8);", "Escala de Zoom da Interface:" }
                                     select {
-                                        style: "background: rgba(0,0,0,0.5); border: 1px solid rgba(255,255,255,0.15); border-radius: 8px; padding: 10px; color: #fff;",
+                                        
                                         value: "{ui_scale()}",
                                         onchange: move |e| ui_scale.set(e.value().clone()),
                                         option { value: "90%", "Compacto (90%)" }
@@ -706,7 +706,7 @@ pub fn SettingsView(
                                 div { style: "display: flex; flex-direction: column; gap: 8px;",
                                     label { style: "font-size: 0.85rem; color: rgba(255,255,255,0.8);", "Taxa de Atualização de Deltas:" }
                                     select {
-                                        style: "background: rgba(0,0,0,0.5); border: 1px solid rgba(255,255,255,0.15); border-radius: 8px; padding: 10px; color: #fff;",
+                                        
                                         value: "{sync_interval()}",
                                         onchange: move |e| sync_interval.set(e.value().clone()),
                                         option { value: "50ms", "Ultra Rápido (50ms - 60 FPS)" }
@@ -721,7 +721,7 @@ pub fn SettingsView(
                                 div { style: "display: flex; flex-direction: column; gap: 6px;",
                                     label { style: "font-size: 0.85rem; color: rgba(255,255,255,0.8);", "Provedor de IA:" }
                                     select {
-                                        style: "background: rgba(0,0,0,0.5); border: 1px solid rgba(255,255,255,0.15); border-radius: 8px; padding: 10px; color: #fff;",
+                                        
                                         value: "{temp_provider()}",
                                         onchange: move |e| temp_provider.set(e.value().clone()),
                                         option { value: "auto", "Auto (Provedor Automático)" }
@@ -734,7 +734,7 @@ pub fn SettingsView(
                                     label { style: "font-size: 0.85rem; color: rgba(255,255,255,0.8);", "Chave de API (API Key):" }
                                     input {
                                         r#type: "password",
-                                        style: "background: rgba(0,0,0,0.5); border: 1px solid rgba(255,255,255,0.15); border-radius: 8px; padding: 10px; color: #fff;",
+                                        
                                         placeholder: "Cole sua chave de API aqui",
                                         value: "{temp_api_key()}",
                                         oninput: move |e| temp_api_key.set(e.value().clone())

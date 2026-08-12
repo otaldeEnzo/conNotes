@@ -76,7 +76,7 @@ pub fn render_plot_card(card: &NoteCard) -> Element {
             div { style: "display: flex; justify-content: space-between; align-items: center;",
                 div { style: "font-family: serif; font-size: 16px; color: var(--accent-emerald, #10b981);", "{card.title}" }
                 select {
-                    style: "background: rgba(0,0,0,0.4); color: #fff; border: 1px solid rgba(255,255,255,0.2); border-radius: 4px; padding: 2px 6px; font-size: 12px;",
+                    
                     value: "{func_type}",
                     onchange: move |e: Event<FormData>| func_type.set(e.value()),
                     option { value: "sin", "sin(x)" }
@@ -124,7 +124,6 @@ pub fn render_code_card(card: &NoteCard) -> Element {
             div { style: "display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 4px;",
                 span { style: "font-family: monospace; font-size: 12px; color: var(--accent-purple, #a855f7);", "{card.title}" }
                 button {
-                    style: "background: rgba(168, 85, 247, 0.2); border: 1px solid rgba(168, 85, 247, 0.4); color: #fff; border-radius: 4px; padding: 2px 8px; font-size: 11px; cursor: pointer;",
                     onclick: copy_to_clipboard,
                     if copied() { "Copiado!" } else { "Copiar" }
                 }
@@ -209,7 +208,6 @@ pub fn render_flashcard(card: &NoteCard) -> Element {
             div { style: "display: flex; justify-content: space-between; align-items: center;",
                 span { style: "font-weight: 600; font-size: 13px; color: var(--accent-cyan, #00e1ff);", "{card.title}" }
                 button {
-                    style: "background: rgba(0, 225, 255, 0.2); border: 1px solid rgba(0, 225, 255, 0.4); color: #fff; border-radius: 4px; padding: 2px 8px; font-size: 11px; cursor: pointer;",
                     onclick: move |_| is_flipped.toggle(),
                     "Virar Card 🔄"
                 }

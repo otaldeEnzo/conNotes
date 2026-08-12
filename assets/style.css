@@ -12,6 +12,14 @@
   --text-primary: #ffffff;
   --text-secondary: #e2e8f0;
   --text-muted: #94a3b8;
+
+  /* HIERARQUIA DE Z-INDEX PADRONIZADA */
+  --z-canvas: 10;
+  --z-sidebar: 50;
+  --z-tabs: 60;
+  --z-popover: 100;
+  --z-modal-backdrop: 500;
+  --z-modal: 501;
 }
 
 * {
@@ -97,59 +105,18 @@ html {
   pointer-events: none;
 }
 
-/* PADRÃO VISUAL MOSCARO (LIQUID FROSTED GLASSMORPHISM UNIFICADO) */
+/* PADRÃO VISUAL MOSCARO (LIQUID FROSTED GLASSMORPHISM UNIFICADO - SÓLIDO E ESCURO) */
 .moscaro,
 .glass-panel {
   position: relative;
-  background: rgba(14, 18, 30, 0.35);
-  backdrop-filter: blur(24px) saturate(210%) contrast(110%);
-  -webkit-backdrop-filter: blur(24px) saturate(210%) contrast(110%);
+  background: rgba(10, 14, 24, 0.95);
+  backdrop-filter: blur(32px) saturate(210%) contrast(110%);
+  -webkit-backdrop-filter: blur(32px) saturate(210%) contrast(110%);
   border-radius: 20px;
-  border: 1px solid rgba(255, 255, 255, 0.15);
-  box-shadow: 
-    0 16px 40px rgba(0, 0, 0, 0.5),
-    inset 0 1px 0 rgba(255, 255, 255, 0.4),
-    inset 0 -1px 0 rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(0, 225, 255, 0.35);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.8), 0 0 20px rgba(0, 225, 255, 0.15);
   overflow: hidden;
   transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
-}
-
-/* REFLEXO ESPECULAR SUPERIOR (BORDA DE LUZ INCIDENTE 90 DEG) */
-.moscaro::before,
-.glass-panel::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 1.5px;
-  background: linear-gradient(
-    90deg,
-    transparent 0%,
-    rgba(255, 255, 255, 0.85) 50%,
-    transparent 100%
-  );
-  pointer-events: none;
-  z-index: 2;
-}
-
-/* REFRAÇÃO LATERAL ESQUERDA (BORDA DE LUZ VERTICAL 180 DEG) */
-.moscaro::after,
-.glass-panel::after {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 1.5px;
-  height: 100%;
-  background: linear-gradient(
-    180deg,
-    rgba(255, 255, 255, 0.85) 0%,
-    rgba(255, 255, 255, 0.2) 60%,
-    transparent 100%
-  );
-  pointer-events: none;
-  z-index: 2;
 }
 
 /* CASCATA DE ESTILOS AUTOMÁTICA MOSCARO PARA ELEMENTOS FILHOS */
@@ -287,15 +254,14 @@ html {
   width: 280px;
   border-radius: 24px;
   padding: 20px;
-  z-index: 10000;
+  z-index: 50;
   display: flex;
   flex-direction: column;
-  background: rgba(255, 255, 255, 0.05);
-  backdrop-filter: blur(28px) saturate(210%);
-  -webkit-backdrop-filter: blur(28px) saturate(210%);
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  border-top: 1px solid rgba(255, 255, 255, 0.35);
-  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.35);
+  background: rgba(10, 14, 24, 0.95);
+  backdrop-filter: blur(32px) saturate(210%);
+  -webkit-backdrop-filter: blur(32px) saturate(210%);
+  border: 1px solid rgba(0, 225, 255, 0.35);
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5), 0 0 20px rgba(0, 225, 255, 0.15);
   transition: transform 0.35s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.35s ease;
 }
 
@@ -399,7 +365,7 @@ html {
   margin-top: 8px;
   border-radius: 18px;
   padding: 8px;
-  z-index: 9999;
+  z-index: 100;
   display: flex;
   flex-direction: column;
   gap: 4px;
@@ -615,7 +581,7 @@ html {
   gap: 8px;
   padding: 8px 14px;
   pointer-events: none;
-  z-index: 10000;
+  z-index: 50;
   box-shadow: 0 16px 40px rgba(0, 0, 0, 0.6);
   color: #ffffff;
   font-size: 13px;
@@ -645,28 +611,26 @@ html {
 .top-tab-capsule {
   position: absolute;
   top: 16px;
-  left: 280px;
   min-height: 48px;
   border-radius: 9999px !important;
   display: flex;
   align-items: center;
   padding: 4px 10px;
   gap: 8px;
-  z-index: 40;
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-  max-width: calc(100vw - 320px);
+  z-index: 45;
+  transition: left 0.35s cubic-bezier(0.16, 1, 0.3, 1), width 0.35s cubic-bezier(0.16, 1, 0.3, 1);
   overflow: hidden;
   isolation: isolate;
 }
 
 .top-tab-capsule.sidebar-open {
-  left: calc(310px + (100vw - 310px) / 2);
-  transform: translateX(-50%);
+  left: 320px;
+  max-width: calc(100vw - 360px);
 }
 
 .top-tab-capsule.sidebar-closed {
-  left: 50%;
-  transform: translateX(-50%);
+  left: 20px;
+  max-width: calc(100vw - 60px);
 }
 
 .sidebar-toggle-btn {
@@ -798,7 +762,7 @@ html {
   flex-direction: column;
   align-items: center;
   gap: 12px;
-  z-index: 10000;
+  z-index: 50;
 }
 
 .sub-toolbar-pill,
@@ -871,7 +835,12 @@ html {
   display: flex;
   align-items: center;
   gap: 8px;
-  z-index: 9999;
+  z-index: 100;
+  background: rgba(14, 18, 30, 0.92);
+  backdrop-filter: blur(24px) saturate(210%);
+  -webkit-backdrop-filter: blur(24px) saturate(210%);
+  border: 1px solid rgba(0, 225, 255, 0.35);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.6), 0 0 20px rgba(0, 225, 255, 0.2);
 }
 
 /* POPOVER EXPANSÍVEL DE ADICIONAR CARDS NA TOOLBAR INFERIOR */
@@ -899,12 +868,12 @@ html {
   flex-direction: column;
   gap: 4px;
   min-width: 190px;
-  z-index: 9999;
-  background: rgba(12, 18, 30, 0.94);
-  backdrop-filter: blur(24px) saturate(190%);
-  -webkit-backdrop-filter: blur(24px) saturate(190%);
+  z-index: 100;
+  background: rgba(14, 18, 30, 0.92);
+  backdrop-filter: blur(24px) saturate(210%);
+  -webkit-backdrop-filter: blur(24px) saturate(210%);
   border: 1px solid rgba(0, 225, 255, 0.35);
-  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.6), 0 0 16px rgba(0, 225, 255, 0.2);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.6), 0 0 20px rgba(0, 225, 255, 0.2);
 }
 
 .add-card-option {
@@ -1464,7 +1433,7 @@ html {
   border-radius: 12px;
   padding: 8px;
   gap: 6px;
-  z-index: 1000;
+  z-index: 50;
   box-shadow: 0 16px 40px rgba(0, 0, 0, 0.6);
 }
 
@@ -1561,7 +1530,7 @@ html {
   background: rgba(5, 7, 12, 0.75);
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
-  z-index: 99999;
+  z-index: 500;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1572,13 +1541,13 @@ html {
   width: 640px;
   max-width: 92vw;
   max-height: 85vh;
+  overflow-y: auto;
   background: rgba(10, 16, 30, 0.88);
   border: 1px solid rgba(0, 225, 255, 0.35);
   border-radius: 16px;
   box-shadow: 0 16px 48px rgba(0, 0, 0, 0.6), 0 0 24px rgba(0, 225, 255, 0.15);
   display: flex;
   flex-direction: column;
-  overflow: hidden;
   animation: scaleUp 0.2s ease-out;
 }
 
