@@ -1,0 +1,13 @@
+[package]
+name = "connotes_core"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+# Abstração matemática 2D/3D leve (sem macros pesadas de compilação simultânea)
+glam = "0.29"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"

@@ -1,190 +1,94 @@
-# 📘 Especificação Mestre de Funcionalidades: ConnectedNotes (Documentação de Reescrita 100%)
+# Plano de Desenvolvimento: STEM Canvas Note-Taking & IA System (Native High-Performance)
 
-Esta documentação detalha **todas as funcionalidades, comportamentos, ferramentas, motores de cálculo e regras de interface** do ConnectedNotes. Ela serve como guia definitivo para a reescrita do software do zero sem nenhuma perda de recursos.
+## 1. Visão Geral do Produto & Solução
+Um aplicativo de anotações com **Infinite Canvas** e **Assistência de IA** especialmente otimizado para a área de **EXATAS/STEM** (fórmulas LaTeX, diagramas matemáticos, gráficos, código, anotações manuscritas/desenhos e texto estruturado).
 
----
-
-## 🏛️ PILAR 1: Canvas Infinito & Câmera 2D
-
-### 1.1 Sistema de Câmera 2D
-- **Pan (Deslocamento com Limites Superior e Esquerdo)**:
-  - Ativado por **botão do meio do mouse (Scroll Click)** ou **Alt + Botão Esquerdo**.
-  - Suporte a gesto de 2 dedos em Touchpads / Telas Touch.
-  - **Limitação de Borda**: O canvas é limitado superiormente ($y \ge 0$) e na lateral esquerda ($x \ge 0$), expandindo de forma infinita apenas para a direita ($x \to +\infty$) e para baixo ($y \to +\infty$).
-- **Zoom Infinito Ancorado**:
-  - Intervalo de escala de **5% (0.05x)** até **500% (5.00x)**.
-  - O ponto de ancoragem do zoom é estritamente a posição atual do ponteiro do mouse (`cursor_pos`).
-  - Suporte a atalhos numéricos (`Ctrl + 0` para resetar zoom em 100%, `Ctrl + +` / `Ctrl + -`).
-
-### 1.2 Grid de Fundo & Modos de Visualização
-- **Grid de Pontos (Dot Grid)**:
-  - Matriz de pontos com espaçamento dinâmico (40px base) que escala suavemente com o zoom.
-  - Ocorre um *fade-out* automático quando o zoom cai abaixo de 20% para evitar ruído visual.
-- **Modos de Papel**:
-  - **Pontilhado (Default)**
-  - **Quadriculado (Grid de Linhas)**
-  - **Pautado (Linhas de Caderno)**
-  - **Isométrico (Grid de Triângulos para Desenho Técnico/Engenharia)**
-  - **Liso (Sem grid)**
-- **Tema Visual**:
-  - Modos **Dark** (Fundo `#0a0d14`), **Light** (Fundo `#f8fafc`), **Nord**, **Gruvbox**, **Dracula** e **Midnight**.
+### Resolução do Problema Principal:
+- **Zero-Friction Multi-device Sync (Local-First Realtime)**:
+  - Sincronização continuada instantânea via WebSockets/WebRTC com CRDTs (Automerge/Yjs em Rust).
+  - Mudou no celular (Android/iOS) -> instantaneamente visível no tablet/PC sem necessidade de upload/download manual de arquivos.
+  - **Offline-first total**: Funcione perfeitamente offline na faculdade, sincronizando quando houver rede.
 
 ---
 
-## 🧮 PILAR 2: Tipos de Blocos Interativos & Computacionais
+## 2. Arquitetura Híbrida de Alta Performance (Sem Chromium / Sem Electron)
 
-Cada bloco no Canvas é um container flutuante de alta performance com título editável, indicador de cor do tipo, botão de fechar, arraste pelo cabeçalho e redimensionamento dinâmico.
+A arquitetura definitiva escolhida combina o melhor de dois mundos para garantir **60-120+ FPS, resposta instantânea de caneta e o Design System `moscaro-v2`**:
 
-### 2.1 Bloco de Texto Rico (Rich Text / Note Block)
-- Editor WYSIWYG completo com suporte a formatação rápida.
-- **Formatação de Texto**: Negrito, Itálico, Sublinhado, Tachado, Código inline.
-- **Títulos**: H1, H2, H3.
-- **Listas**: Listas com marcadores, listas numeradas, listas de tarefas com checkbox.
-- **Blocos de Citação & Highlight**: Destaques coloridos de texto.
-- **Auto-conversão de Markdown**: Digitar `# ` vira H1, `* ` vira lista, ```` ``` ```` vira código.
+### A. Camada de Fundo & Core (Rust + Wgpu / GPU Pure)
+- **Rust (`wgpu` + Shaders WGSL)**:
+  - Renderização direta na placa de vídeo via Vulkan / Metal / DirectX 12.
+  - Baixíssima latência na captura e desenho de traços de **Ink/Stylus** (caneta).
+  - Renderização do **Dot Grid com efeito Glow sob o mouse**, linhas do papel pautado e expressões matemáticas.
+  - Engine de sincronização CRDT (Local-First) e persistência de arquivos.
 
-### 2.2 Bloco de Matemática & Equações LaTeX
-- Editor de equações em formato **LaTeX / KaTeX**.
-- Renderização matemática vetorial cristalina de alta resolução.
-- **Suporte a Símbolos Avançados**: Matrizes, Integrais duplas/triplas, Somatórios, Limites, Vetores, Letras Gregas, Frações compostas.
-- **Omnibar de Símbolos Rápida**: Palette de atalhos matemáticos comuns no topo do bloco.
-- **Conversão Automática de Texto em Equação** via serviço de IA/Reconhecimento.
-
-### 2.3 Bloco de Código Interactive (JS / Python Sandbox)
-- **Editor de Código com Syntax Highlighting** (Suporte a JavaScript e Python).
-- **Avaliador Python Local & Remoto**:
-  - Execução local via **Pyodide WebAssembly Worker** no navegador (sem necessidade de servidor).
-  - Suporte a execução remota via sincronização com kernel do **Google Colab / Jupyter**.
-  - Suporte a bibliotecas científicas: `numpy`, `scipy`, `matplotlib`, `sympy`.
-- **Avaliador JavaScript Nativo**:
-  - Execução síncrona com interceptação de `console.log` e suporte a desenho interativo via container DOM `canvas 2d`.
-- **Abas de Saída**: Alternância entre aba **Código** e aba **Saída de Terminal / Gráficos Matplotlib**.
-- **Linter Integrado**: Análise estática de erros de sintaxe com botão de auto-correção.
-
-### 2.4 Bloco GeoGebra (Geometria Dinâmica & Gráficos 3D)
-- Applet interativo completo do GeoGebra incorporado.
-- Alternância entre **Geometria 2D**, **Álgebra**, **CAS (Computação Algébrica)** e **Gráficos 3D**.
-- Redimensionamento suave sem distorção de aspecto do applet.
-
-### 2.5 Visualizadores Especiais STEM (CN Compute Visualizers)
-- **Linear Transform Block**: Visualizador vetorial interativo de transformações lineares $y = A \cdot x$ com matrizes $2\times2$.
-- **Taylor Series Visualizer**: Gráfico interativo comparando uma função $f(x)$ com sua aproximação em Séries de Taylor até ordem $N$.
-- **Vector Field Visualizer**: Campo vetorial 2D $\vec{F}(x,y) = (P(x,y), Q(x,y))$ com linhas de fluxo.
-- **Phase Portrait Visualizer**: Retrato de fase para sistemas de equações diferenciais $x' = f(x,y), y' = g(x,y)$.
-- **Conformal Map Visualizer**: Mapeamentos conformes no plano complexo $w = f(z)$.
-- **Fourier Synthesis Visualizer**: Decomposição e síntese de ondas por Séries de Fourier.
-
-### 2.6 Bloco Diagrama Mermaid.js
-- Renderização em tempo real de diagramas de fluxo (*Flowcharts*), diagramas de classe, estado, sequência, Gantt e ER.
-
-### 2.7 Bloco Mapa Mental (Mindmap Block)
-- Construtor interativo de nós de pensamento de árvore expansível com adição de filhos (`Tab` / `Enter`).
-
-### 2.8 Bloco Tabela de Dados (Data Table Block)
-- Tabela estilo planilha com adição de linhas/colunas, tipos de dados (Texto, Número, Data) e cálculos de soma/média no rodapé.
-
-### 2.9 Bloco Estudo de PDF (PDF Block)
-- Leitor de PDF com extração de texto, realce de trecho com caneta e ancoragem de comentários nas páginas.
-
-### 2.10 Bloco Circuito Elétrico (Circuit Block)
-- Simulador e desenhador de esquemáticos elétricos (Resistores, Capacitores, Fontes V/I, AmpOps).
-
-### 2.11 Blocos Educacionais & Exercícios
-- **Exercise Block**: Cartão de exercício com enunciado, opção de múltipla escolha ou resposta aberta e gabarito oculto com revelação por clique.
-- **Proof Debugger Block**: Verificador de passos de demonstração matemática.
-- **Flashcard Block**: Cartão de memorização rápida com rotação 3D (Frente/Verso).
+### B. Camada de Interface & UI (`moscaro-v2` em Flutter com Impeller Engine)
+- **Flutter + Impeller Graphics Engine**:
+  - Compilação nativa para Windows, Android, iOS e macOS.
+  - Zero uso de Chromium/Webviews. O motor **Impeller** executa shaders de vidro (*BackdropFilter*) e gradientes Aurora direto na GPU sem engasgos.
+  - **Design System `moscaro-v2` via Extensions**: Aplicação universal do estilo visual `moscaro-v2` em qualquer componente (botões, painéis, modais) com uma única extensão/chamada:
+    ```dart
+    widget.moscaroV2();
+    ```
 
 ---
 
-## ✒️ PILAR 3: Desenho Vetorial, Formas & Conexões
+### Arquitetura em Camadas
+```text
+┌─────────────────────────────────────────────────────────────┐
+│ Camada UI (Flutter + Impeller Engine - Estilo moscaro-v2)  │
+│ [ Pílulas de Ferramentas ]      [ Painel IA com Blur ]      │
+├─────────────────────────────────────────────────────────────┤
+│ Camada Nativa GPU (Rust + Wgpu / Shaders WGSL - 120 FPS)    │
+│ [ Traço da Caneta ]   [ Grid Dot Glow ]   [ Fórmulas STEM ] │
+└─────────────────────────────────────────────────────────────┘
+```
 
-### 3.1 Caneta & Marca-texto
-- **Caneta Livre (Pen)**:
-  - Traçado vetorial com resposta à pressão da caneta/stylus.
-  - Algoritmo de simplificação **Ramer-Douglas-Peucker (RDP)** tuning 0.15px para curvas suaves.
-  - Paleta de cores selecionáveis (Roxo, Ciano, Esmeralda, Rosa, Âmbar, Branco, Preto).
-  - Slider de espessura de traço (1px a 12px).
-- **Marca-texto (Highlighter)**:
-  - Traçado com opacidade translúcida e mistura de camada (*Multiply blend mode*).
-- **Borracha (Eraser)**:
-  - **Borracha de Objeto**: Deleta o traço inteiro ao tocar em qualquer ponto.
-  - **Borracha Vetorial / Recorte**: Fatia e divide o traço no raio do ponteiro da borracha.
+### B. Especificação Visual Premium & Design System Centralizado (`moscaro-v2`)
 
-### 3.2 Reconhecimento de Formas (Shape Recognition Pro)
-- Reconhecimento automático de formas desenhadas à mão (*Neat Shapes*):
-  - Retângulos, Círculos, Elipses, Triângulos (Equilátero, Retângulo, Isósceles), Pentágonos, Hexágonos, Octógonos, Losangos e Linhas Retas.
-  - Se o usuário segurar o traço parado por 350ms após desenhar, ele sofre o *Snap* geométrico perfeito.
+Para garantir manutenibilidade e consistência absoluta, criaremos o **Design System `moscaro-v2`**:
+- **Estilização Reutilizável (`moscaro-v2`)**: Todos os componentes (botões simples, botões expansíveis, pílulas, modais, cards, caixas de diálogo) herdarão a classe/estilo `moscaro-v2` automaticamente. Não haverá definição manual repetitiva de estilos para novas features.
+- **Borda Dinâmica Aurora**: Integrada ao token de foco/seleção do `moscaro-v2`.
+- **Efeito Glassmorphism & Blur**: Padrão para todos os containers e pílulas.
 
-### 3.3 Conexões & Setas Inteligentes entre Blocos
-- Conectores dinâmicos vinculando as ancoragens dos blocos (Top, Bottom, Left, Right).
-- Estilos de Linha: **Reta**, **Curva Bézier**, **Ortogonal (Esquema de passos 90°)**.
-- Estilos de Ponta: **Seta Simples**, **Seta Dupla**, **Linha Simples**.
-- As conexões se re-calculam e acompanham o bloco em tempo real durante o arraste.
+### C. Opções de Fundo do Canvas (Configurável pelo Usuário)
+O usuário poderá alternar entre 3 opções de fundo (e no futuro carregar fundos personalizados):
+1. **Dot Grid (Padrão Stitch)**: Matriz de pontos interativa com efeito de *glow* reativo ao mouse.
+2. **Pautado (Lined / Notebook)**: Linhas horizontais discretas e de alta precisão para anotações manuscritas/texto.
+3. **Em Branco (Blank Canvas)**: Fundo limpo e minimalista para diagramação livre.
 
----
-
-## ⚡ PILAR 4: Motor STEM NATIVO Rust (`cn_compute`)
-
-### 4.1 Solver de Equações Diferenciais Ordinárias (EDO)
-- Métodos numéricos nativos compilados em Rust: **Euler**, **Heun**, **Runge-Kutta de 4ª Ordem (RK4)**, **Dormand-Prince (RK45 Adaptativo)**.
-- Tolerância absoluta e relativa configuráveis.
-
-### 4.2 Álgebra Linear & Matrizes
-- Operações matriciais nativas: Inversão de matrizes, Decomposição LU, Valores e Vetores Próprios (*Eigenvalues/Eigenvectors*), Multiplicação e Determinante.
-
-### 4.3 Cálculo de Incertezas & Propagação de Erros Experimentais
-- Propagação de incerteza por Derivadas Parciais:
-  $$\sigma_f = \sqrt{\sum \left(\frac{\partial f}{\partial x_i} \sigma_{x_i}\right)^2}$$
-- Útil para relatórios de laboratório de física e química.
+### D. Suporte Completo a Ink & Stylus (Caneta)
+- Integração nativa de eventos de ponteiro de alta precisão (`PointerEvents`, pressão, inclinação/tilt, palma rejeitada) para uso com **Apple Pencil**, **Samsung S-Pen**, **Stylus Android/Windows** e mesas digitalizadoras.
 
 ---
 
-## 📂 PILAR 5: Gestão de Notas, Árvore & Abas
+## 3. Tecnologias Especializadas STEM & Exatas
 
-### 5.1 Árvore de Notas & Estrutura Hierárquica (Sidebar)
-- Navegação por Pastas e Sub-notas em profundidade ilimitada.
-- Arraste e solte (*Drag and Drop*) de notas entre pastas.
-- Criação rápida de notas de qualquer tipo (Canvas, Texto Rico, Código, PDF).
-- Sistema de **Tags / Etiquetas** com filtragem rápida no rodapé (`#Física`, `#Laboratório`).
-- Campo de Busca em Tempo Real (`Ctrl + P`).
-
-### 5.2 Barra de Abas (*TabBar*)
-- Suporte a múltiplas notas abertas em abas no topo da tela.
-- Reordenação de abas por arraste.
-- Atalho `Ctrl + W` para fechar aba, `Ctrl + Tab` para alternar.
-
-### 5.3 Omnibar Científica (Barra Superior de Busca)
-- Abertura rápida por `Ctrl + K`.
-- Pesquisa global por conteúdo de blocos, títulos de notas, fórmulas LaTeX e código.
+1. **Fórmulas e Matemática**:
+   - Renderizador nativo de equações (KaTeX/Typst Math engine em Rust ou C++).
+   - Suporte a entrada por caneta (Ink/Stylus) com suavização de traços acelerada por GPU.
+2. **Assistente de IA Integrado (STEM AI Assistant)**:
+   - Resolução passo a passo de equações.
+   - Explicação de conceitos, física, química, cálculo e álgebra linear.
+   - Geração e plotagem de gráficos de funções em tempo real acelerados por GPU.
 
 ---
 
-## 🌐 PILAR 6: Persistência Local & Rede P2P sem Nuvem
+## 4. Etapas de Desenvolvimento Planejadas
 
-### 6.1 Banco de Dados SQLite Local (`cn_storage`)
-- Arquivo local único `vault.db` criptografado ou em disco nativo.
-- Salvamento automático (*Auto-save*) com debounce silencioso sem poluir o histórico de Desfazer (`Ctrl + Z`).
-- Histórico de revisões e desfazer/refazer (*Undo/Redo Stack*).
+### Fase 1: Design System `moscaro-v2` & Engine Canvas (3 Fundos + Aurora + Glow)
+- Criação do **Design System `moscaro-v2`** (tokens, botões normais/expansíveis, inputs, pílulas).
+- Engine de Canvas com alternância de 3 fundos (Dot Grid com Glow, Pautado, Em Branco).
+- Suporte inicial a **Ink & Stylus** para desenho e anotação manual.
 
-### 6.2 Sincronização P2P Multi-Dispositivo (`cn_sync`)
-- Descoberta automática de nós na mesma rede Wi-Fi/LAN via **mDNS (Multicast DNS)** e anúncio UDP.
-- Transmissão de notas e blocos sem passar por nenhum servidor na nuvem (100% Privado e Descentralizado).
-- Protocolo de sincronização delta por versão de documento.
+### Fase 2: Motor Realtime Multi-dispositivo (Local-First + CRDT Rust)
+- Protocolo de sincronização rápida p2p / server relay de ultra-baixa latência.
+- Armazenamento SQLite / RocksDB local nativo.
 
----
+### Fase 3: Renderizador Math/STEM & Traço de Caneta Avançado
+- Renderização de matemática (LaTeX) de alta performance.
+- Sistema de suavização de traços (Ink vector stabilization).
 
-### 📌 Resumo de Especificações para a Reescrita
+### Fase 4: Integração do Assistente de IA STEM
+- Engine de IA integrada ao canvas com capacidade de ler expressões e gerar gráficos.
 
-| Componente | Requisito Principal |
-|---|---|
-| **Renderização** | 120 FPS cravados via GPU (WGPU/Vulkan/DirectX) |
-| **Arquitetura de Cores** | Tema centralizado estilo CSS (`theme.rs`) |
-| **Liquid Glass** | Dual Kawase Blur Shader nativo estilo iOS em VRAM |
-| **Nível de Detalhe** | Sistema de LOD de 3 níveis por escala de zoom |
-| **Persistência** | SQLite NATIVO `vault.db` (`cn_storage`) |
-| **Cálculo Científico** | Motor Nativo Rust em Código de Máquina (`cn_compute`) |
-| **Sincronização** | P2P mDNS/UDP sem nuvem (`cn_sync`) |
-
----
-
-Esta documentação cobre **100% de todos os requisitos do ConnectedNotes** e servirá como a especificação mestre completa para o desenvolvimento do software.
