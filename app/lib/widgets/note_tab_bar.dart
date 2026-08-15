@@ -5,7 +5,7 @@ import '../theme/moscaro_v2_extension.dart';
 import 'svg_icon.dart';
 
 /// TabBar Superior Centralizada (Abas de Notas Ativas estilo Navegador)
-/// Refinada com largura dinâmica compacta, compensando os 324px de largura física da Sidebar para evitar qualquer sobreposição.
+/// Ajustada para respeitar o espaço do ZoomHudPill no canto superior direito.
 class NoteTabBar extends StatefulWidget {
   final List<String> activeNoteIds;
   final Map<String, String> noteTitles;
@@ -78,16 +78,15 @@ class _NoteTabBarState extends State<NoteTabBar> {
   Widget build(BuildContext context) {
     final double screenWidth = MediaQuery.of(context).size.width;
     
-    // BUGFIX: Ajustado o cálculo do limite máximo. Quando a sidebar está aberta, a largura útil livre
-    // restante real do canvas é: (screenWidth - 324px de painel e margens - 48px de folga na direita).
+    // Desconta o espaço da Sidebar (380px) à esquerda se aberta e o espaço do Zoom HUD (160px) à direita
     final double maxPossibleWidth = widget.isSidebarOpen 
-        ? (screenWidth - 380) 
-        : screenWidth - 100;
+        ? (screenWidth - 380 - 160) 
+        : (screenWidth - 200);
         
-    final double absoluteMaxWidth = maxPossibleWidth.clamp(150.0, 1050.0);
+    final double absoluteMaxWidth = maxPossibleWidth.clamp(140.0, 950.0);
 
     final double estimatedContentWidth = 102.0 + (widget.activeNoteIds.length * 122.0);
-    final double targetWidth = estimatedContentWidth.clamp(150.0, absoluteMaxWidth);
+    final double targetWidth = estimatedContentWidth.clamp(140.0, absoluteMaxWidth);
 
     return AnimatedContainer(
       duration: const Duration(milliseconds: 250),
