@@ -86,7 +86,7 @@ class CanvasDotGridPainter extends CustomPainter {
       }
 
       if (count > 0) {
-        canvas.drawRawPoints(PointMode.points, buf.sublist(0, count), dotPaint);
+        canvas.drawRawPoints(PointMode.points, Float32List.sublistView(buf, 0, count), dotPaint);
       }
     } 
     // 3. Modo Pautado (Notebook STEM)

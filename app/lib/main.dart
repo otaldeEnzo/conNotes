@@ -103,6 +103,8 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> {
   final ValueNotifier<int> _committedStrokesNotifier = ValueNotifier(0);
   Offset? _selectionStartCanvasPoint;
   final SelectedStrokesPictureCache _dragPictureCache = SelectedStrokesPictureCache();
+  final TransientStrokesPictureCache _transientPictureCache = TransientStrokesPictureCache();
+  final ValueNotifier<int> _transientUpdateNotifier = ValueNotifier(0);
 
   // Interação (Renderização Híbrida)
   final ValueNotifier<bool> _isInteractingNotifier = ValueNotifier(false);
@@ -156,8 +158,8 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> {
     });
   }
 
-  /// Injeção em lotes assíncronos: distribui o trabalho pesado em vários frames
-  /// para manter o UI responsivo. Cada frame recebe no máximo 3 ms de trabalho.
+  /// Injeção em lotes assíncronos adaptativos: distribui o trabalho pesado em fatias
+  /// de tempo (2.5 ms por frame) para manter a UI responsiva a 144 FPS.
   bool _isInjecting = false;
   void _injectStressTestStrokes(int count) {
     final note = _currentNote;
@@ -166,23 +168,20 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> {
     _isInjecting = true;
     final random = math.Random();
     final center = -_panOffset / _zoomScale + const Offset(500, 300);
-    const maxBatchSize = 500;
     int injected = 0;
 
-    void injectBatch() {
+    void injectSlice() {
       if (!mounted || injected >= count) {
         _isInjecting = false;
         return;
       }
 
-      final batchEnd = math.min(injected + maxBatchSize, count);
       final newStrokes = <InkStroke>[];
       final stopwatch = Stopwatch()..start();
 
-      for (int i = injected; i < batchEnd; i++) {
-        if (i > injected && stopwatch.elapsedMicroseconds >= 3000) break;
-        final startX = center.dx + (random.nextDouble() - 0.5) * 800;
-        final startY = center.dy + (random.nextDouble() - 0.5) * 600;
+      while (injected + newStrokes.length < count && stopwatch.elapsedMicroseconds < 2500) {
+        final startX = center.dx + (random.nextDouble() - 0.5) * 6000;
+        final startY = center.dy + (random.nextDouble() - 0.5) * 5000;
         final pts = <StrokePoint>[];
 
         double minX = double.infinity, minY = double.infinity;
@@ -198,7 +197,6 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> {
           if (dy > maxY) maxY = dy;
         }
 
-        // Pre-computar bounding box durante a criação (evita recálculo posterior)
         final pad = 2.5 * 1.5;
         newStrokes.add(InkStroke(
           id: 'stress_${_globalCounter++}',
@@ -211,21 +209,66 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> {
         ));
       }
 
-      note.addAllStrokes(newStrokes);
-      injected += newStrokes.length;
-
-      setState(() {
+      if (newStrokes.isNotEmpty) {
+        note.addAllStrokes(newStrokes);
+        injected += newStrokes.length;
         _strokesVersion++;
         _committedStrokesNotifier.value++;
-      });
+      }
 
-      // Agendar próximo lote após o frame atual terminar de renderizar
       SchedulerBinding.instance.addPostFrameCallback((_) {
-        injectBatch();
+        injectSlice();
       });
     }
 
-    injectBatch();
+    injectSlice();
+  }
+
+  /// Ingestão adaptativa fatiada no tempo (2.5ms por frame) com prévia Picture instantânea
+  void _ingestStrokesAdaptively(NoteDocument note, List<InkStroke> newStrokes) {
+    if (newStrokes.length <= 200) {
+      note.addAllStrokes(newStrokes);
+      _strokesVersion++;
+      _committedStrokesNotifier.value++;
+      return;
+    }
+
+    // Para lotes grandes (> 200 traços):
+    // 1. Renderização visual instantânea via camada transitória Picture O(1)
+    _transientPictureCache.setStrokes(newStrokes);
+    _transientUpdateNotifier.value++;
+
+    // 2. Ingestão adaptativa em background (fatias de 2.5ms por frame)
+    int cursor = 0;
+    void processSlice() {
+      if (!mounted) {
+        _transientPictureCache.clear();
+        return;
+      }
+
+      final sw = Stopwatch()..start();
+      final slice = <InkStroke>[];
+      while (cursor < newStrokes.length && sw.elapsedMicroseconds < 2500) {
+        slice.add(newStrokes[cursor++]);
+      }
+
+      if (slice.isNotEmpty) {
+        note.addAllStrokes(slice);
+        _strokesVersion++;
+        _committedStrokesNotifier.value++;
+      }
+
+      if (cursor < newStrokes.length) {
+        SchedulerBinding.instance.addPostFrameCallback((_) => processSlice());
+      } else {
+        // Ingestão completa: limpa a camada transitória pois todos os traços já residem nos tiles
+        _transientPictureCache.clear();
+        _transientUpdateNotifier.value++;
+        _committedStrokesNotifier.value++;
+      }
+    }
+
+    SchedulerBinding.instance.addPostFrameCallback((_) => processSlice());
   }
 
   @override
@@ -234,6 +277,7 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> {
     _telemetrySyncTimer?.cancel();
     _interactionTimer?.cancel();
     _dragPictureCache.dispose();
+    _transientPictureCache.dispose();
     _pendingErasures.clear();
     super.dispose();
   }
@@ -377,7 +421,7 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> {
       allNewSelectedIds.add(newId);
     }
 
-    note.addAllStrokes(allNewStrokes);
+    _ingestStrokesAdaptively(note, allNewStrokes);
     _undoManager.pushCommand(DuplicateStrokesCommand(allNewStrokes), execute: false, note: note);
 
     setState(() {
@@ -433,7 +477,7 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> {
       allNewSelectedIds.add(newId);
     }
 
-    note.addAllStrokes(allNewStrokes);
+    _ingestStrokesAdaptively(note, allNewStrokes);
     _undoManager.pushCommand(DuplicateStrokesCommand(allNewStrokes), execute: false, note: note);
 
     setState(() {
@@ -631,6 +675,8 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> {
                           _activeStroke!.points.add(
                             StrokePoint(point: canvasPoint, pressure: event.pressure),
                           );
+                          _activeStroke!.cachedRawPoints = null;
+                          _activeStroke!.cachedPath = null;
                           _activeStrokeUpdateNotifier.value++;
                         } else if (_activeTool == 'eraser') {
                           _eraseStrokesNear(canvasPoint);
@@ -911,6 +957,26 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> {
                               );
                             },
                           ),
+
+                        // Camada 2.5: Traços Transitórios (Ingestão Instantânea O(1) de Colagem Massiva)
+                        ListenableBuilder(
+                          listenable: Listenable.merge([_panNotifier, _zoomNotifier, _transientUpdateNotifier]),
+                          builder: (context, _) {
+                            final pan = _panNotifier.value;
+                            final zoom = _zoomNotifier.value;
+                            return RepaintBoundary(
+                              child: CustomPaint(
+                                size: Size.infinite,
+                                painter: TransientStrokesPainter(
+                                  cache: _transientPictureCache,
+                                  panOffset: pan,
+                                  zoomScale: zoom,
+                                  updateNotifier: _transientUpdateNotifier,
+                                ),
+                              ),
+                            );
+                          },
+                        ),
 
                         // Camada 3: Traço Ativo (Desenhado em tempo real na ponta da caneta - Traço Vivo)
                         if (note != null)
