@@ -20,6 +20,7 @@ import 'widgets/selection_models.dart';
 import 'widgets/selection_overlay_painter.dart';
 import 'widgets/selection_action_bar.dart';
 import 'widgets/selection_sub_bar.dart';
+import 'widgets/eraser_sub_bar.dart';
 import 'widgets/spatial_index.dart';
 import 'widgets/undo_commands.dart';
 import 'ffi/native_bridge.dart';
@@ -98,6 +99,7 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> {
 
   // Estado da Ferramenta de Seleção (Área Retangular, Laço e Tap-to-Select)
   SelectionType _selectionType = SelectionType.rectangle;
+  EraserConfig _eraserConfig = const EraserConfig();
   SelectionState _selectionState = SelectionState.empty();
   final ValueNotifier<int> _selectionUpdateNotifier = ValueNotifier(0);
   final ValueNotifier<int> _committedStrokesNotifier = ValueNotifier(0);
@@ -537,6 +539,25 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> {
     }
   }
 
+  void _selectAll() {
+    final note = _currentNote;
+    if (note == null || note.strokes.isEmpty) return;
+
+    final allIds = note.strokes.map((s) => s.id).toSet();
+    final combinedBounds = SelectionGeometry.computeCombinedBounds(note.strokes);
+
+    setState(() {
+      _activeTool = 'select';
+      _isPenSubBarVisible = false;
+      _selectionState = SelectionState(
+        type: _selectionType,
+        selectedStrokeIds: allIds,
+        bounds: combinedBounds,
+      );
+    });
+    _selectionUpdateNotifier.value++;
+  }
+
   void _handleZoomDelta(double delta, Offset focalPoint) {
     final double currentZoom = _zoomNotifier.value;
     final Offset currentPan = _panNotifier.value;
@@ -561,6 +582,7 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> {
 
     return CallbackShortcuts(
       bindings: {
+        const SingleActivator(LogicalKeyboardKey.keyA, control: true): _selectAll,
         const SingleActivator(LogicalKeyboardKey.keyZ, control: true): _undo,
         const SingleActivator(LogicalKeyboardKey.keyY, control: true): _redo,
         const SingleActivator(LogicalKeyboardKey.keyZ, control: true, shift: true): _redo,
@@ -604,6 +626,7 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> {
                       }
                     },
                     onPointerDown: (event) {
+                      _mousePosNotifier.value = event.localPosition;
                       final isMiddleButton = event.buttons == 4;
                       if (isMiddleButton) return;
 
@@ -656,6 +679,7 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> {
                       }
                     },
                     onPointerMove: (event) {
+                      _mousePosNotifier.value = event.localPosition;
                       final isMiddleButton = event.buttons == 4;
 
                       if (isMiddleButton) {
@@ -706,6 +730,7 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> {
                       }
                     },
                     onPointerUp: (event) {
+                      _mousePosNotifier.value = event.localPosition;
                       if (_activeTool == 'pen' && _activeStroke != null && note != null) {
                         // Mantém o erro visual abaixo de ~0,35 px na escala atual.
                         final simplifiedPoints = InkStroke.simplifyRDP(
@@ -726,8 +751,17 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> {
                           final double padding = _activeStroke!.strokeWidth * 2;
                           final boundingBox = Rect.fromLTRB(minX - padding, minY - padding, maxX + padding, maxY + padding);
 
-                          // Pré-compilar caminho Bézier para não recalcular durante Pan e Zoom
-                          final cachedPath = InkStroke.buildCatmullRomPath(simplifiedPoints);
+                          // Pré-compilar caminho otimizado para não recalcular durante Pan e Zoom
+                          final Path cachedPath;
+                          if (_activeStroke!.toolType == InkToolType.fountain || _activeStroke!.enablePressure) {
+                            cachedPath = FreehandOutlineRenderer.generateOutlinePath(
+                              simplifiedPoints,
+                              baseWidth: _activeStroke!.strokeWidth,
+                              isTapered: _activeStroke!.toolType == InkToolType.fountain,
+                            );
+                          } else {
+                            cachedPath = InkStroke.buildCatmullRomPath(simplifiedPoints);
+                          }
 
                           final finalStroke = InkStroke(
                             id: _activeStroke!.id,
@@ -763,11 +797,13 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> {
                             _activeStroke = null;
                             _isDrawing = false;
                           });
+                          _activeStrokeUpdateNotifier.value++;
                         } else {
                           setState(() {
                             _activeStroke = null;
                             _isDrawing = false;
                           });
+                          _activeStrokeUpdateNotifier.value++;
                         }
                       } else if (_activeTool == 'select' && _selectionStartCanvasPoint != null && note != null) {
                         final canvasPoint = (event.localPosition - _panOffset) / _zoomScale;
@@ -906,20 +942,19 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> {
                     },
                     child: Stack(
                       children: [
-                        // Camada 1: Grade de Fundo (Dot Grid com Halo Cursor)
+                        // Camada 1: Grade de Fundo (Dot Grid isolada de eventos de mouse para 144Hz liso)
                         ListenableBuilder(
-                          listenable: Listenable.merge([_panNotifier, _zoomNotifier, _mousePosNotifier]),
+                          listenable: Listenable.merge([_panNotifier, _zoomNotifier]),
                           builder: (context, _) {
                             final pan = _panNotifier.value;
                             final zoom = _zoomNotifier.value;
-                            final mousePos = _mousePosNotifier.value;
                             return RepaintBoundary(
                               child: CustomPaint(
                                 size: Size.infinite,
                                 painter: CanvasDotGridPainter(
                                   panOffset: pan,
                                   zoomScale: zoom,
-                                  mousePosition: mousePos,
+                                  mousePosition: null,
                                   backgroundType: _currentBackground,
                                   isDrawing: _isDrawing,
                                 ),
@@ -1016,6 +1051,25 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> {
                                     zoomScale: zoom,
                                     repaintNotifier: _selectionUpdateNotifier,
                                     dragCache: _dragPictureCache,
+                                  ),
+                                ),
+                              );
+                            },
+                          ),
+
+                        // Camada 5: Cursor Halo da Borracha (Sub-camada isolada ultra-fluida 1000Hz)
+                        if (_activeTool == 'eraser')
+                          ListenableBuilder(
+                            listenable: _mousePosNotifier,
+                            builder: (context, _) {
+                              final mousePos = _mousePosNotifier.value;
+                              if (mousePos == null) return const SizedBox.shrink();
+                              return RepaintBoundary(
+                                child: CustomPaint(
+                                  size: Size.infinite,
+                                  painter: _EraserHaloPainter(
+                                    mousePosition: mousePos,
+                                    radius: _eraserConfig.radius,
                                   ),
                                 ),
                               );
@@ -1183,6 +1237,36 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> {
                 ),
               ),
 
+              // 6.5 Sub-Barra Flutuante da Borracha (Traço vs Precisão, Sliders & Presets)
+              Positioned(
+                bottom: 96,
+                left: _isSidebarOpen ? 348 : 0,
+                right: 0,
+                child: Center(
+                  child: EraserSubBar(
+                    isVisible: _activeTool == 'eraser',
+                    activeMode: _eraserConfig.mode,
+                    radius: _eraserConfig.radius,
+                    eraseHighlighterOnly: _eraserConfig.eraseHighlighterOnly,
+                    onSelectMode: (mode) {
+                      setState(() {
+                        _eraserConfig = _eraserConfig.copyWith(mode: mode);
+                      });
+                    },
+                    onChangeRadius: (rad) {
+                      setState(() {
+                        _eraserConfig = _eraserConfig.copyWith(radius: rad);
+                      });
+                    },
+                    onToggleHighlighterOnly: (val) {
+                      setState(() {
+                        _eraserConfig = _eraserConfig.copyWith(eraseHighlighterOnly: val);
+                      });
+                    },
+                  ),
+                ),
+              ),
+
               // 7. Barra de Ferramentas / ToolbarPill (Inferior)
               Positioned(
                 bottom: 32,
@@ -1216,6 +1300,7 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> {
                     onSelectEraser: () {
                       setState(() {
                         _activeTool = 'eraser';
+                        _isPenSubBarVisible = false;
                         _selectionState = SelectionState.empty();
                       });
                     },
@@ -1323,23 +1408,88 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> {
     final note = _currentNote;
     if (note == null) return;
     
-    final eraserRadius = 24.0 / _zoomScale;
+    final eraserRadius = _eraserConfig.radius / _zoomScale;
+    final eraserRadiusSq = eraserRadius * eraserRadius;
 
-    // A consulta espacial reduz o conjunto; o teste por segmento mantém a
-    // precisão mesmo quando há pouca amostragem de pontos.
     final candidateIds = note.spatialIndex.queryPoint(canvasPoint, eraserRadius);
-    final toRemove = candidateIds
+    final candidateStrokes = candidateIds
         .map((id) => note.getStroke(id))
         .whereType<InkStroke>()
-        .where((stroke) => !_pendingErasures.containsKey(stroke.id))
-        .where((stroke) => SelectionGeometry.isPointNearStroke(canvasPoint, stroke, eraserRadius))
+        .where((s) => !_eraserConfig.eraseHighlighterOnly || s.toolType == InkToolType.highlighter)
         .toList();
 
-    if (toRemove.isNotEmpty) {
-      for (final stroke in toRemove) {
-        _pendingErasures[stroke.id] = stroke;
+    if (candidateStrokes.isEmpty) return;
+
+    if (_eraserConfig.mode == EraserMode.stroke) {
+      // 1. Borracha de Traço Inteiro
+      final toRemove = candidateStrokes
+          .where((stroke) => SelectionGeometry.isPointNearStroke(canvasPoint, stroke, eraserRadius))
+          .toList();
+
+      if (toRemove.isNotEmpty) {
+        _undoManager.pushCommand(RemoveStrokesCommand(toRemove), execute: true, note: note);
+        _strokesVersion++;
+        _committedStrokesNotifier.value++;
       }
-      _scheduleEraseCommit(note);
+    } else {
+      // 2. Borracha de Precisão / Segmentação
+      final removedOld = <InkStroke>[];
+      final addedNew = <InkStroke>[];
+
+      for (final stroke in candidateStrokes) {
+        if (!SelectionGeometry.isPointNearStroke(canvasPoint, stroke, eraserRadius)) {
+          continue;
+        }
+
+        final segments = <List<StrokePoint>>[];
+        var currentSegment = <StrokePoint>[];
+
+        for (final p in stroke.points) {
+          final distSq = (p.point - canvasPoint).distanceSquared;
+          if (distSq >= eraserRadiusSq) {
+            currentSegment.add(p);
+          } else {
+            if (currentSegment.isNotEmpty) {
+              segments.add(currentSegment);
+              currentSegment = <StrokePoint>[];
+            }
+          }
+        }
+        if (currentSegment.isNotEmpty) {
+          segments.add(currentSegment);
+        }
+
+        // Se nenhum ponto foi cortado, ignora
+        if (segments.length == 1 && segments[0].length == stroke.points.length) {
+          continue;
+        }
+
+        removedOld.add(stroke);
+
+        for (final seg in segments) {
+          if (seg.isEmpty) continue;
+          final newId = '${stroke.id}_seg_${_globalCounter++}';
+          final bounds = SelectionGeometry.computePointsBounds(seg, stroke.strokeWidth);
+          addedNew.add(InkStroke(
+            id: newId,
+            points: seg,
+            color: stroke.color,
+            strokeWidth: stroke.strokeWidth,
+            toolType: stroke.toolType,
+            enablePressure: stroke.enablePressure,
+            boundingBox: bounds,
+          ));
+        }
+      }
+
+      if (removedOld.isNotEmpty) {
+        note.removeStrokes(removedOld);
+        if (addedNew.isNotEmpty) {
+          note.addAllStrokes(addedNew);
+        }
+        _strokesVersion++;
+        _committedStrokesNotifier.value++;
+      }
     }
   }
 
@@ -1404,5 +1554,38 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> {
       if (removed) return true;
     }
     return false;
+  }
+}
+
+/// Painter do Cursor Halo da Borracha
+class _EraserHaloPainter extends CustomPainter {
+  final Offset mousePosition;
+  final double radius;
+
+  _EraserHaloPainter({required this.mousePosition, required this.radius});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final fillPaint = Paint()
+      ..color = MoscaroTokens.auroraBlue.withValues(alpha: 0.12)
+      ..style = PaintingStyle.fill;
+
+    final borderPaint = Paint()
+      ..color = MoscaroTokens.auroraBlue.withValues(alpha: 0.65)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.2;
+
+    final centerDotPaint = Paint()
+      ..color = MoscaroTokens.auroraBlue
+      ..style = PaintingStyle.fill;
+
+    canvas.drawCircle(mousePosition, radius, fillPaint);
+    canvas.drawCircle(mousePosition, radius, borderPaint);
+    canvas.drawCircle(mousePosition, 2.0, centerDotPaint);
+  }
+
+  @override
+  bool shouldRepaint(covariant _EraserHaloPainter oldDelegate) {
+    return oldDelegate.mousePosition != mousePosition || oldDelegate.radius != radius;
   }
 }

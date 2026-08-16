@@ -85,6 +85,10 @@ class NoteDocument {
     removeAllStrokes([id]);
   }
 
+  void removeStrokes(List<InkStroke> strokes) {
+    removeAllStrokes(strokes.map((s) => s.id));
+  }
+
   /// Remove múltiplos traços em lote cirúrgico
   void removeAllStrokes(Iterable<String> ids) {
     final idSet = ids.toSet();

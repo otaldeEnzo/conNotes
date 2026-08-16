@@ -20,28 +20,37 @@ class SelectionSubBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    if (!isVisible) return const SizedBox.shrink();
-
-    return AnimatedOpacity(
-      duration: const Duration(milliseconds: 200),
-      opacity: isVisible ? 1.0 : 0.0,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-        decoration: BoxDecoration(
-          color: MoscaroTokens.glassWhite,
-          borderRadius: BorderRadius.circular(MoscaroTokens.radiusPill),
-          border: Border.all(color: MoscaroTokens.borderGlow),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withOpacity(0.35),
-              blurRadius: 16,
-              offset: const Offset(0, 4),
-            ),
-          ],
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
+    return IgnorePointer(
+      ignoring: !isVisible,
+      child: AnimatedSlide(
+        duration: const Duration(milliseconds: 240),
+        curve: Curves.easeOutCubic,
+        offset: isVisible ? Offset.zero : const Offset(0, 0.4),
+        child: AnimatedScale(
+          duration: const Duration(milliseconds: 240),
+          curve: Curves.easeOutCubic,
+          scale: isVisible ? 1.0 : 0.88,
+          child: AnimatedOpacity(
+            duration: const Duration(milliseconds: 200),
+            opacity: isVisible ? 1.0 : 0.0,
+            child: Container(
+              height: 44,
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              decoration: BoxDecoration(
+                color: MoscaroTokens.glassWhite,
+                borderRadius: BorderRadius.circular(MoscaroTokens.radiusPill),
+                border: Border.all(color: MoscaroTokens.borderGlow),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.35),
+                    blurRadius: 16,
+                    offset: const Offset(0, 4),
+                  ),
+                ],
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
             // 1. Botão Retângulo
             _buildTypeButton(
               type: SelectionType.rectangle,
@@ -67,8 +76,11 @@ class SelectionSubBar extends StatelessWidget {
         borderRadius: MoscaroTokens.radiusPill,
         padding: EdgeInsets.zero,
       ),
-    );
-  }
+    ),
+  ),
+),
+);
+}
 
   Widget _buildTypeButton({
     required SelectionType type,

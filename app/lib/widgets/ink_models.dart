@@ -9,6 +9,37 @@ enum InkToolType {
   highlighter, // Marca-Texto (translúcido, não encobre o texto)
 }
 
+/// Modos de Funcionamento da Borracha
+enum EraserMode {
+  stroke,    // Borracha de Objeto (remove o traço inteiro em O(1))
+  precision, // Borracha de Precisão (corta e divide o traço no ponto de contato)
+}
+
+/// Configuração da Borracha Ativa
+class EraserConfig {
+  final EraserMode mode;
+  final double radius;
+  final bool eraseHighlighterOnly;
+
+  const EraserConfig({
+    this.mode = EraserMode.stroke,
+    this.radius = 24.0,
+    this.eraseHighlighterOnly = false,
+  });
+
+  EraserConfig copyWith({
+    EraserMode? mode,
+    double? radius,
+    bool? eraseHighlighterOnly,
+  }) {
+    return EraserConfig(
+      mode: mode ?? this.mode,
+      radius: radius ?? this.radius,
+      eraseHighlighterOnly: eraseHighlighterOnly ?? this.eraseHighlighterOnly,
+    );
+  }
+}
+
 /// Ponto individual de um traço com pressão e timestamp
 class StrokePoint {
   final Offset point;

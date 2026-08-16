@@ -104,88 +104,96 @@ class _PenSlotsSubBarState extends State<PenSlotsSubBar> {
 
   @override
   Widget build(BuildContext context) {
-    if (!widget.isVisible) {
-      return const SizedBox.shrink();
-    }
-
-    return AnimatedOpacity(
-      duration: const Duration(milliseconds: 200),
-      opacity: widget.isVisible ? 1.0 : 0.0,
-      child: Container(
-        height: 42,
-        constraints: const BoxConstraints(maxWidth: 520),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const SizedBox(width: 8),
-            // Carrossel Reordenável (Drag & Drop) de Slots
-            Flexible(
-              child: Listener(
-                onPointerSignal: _handlePointerSignal,
-                child: ScrollConfiguration(
-                  behavior: const ScrollBehavior().copyWith(
-                    dragDevices: {
-                      PointerDeviceKind.touch,
-                      PointerDeviceKind.mouse,
-                      PointerDeviceKind.trackpad,
-                    },
-                    scrollbars: false,
-                  ),
-                  child: SingleChildScrollView(
-                    controller: _scrollController,
-                    scrollDirection: Axis.horizontal,
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: List.generate(widget.presets.length, (index) {
-                        final preset = widget.presets[index];
-                        final isSelected = preset.id == widget.activePresetId;
-
-                        return DragTarget<int>(
-                          onWillAcceptWithDetails: (details) => details.data != index,
-                          onAcceptWithDetails: (details) {
-                            widget.onReorderSlots(details.data, index);
+    return IgnorePointer(
+      ignoring: !widget.isVisible,
+      child: AnimatedSlide(
+        duration: const Duration(milliseconds: 240),
+        curve: Curves.easeOutCubic,
+        offset: widget.isVisible ? Offset.zero : const Offset(0, 0.4),
+        child: AnimatedScale(
+          duration: const Duration(milliseconds: 240),
+          curve: Curves.easeOutCubic,
+          scale: widget.isVisible ? 1.0 : 0.88,
+          child: AnimatedOpacity(
+            duration: const Duration(milliseconds: 200),
+            opacity: widget.isVisible ? 1.0 : 0.0,
+            child: Container(
+              height: 44,
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              constraints: const BoxConstraints(maxWidth: 520),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  // Carrossel Reordenável (Drag & Drop) de Slots
+                  Flexible(
+                    child: Listener(
+                      onPointerSignal: _handlePointerSignal,
+                      child: ScrollConfiguration(
+                        behavior: const ScrollBehavior().copyWith(
+                          dragDevices: {
+                            PointerDeviceKind.touch,
+                            PointerDeviceKind.mouse,
+                            PointerDeviceKind.trackpad,
                           },
-                          builder: (context, candidateData, rejectedData) {
-                            return LongPressDraggable<int>(
-                              data: index,
-                              feedback: Material(
-                                color: Colors.transparent,
-                                child: Opacity(
-                                  opacity: 0.8,
-                                  child: _buildSlotPill(context, preset, true, isGhost: true),
-                                ),
-                              ),
-                              childWhenDragging: Opacity(
-                                opacity: 0.3,
-                                child: _buildSlotPill(context, preset, isSelected),
-                              ),
-                              child: _buildSlotPill(context, preset, isSelected),
-                            );
-                          },
-                        );
-                      }),
+                          scrollbars: false,
+                        ),
+                        child: SingleChildScrollView(
+                          controller: _scrollController,
+                          scrollDirection: Axis.horizontal,
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: List.generate(widget.presets.length, (index) {
+                              final preset = widget.presets[index];
+                              final isSelected = preset.id == widget.activePresetId;
+
+                              return DragTarget<int>(
+                                onWillAcceptWithDetails: (details) => details.data != index,
+                                onAcceptWithDetails: (details) {
+                                  widget.onReorderSlots(details.data, index);
+                                },
+                                builder: (context, candidateData, rejectedData) {
+                                  return LongPressDraggable<int>(
+                                    data: index,
+                                    feedback: Material(
+                                      color: Colors.transparent,
+                                      child: Opacity(
+                                        opacity: 0.8,
+                                        child: _buildSlotPill(context, preset, true, isGhost: true),
+                                      ),
+                                    ),
+                                    childWhenDragging: Opacity(
+                                      opacity: 0.3,
+                                      child: _buildSlotPill(context, preset, isSelected),
+                                    ),
+                                    child: _buildSlotPill(context, preset, isSelected),
+                                  );
+                                },
+                              );
+                            }),
+                          ),
+                        ),
+                      ),
                     ),
                   ),
-                ),
+                  const SizedBox(width: 4),
+                  Container(width: 1, height: 18, color: Colors.white24),
+                  const SizedBox(width: 4),
+                  // Botão Adicionar Novo Slot
+                  IconButton(
+                    icon: const Icon(Icons.add, size: 18, color: MoscaroTokens.auroraBlue),
+                    onPressed: widget.onAddNewSlot,
+                    tooltip: 'Novo Slot de Caneta',
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                  ),
+                ],
               ),
-            ),
-            const SizedBox(width: 4),
-            Container(width: 1, height: 18, color: Colors.white24),
-            const SizedBox(width: 4),
-            // Botão Adicionar Novo Slot
-            IconButton(
-              icon: const Icon(Icons.add, size: 18, color: MoscaroTokens.auroraBlue),
-              onPressed: widget.onAddNewSlot,
-              tooltip: 'Novo Slot de Caneta',
+            ).moscaroV2(
+              borderRadius: MoscaroTokens.radiusPill,
               padding: EdgeInsets.zero,
-              constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
             ),
-            const SizedBox(width: 8),
-          ],
+          ),
         ),
-      ).moscaroV2(
-        borderRadius: MoscaroTokens.radiusPill,
-        padding: EdgeInsets.zero,
       ),
     );
   }

@@ -211,6 +211,24 @@ class SelectionGeometry {
     return Rect.fromLTRB(minX - pad, minY - pad, maxX + pad, maxY + pad).shift(stroke.transform);
   }
 
+  static Rect computePointsBounds(List<StrokePoint> points, double strokeWidth) {
+    if (points.isEmpty) return Rect.zero;
+    double minX = double.infinity;
+    double minY = double.infinity;
+    double maxX = double.negativeInfinity;
+    double maxY = double.negativeInfinity;
+
+    for (final p in points) {
+      if (p.point.dx < minX) minX = p.point.dx;
+      if (p.point.dy < minY) minY = p.point.dy;
+      if (p.point.dx > maxX) maxX = p.point.dx;
+      if (p.point.dy > maxY) maxY = p.point.dy;
+    }
+
+    final pad = strokeWidth * 1.5;
+    return Rect.fromLTRB(minX - pad, minY - pad, maxX + pad, maxY + pad);
+  }
+
   static Rect computePolygonBounds(List<Offset> polygon) {
     if (polygon.isEmpty) return Rect.zero;
     double minX = double.infinity;

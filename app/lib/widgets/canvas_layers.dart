@@ -567,7 +567,7 @@ class StrokePictureCache {
   }
 }
 
-/// Gerador de contorno poligonal contínuo orgânico com física de caneta tinteiro/caligráfica (Perfect Freehand).
+/// Gerador de contorno orgânico e caligráfico sem bugs de auto-interseção (ribbon segment quads).
 class FreehandOutlineRenderer {
   static Path generateOutlinePath(List<StrokePoint> points, {
     required double baseWidth,
@@ -584,100 +584,66 @@ class FreehandOutlineRenderer {
       return path;
     }
 
-    if (len == 2) {
-      final p0 = points[0].point;
-      final p1 = points[1].point;
-      final delta = p1 - p0;
-      final dist = delta.distance;
-      if (dist < 0.001) {
-        path.addOval(Rect.fromCircle(center: p0, radius: baseWidth * 0.5));
-        return path;
-      }
-      final normal = Offset(-delta.dy, delta.dx) / dist;
-      final r0 = (baseWidth * points[0].pressure.clamp(0.3, 1.5)) * 0.5;
-      final r1 = (baseWidth * points[1].pressure.clamp(0.3, 1.5)) * 0.5;
+    if (isTapered) {
+      // 1. Caneta Tinteiro / Caligráfica Chanfrada (Chiseled Nib a 45 graus)
+      final double angle = math.pi / 4.0; // 45°
+      final double cosA = math.cos(angle);
+      final double sinA = math.sin(angle);
 
-      path.moveTo(p0.dx + normal.dx * r0, p0.dy + normal.dy * r0);
-      path.lineTo(p1.dx + normal.dx * r1, p1.dy + normal.dy * r1);
-      path.arcToPoint(
-        Offset(p1.dx - normal.dx * r1, p1.dy - normal.dy * r1),
-        radius: Radius.circular(r1),
-      );
-      path.lineTo(p0.dx - normal.dx * r0, p0.dy - normal.dy * r0);
-      path.arcToPoint(
-        Offset(p0.dx + normal.dx * r0, p0.dy + normal.dy * r0),
-        radius: Radius.circular(r0),
-      );
-      path.close();
+      for (int i = 0; i < len - 1; i++) {
+        final p0 = points[i].point;
+        final p1 = points[i + 1].point;
+
+        // Conicidade suave nas extremidades
+        double taper0 = 1.0;
+        double taper1 = 1.0;
+        if (i < 4) taper0 = ((i + 1) / 4.0).clamp(0.25, 1.0);
+        if (i + 1 > len - 5) taper1 = ((len - 1 - (i + 1)) / 4.0).clamp(0.25, 1.0);
+
+        final r0 = (baseWidth * 0.5 * points[i].pressure.clamp(0.4, 1.5) * taper0).clamp(0.5, baseWidth * 2.0);
+        final r1 = (baseWidth * 0.5 * points[i + 1].pressure.clamp(0.4, 1.5) * taper1).clamp(0.5, baseWidth * 2.0);
+
+        final nib0 = Offset(cosA * r0, sinA * r0);
+        final nib1 = Offset(cosA * r1, sinA * r1);
+
+        path.moveTo(p0.dx - nib0.dx, p0.dy - nib0.dy);
+        path.lineTo(p0.dx + nib0.dx, p0.dy + nib0.dy);
+        path.lineTo(p1.dx + nib1.dx, p1.dy + nib1.dy);
+        path.lineTo(p1.dx - nib1.dx, p1.dy - nib1.dy);
+        path.close();
+      }
       return path;
     }
 
-    final leftPts = <Offset>[];
-    final rightPts = <Offset>[];
+    // 2. Caneta de Pressão Orgânica com Quads Locais e Juntas Arredondadas
+    for (int i = 0; i < len - 1; i++) {
+      final p0 = points[i].point;
+      final p1 = points[i + 1].point;
+      final delta = p1 - p0;
+      final dist = delta.distance;
+      if (dist < 0.001) continue;
 
-    for (int i = 0; i < len; i++) {
-      final curr = points[i].point;
-      Offset tangent;
-      if (i == 0) {
-        tangent = points[1].point - curr;
-      } else if (i == len - 1) {
-        tangent = curr - points[i - 1].point;
-      } else {
-        tangent = points[i + 1].point - points[i - 1].point;
-      }
+      final normal = Offset(-delta.dy / dist, delta.dx / dist);
 
-      final dist = tangent.distance;
-      final normal = dist > 0.001
-          ? Offset(-tangent.dy / dist, tangent.dx / dist)
-          : const Offset(0, 1);
+      double taper0 = 1.0;
+      double taper1 = 1.0;
+      if (i < 4) taper0 = ((i + 1) / 4.0).clamp(0.2, 1.0);
+      if (i + 1 > len - 5) taper1 = ((len - 1 - (i + 1)) / 4.0).clamp(0.2, 1.0);
 
-      // Fator de conicidade (tapering) nas pontas
-      double taper = 1.0;
-      if (isTapered) {
-        final progress = i / (len - 1);
-        if (progress < 0.15) {
-          taper = (progress / 0.15).clamp(0.2, 1.0);
-        } else if (progress > 0.85) {
-          taper = ((1.0 - progress) / 0.15).clamp(0.15, 1.0);
-        }
-      }
+      final r0 = (baseWidth * 0.5 * points[i].pressure.clamp(0.25, 1.6) * taper0).clamp(0.5, baseWidth * 2.0);
+      final r1 = (baseWidth * 0.5 * points[i + 1].pressure.clamp(0.25, 1.6) * taper1).clamp(0.5, baseWidth * 2.0);
 
-      final pRatio = points[i].pressure.clamp(0.25, 1.6);
-      final radius = (baseWidth * 0.5 * pRatio * taper).clamp(0.5, baseWidth * 1.8);
+      path.moveTo(p0.dx - normal.dx * r0, p0.dy - normal.dy * r0);
+      path.lineTo(p0.dx + normal.dx * r0, p0.dy + normal.dy * r0);
+      path.lineTo(p1.dx + normal.dx * r1, p1.dy + normal.dy * r1);
+      path.lineTo(p1.dx - normal.dx * r1, p1.dy - normal.dy * r1);
+      path.close();
 
-      leftPts.add(curr + normal * radius);
-      rightPts.add(curr - normal * radius);
+      path.addOval(Rect.fromCircle(center: p0, radius: r0));
     }
+    final lastR = (baseWidth * 0.5 * points.last.pressure.clamp(0.25, 1.6) * 0.2).clamp(0.5, baseWidth);
+    path.addOval(Rect.fromCircle(center: points.last.point, radius: lastR));
 
-    // Constrói o contorno fechado suave
-    path.moveTo(leftPts[0].dx, leftPts[0].dy);
-
-    for (int i = 0; i < leftPts.length - 1; i++) {
-      final p0 = leftPts[i];
-      final p1 = leftPts[i + 1];
-      final mid = Offset((p0.dx + p1.dx) / 2.0, (p0.dy + p1.dy) / 2.0);
-      path.quadraticBezierTo(p0.dx, p0.dy, mid.dx, mid.dy);
-    }
-    path.lineTo(leftPts.last.dx, leftPts.last.dy);
-
-    // Tampa final
-    final endRadius = (baseWidth * 0.5 * points.last.pressure.clamp(0.25, 1.6) * 0.2).clamp(0.5, baseWidth * 0.5);
-    path.arcToPoint(rightPts.last, radius: Radius.circular(endRadius));
-
-    // Lado direito voltando
-    for (int i = rightPts.length - 1; i > 0; i--) {
-      final p0 = rightPts[i];
-      final p1 = rightPts[i - 1];
-      final mid = Offset((p0.dx + p1.dx) / 2.0, (p0.dy + p1.dy) / 2.0);
-      path.quadraticBezierTo(p0.dx, p0.dy, mid.dx, mid.dy);
-    }
-    path.lineTo(rightPts.first.dx, rightPts.first.dy);
-
-    // Tampa inicial
-    final startRadius = (baseWidth * 0.5 * points.first.pressure.clamp(0.25, 1.6) * 0.2).clamp(0.5, baseWidth * 0.5);
-    path.arcToPoint(leftPts.first, radius: Radius.circular(startRadius));
-
-    path.close();
     return path;
   }
 }
