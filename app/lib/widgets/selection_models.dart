@@ -81,10 +81,23 @@ class SelectionGeometry {
 
     final maxDist = tolerance + stroke.strokeWidth / 2;
     final maxDistSq = maxDist * maxDist;
+    final px = localPoint.dx;
+    final py = localPoint.dy;
 
     for (int i = 0; i < points.length - 1; i++) {
       final p1 = points[i].point;
       final p2 = points[i + 1].point;
+
+      // Early rejection rápido por AABB do segmento antes do dot product
+      final minX = (p1.dx < p2.dx ? p1.dx : p2.dx) - maxDist;
+      if (px < minX) continue;
+      final maxX = (p1.dx > p2.dx ? p1.dx : p2.dx) + maxDist;
+      if (px > maxX) continue;
+      final minY = (p1.dy < p2.dy ? p1.dy : p2.dy) - maxDist;
+      if (py < minY) continue;
+      final maxY = (p1.dy > p2.dy ? p1.dy : p2.dy) + maxDist;
+      if (py > maxY) continue;
+
       if (_distanceSqToSegment(localPoint, p1, p2) <= maxDistSq) {
         return true;
       }

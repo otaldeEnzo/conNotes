@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import '../theme/moscaro_v2_tokens.dart';
 import 'ink_models.dart';
+import 'note_models.dart';
 import 'selection_models.dart';
 
 /// Gerenciador de Cache para o bloco de traços selecionados em movimento
@@ -11,7 +12,7 @@ class SelectedStrokesPictureCache {
   ui.Picture? _picture;
   Set<String>? _cachedIds;
 
-  void update(List<InkStroke> allStrokes, Set<String> selectedIds) {
+  void update(NoteDocument note, Set<String> selectedIds) {
     if (_cachedIds != null &&
         _cachedIds!.length == selectedIds.length &&
         _cachedIds!.containsAll(selectedIds) &&
@@ -31,9 +32,9 @@ class SelectedStrokesPictureCache {
     final canvas = Canvas(recorder);
     final reusablePaint = Paint();
 
-    for (var i = 0; i < allStrokes.length; i++) {
-      final stroke = allStrokes[i];
-      if (selectedIds.contains(stroke.id)) {
+    for (final id in selectedIds) {
+      final stroke = note.getStroke(id);
+      if (stroke != null) {
         SelectionOverlayPainter._drawStrokeDirectFast(canvas, stroke, reusablePaint);
       }
     }
@@ -59,7 +60,7 @@ class SelectedStrokesPictureCache {
 /// (Caixa delimitadora, Laço dinâmico, Traços em arraste e Alças Moscaro v2).
 class SelectionOverlayPainter extends CustomPainter {
   final SelectionState selectionState;
-  final List<InkStroke> allStrokes;
+  final NoteDocument note;
   final Offset panOffset;
   final double zoomScale;
   final ValueNotifier<int>? repaintNotifier;
@@ -67,7 +68,7 @@ class SelectionOverlayPainter extends CustomPainter {
 
   SelectionOverlayPainter({
     required this.selectionState,
-    required this.allStrokes,
+    required this.note,
     required this.panOffset,
     required this.zoomScale,
     this.repaintNotifier,
@@ -97,11 +98,11 @@ class SelectionOverlayPainter extends CustomPainter {
       final dragOffset = selectionState.dragOffset;
       final shiftedBounds = bounds.shift(dragOffset);
 
-      // 2.1 Zero-Lag: Desenhar traços selecionados deslocados com 1 única draw call Picture nativa
-      if (selectionState.isDraggingSelection && dragOffset != Offset.zero) {
-        dragCache.update(allStrokes, selectionState.selectedStrokeIds);
+      // 2.1 Zero-Lag: Desenhar traços selecionados deslocados
+      if (selectionState.isDraggingSelection) {
         canvas.save();
         canvas.translate(dragOffset.dx, dragOffset.dy);
+        dragCache.update(note, selectionState.selectedStrokeIds);
         dragCache.draw(canvas);
         canvas.restore();
       }
@@ -256,6 +257,8 @@ class SelectionOverlayPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant SelectionOverlayPainter oldDelegate) {
-    return true; // Controlado pelo RepaintBoundary e notifiers
+    return oldDelegate.panOffset != panOffset ||
+           oldDelegate.zoomScale != zoomScale ||
+           oldDelegate.selectionState != selectionState;
   }
 }

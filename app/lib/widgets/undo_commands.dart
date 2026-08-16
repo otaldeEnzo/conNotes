@@ -113,16 +113,12 @@ class MoveStrokesCommand implements UndoCommand {
 
   @override
   void execute(NoteDocument note) {
-    for (final s in updatedStrokes) {
-      note.updateStroke(s);
-    }
+    note.updateAllStrokes(updatedStrokes);
   }
 
   @override
   void undo(NoteDocument note) {
-    for (final s in originalStrokes) {
-      note.updateStroke(s);
-    }
+    note.updateAllStrokes(originalStrokes);
   }
 }
 

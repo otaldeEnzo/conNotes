@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'dart:typed_data';
 
 /// Tipos Especializados de Ferramenta de Escrita (Padrão OneNote / Samsung Notes)
 enum InkToolType {
@@ -32,6 +33,7 @@ class InkStroke {
   final Offset transform; // Usado para Flyweight pattern (compartilha a geometria realocando apenas a posição visual)
   Rect? boundingBox; // Para Viewport Culling (BoundingBox final JÁ INCLUI o transform)
   Path? cachedPath; // Caminho pré-calculado (no espaço local, SEM transform) para renderização instantânea durante Pan/Zoom
+  Float32List? cachedRawPoints; // Geometria compacta para drawRawPoints sem alocação no paint
 
   InkStroke({
     required this.id,
@@ -43,7 +45,15 @@ class InkStroke {
     this.transform = Offset.zero,
     this.boundingBox,
     this.cachedPath,
+    this.cachedRawPoints,
   });
+
+  /// Retorna uma representação compacta e reutilizável dos pontos para Skia.
+  Float32List get rawPoints {
+    return cachedRawPoints ??= Float32List.fromList([
+      for (final point in points) ...[point.point.dx, point.point.dy],
+    ]);
+  }
 
   /// Constrói um caminho matematicamente suavizado através dos pontos usando Catmull-Rom Spline
   static Path buildCatmullRomPath(List<StrokePoint> points) {

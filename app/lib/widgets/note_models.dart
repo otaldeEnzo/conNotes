@@ -1,3 +1,4 @@
+import 'dart:ui';
 import 'ink_models.dart';
 import 'spatial_index.dart';
 import 'selection_models.dart';
@@ -11,6 +12,7 @@ class NoteDocument {
   
   // Lista ordenada para renderização (z-index)
   final List<InkStroke> _strokesList;
+  final Map<String, int> _strokeIndex = {};
   
   // Mapa de busca O(1) e SpatialIndex para buscas espaciais
   final Map<String, InkStroke> _strokeMap = {};
@@ -36,6 +38,7 @@ class NoteDocument {
     // Inicializar mapa e índice se houver traços prévios
     for (final stroke in _strokesList) {
       _strokeMap[stroke.id] = stroke;
+      _strokeIndex[stroke.id] = _strokeIndex.length;
       pictureCache.insertStrokeToTiles(stroke);
     }
     spatialIndex.bulkLoad(_strokesList);
@@ -57,6 +60,7 @@ class NoteDocument {
     
     _strokesList.add(stroke);
     _strokeMap[stroke.id] = stroke;
+    _strokeIndex[stroke.id] = _strokesList.length - 1;
     _cachedPointCount += stroke.points.length;
     spatialIndex.insert(stroke.id, stroke.boundingBox!);
     pictureCache.insertStrokeToTiles(stroke);
@@ -65,11 +69,12 @@ class NoteDocument {
   /// Adiciona múltiplos traços em lote sem destruir o cache dos tiles existentes
   void addAllStrokes(List<InkStroke> newStrokes) {
     if (newStrokes.isEmpty) return;
-    _strokesList.addAll(newStrokes);
     for (var i = 0; i < newStrokes.length; i++) {
       final s = newStrokes[i];
+      _strokesList.add(s);
       s.boundingBox ??= SelectionGeometry.computeStrokeBounds(s);
       _strokeMap[s.id] = s;
+      _strokeIndex[s.id] = _strokesList.length - 1;
       _cachedPointCount += s.points.length;
       spatialIndex.insert(s.id, s.boundingBox!);
       pictureCache.insertStrokeToTiles(s);
@@ -77,61 +82,89 @@ class NoteDocument {
   }
 
   void removeStroke(String id) {
-    final stroke = _strokeMap.remove(id);
-    if (stroke != null) {
-      _strokesList.removeWhere((s) => s.id == id);
-      _cachedPointCount -= stroke.points.length;
-      final bounds = stroke.boundingBox ?? SelectionGeometry.computeStrokeBounds(stroke);
-      spatialIndex.remove(id, bounds);
-      // Invalidação cirúrgica: remove apenas dos tiles afetados (O(1))
-      pictureCache.removeStrokeFromTiles(id, bounds);
-    }
+    removeAllStrokes([id]);
   }
 
-  /// Remove múltiplos traços em lote
+  /// Remove múltiplos traços em lote cirúrgico
   void removeAllStrokes(Iterable<String> ids) {
     final idSet = ids.toSet();
     if (idSet.isEmpty) return;
-    _strokesList.removeWhere((s) {
-      if (idSet.contains(s.id)) {
-        final stroke = _strokeMap.remove(s.id);
-        if (stroke != null) {
-          final bounds = stroke.boundingBox ?? SelectionGeometry.computeStrokeBounds(stroke);
-          spatialIndex.remove(s.id, bounds);
-          pictureCache.removeStrokeFromTiles(s.id, bounds);
-        }
-        return true;
+    final removedBounds = <String, Rect>{};
+
+    for (final id in idSet) {
+      final stroke = _strokeMap.remove(id);
+      if (stroke != null) {
+        _cachedPointCount -= stroke.points.length;
+        final bounds = stroke.boundingBox ?? SelectionGeometry.computeStrokeBounds(stroke);
+        spatialIndex.remove(id, bounds);
+        removedBounds[id] = bounds;
       }
-      return false;
-    });
+    }
+
+    if (removedBounds.isEmpty) return;
+
+    _strokesList.removeWhere((s) => idSet.contains(s.id));
+    _rebuildStrokeIndices();
+    pictureCache.removeStrokesFromTiles(removedBounds);
   }
 
   void updateStroke(InkStroke updatedStroke) {
-    final oldStroke = _strokeMap[updatedStroke.id];
-    if (oldStroke != null) {
-      // Atualizar lista mantendo a ordem
-      final index = _strokesList.indexWhere((s) => s.id == updatedStroke.id);
-      if (index != -1) {
-        _strokesList[index] = updatedStroke;
+    updateAllStrokes([updatedStroke]);
+  }
+
+  /// Atualiza múltiplos traços em lote unificado O(1) de tiles
+  void updateAllStrokes(List<InkStroke> updatedStrokes) {
+    if (updatedStrokes.isEmpty) return;
+    final oldBoundsMap = <String, Rect>{};
+    final validUpdates = <InkStroke>[];
+
+    for (var i = 0; i < updatedStrokes.length; i++) {
+      final updated = updatedStrokes[i];
+      final old = _strokeMap[updated.id];
+      if (old != null) {
+        final index = _strokeIndex[updated.id];
+        if (index != null) {
+          _strokesList[index] = updated;
+        }
+        _strokeMap[updated.id] = updated;
+
+        final oldBounds = old.boundingBox ?? SelectionGeometry.computeStrokeBounds(old);
+        final newBounds = updated.boundingBox ?? SelectionGeometry.computeStrokeBounds(updated);
+        spatialIndex.update(updated.id, oldBounds, newBounds);
+
+        oldBoundsMap[updated.id] = oldBounds;
+        validUpdates.add(updated);
       }
-      
-      _strokeMap[updatedStroke.id] = updatedStroke;
-      
-      final oldBounds = oldStroke.boundingBox ?? SelectionGeometry.computeStrokeBounds(oldStroke);
-      final newBounds = updatedStroke.boundingBox ?? SelectionGeometry.computeStrokeBounds(updatedStroke);
-      spatialIndex.update(updatedStroke.id, oldBounds, newBounds);
-      // Invalidação cirúrgica: atualiza apenas os tiles envolvidos no deslocamento
-      pictureCache.updateStrokeInTiles(updatedStroke, oldBounds, newBounds);
     }
+
+    if (validUpdates.isEmpty) return;
+
+    pictureCache.removeStrokesFromTiles(oldBoundsMap);
+    for (var i = 0; i < validUpdates.length; i++) {
+      pictureCache.insertStrokeToTiles(validUpdates[i]);
+    }
+  }
+
+  /// Mantido para retrocompatibilidade
+  void updateStrokes(Iterable<InkStroke> updatedStrokes) {
+    updateAllStrokes(updatedStrokes.toList());
+  }
+
+  void _rebuildStrokeIndices() {
+    _strokeIndex
+      ..clear()
+      ..addEntries(_strokesList.asMap().entries.map(
+        (entry) => MapEntry(entry.value.id, entry.key),
+      ));
   }
 
   /// Limpa todos os traços do documento.
   void clearStrokes() {
     _strokesList.clear();
     _strokeMap.clear();
+    _strokeIndex.clear();
     _cachedPointCount = 0;
     spatialIndex.clear();
     pictureCache.invalidate();
   }
 }
-

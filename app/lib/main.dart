@@ -100,6 +100,7 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> {
   SelectionType _selectionType = SelectionType.rectangle;
   SelectionState _selectionState = SelectionState.empty();
   final ValueNotifier<int> _selectionUpdateNotifier = ValueNotifier(0);
+  final ValueNotifier<int> _committedStrokesNotifier = ValueNotifier(0);
   Offset? _selectionStartCanvasPoint;
   final SelectedStrokesPictureCache _dragPictureCache = SelectedStrokesPictureCache();
 
@@ -118,6 +119,8 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> {
   List<InkStroke> _clipboardStrokes = [];
   int _globalCounter = 0;
   Timer? _telemetrySyncTimer;
+  final Map<String, InkStroke> _pendingErasures = {};
+  bool _eraseCommitScheduled = false;
 
   @override
   void initState() {
@@ -135,6 +138,7 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> {
       note?.pictureCache.clear();
       setState(() {
         _strokesVersion++;
+        _committedStrokesNotifier.value++;
       });
     };
     DevHubServer.instance.start();
@@ -153,7 +157,7 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> {
   }
 
   /// Injeção em lotes assíncronos: distribui o trabalho pesado em vários frames
-  /// para manter o UI responsivo. Máx. 200 traços por frame.
+  /// para manter o UI responsivo. Cada frame recebe no máximo 3 ms de trabalho.
   bool _isInjecting = false;
   void _injectStressTestStrokes(int count) {
     final note = _currentNote;
@@ -162,7 +166,7 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> {
     _isInjecting = true;
     final random = math.Random();
     final center = -_panOffset / _zoomScale + const Offset(500, 300);
-    const batchSize = 500;
+    const maxBatchSize = 500;
     int injected = 0;
 
     void injectBatch() {
@@ -171,10 +175,12 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> {
         return;
       }
 
-      final batchEnd = math.min(injected + batchSize, count);
+      final batchEnd = math.min(injected + maxBatchSize, count);
       final newStrokes = <InkStroke>[];
+      final stopwatch = Stopwatch()..start();
 
       for (int i = injected; i < batchEnd; i++) {
+        if (i > injected && stopwatch.elapsedMicroseconds >= 3000) break;
         final startX = center.dx + (random.nextDouble() - 0.5) * 800;
         final startY = center.dy + (random.nextDouble() - 0.5) * 600;
         final pts = <StrokePoint>[];
@@ -206,10 +212,11 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> {
       }
 
       note.addAllStrokes(newStrokes);
-      injected = batchEnd;
+      injected += newStrokes.length;
 
       setState(() {
         _strokesVersion++;
+        _committedStrokesNotifier.value++;
       });
 
       // Agendar próximo lote após o frame atual terminar de renderizar
@@ -227,6 +234,7 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> {
     _telemetrySyncTimer?.cancel();
     _interactionTimer?.cancel();
     _dragPictureCache.dispose();
+    _pendingErasures.clear();
     super.dispose();
   }
 
@@ -297,6 +305,7 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> {
     setState(() {
       _undoManager.undo(note);
       _strokesVersion++;
+      _committedStrokesNotifier.value++;
       _selectionState = SelectionState.empty();
     });
   }
@@ -310,6 +319,7 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> {
     setState(() {
       _undoManager.redo(note);
       _strokesVersion++;
+      _committedStrokesNotifier.value++;
       _selectionState = SelectionState.empty();
     });
   }
@@ -323,183 +333,118 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> {
         .whereType<InkStroke>()
         .toList();
     if (selectedStrokes.isEmpty) return;
-    
-    _clipboardStrokes = selectedStrokes.map((s) => InkStroke(
-      id: s.id,
-      points: s.points.map((p) => StrokePoint(point: p.point, pressure: p.pressure, tilt: p.tilt)).toList(),
-      color: s.color,
-      strokeWidth: s.strokeWidth,
-      toolType: s.toolType,
-      enablePressure: s.enablePressure,
-      boundingBox: s.boundingBox,
-      cachedPath: s.cachedPath,
-    )).toList();
+
+    // Cópia Flyweight: armazena referências aos traços sem realocar buffers de pontos
+    _clipboardStrokes = List<InkStroke>.from(selectedStrokes);
+    DevHubServer.instance.logAction('Copiar (${_clipboardStrokes.length} traços)');
   }
 
-  bool _isPasting = false;
   void _pasteStrokes() {
     final note = _currentNote;
-    if (note == null || _clipboardStrokes.isEmpty || _isPasting) return;
+    if (note == null || _clipboardStrokes.isEmpty) return;
 
-    // Calcular o centro geométrico dos traços copiados
     final bounds = SelectionGeometry.computeCombinedBounds(_clipboardStrokes);
     if (bounds == null) return;
-    
-    // Calcular posição do mouse na tela (canvas space)
+
     final mousePos = _mousePosNotifier.value ?? const Offset(400, 300);
     final canvasMousePos = (mousePos - _panOffset) / _zoomScale;
-    
-    // O vetor de deslocamento do centro dos traços para o mouse
     final offsetToMouse = canvasMousePos - bounds.center;
 
     DevHubServer.instance.logAction('Colar (${_clipboardStrokes.length} traços)');
 
-    _isPasting = true;
-    final totalCount = _clipboardStrokes.length;
-    const batchSize = 500;
-    int processedCount = 0;
-    
+    final nowMicro = DateTime.now().microsecondsSinceEpoch;
     final allNewStrokes = <InkStroke>[];
     final allNewSelectedIds = <String>{};
-    final matrixStorage = Matrix4.translationValues(offsetToMouse.dx, offsetToMouse.dy, 0).storage;
-    final nowMicro = DateTime.now().microsecondsSinceEpoch;
-    final dx = offsetToMouse.dx;
-    final dy = offsetToMouse.dy;
 
-    void processBatch() {
-      if (!mounted || processedCount >= totalCount) {
-        if (allNewStrokes.isNotEmpty) {
-          _undoManager.pushCommand(DuplicateStrokesCommand(allNewStrokes), execute: false, note: note);
-        }
-        _isPasting = false;
-        return;
-      }
+    for (var i = 0; i < _clipboardStrokes.length; i++) {
+      final s = _clipboardStrokes[i];
+      final newId = '${nowMicro}_${_globalCounter++}_${s.id}';
 
-      final batchEnd = math.min(processedCount + batchSize, totalCount);
-      final batchStrokes = <InkStroke>[];
+      final clone = InkStroke(
+        id: newId,
+        points: s.points, // Flyweight
+        transform: s.transform + offsetToMouse, // Deslocamento visual O(1)
+        color: s.color,
+        strokeWidth: s.strokeWidth,
+        toolType: s.toolType,
+        enablePressure: s.enablePressure,
+        boundingBox: s.boundingBox?.shift(offsetToMouse),
+        cachedPath: s.cachedPath, // Raster Skia compartilhado
+        cachedRawPoints: s.cachedRawPoints,
+      );
 
-      for (var i = processedCount; i < batchEnd; i++) {
-        final s = _clipboardStrokes[i];
-        final newId = '${nowMicro}_${_globalCounter++}_${s.id}';
-
-        // Otimização Flyweight: 0 Alocações de pontos ou caminhos!
-        final clone = InkStroke(
-          id: newId,
-          points: s.points, // Compartilha array original
-          transform: s.transform + offsetToMouse, // Atualiza apenas matriz visual
-          color: s.color,
-          strokeWidth: s.strokeWidth,
-          toolType: s.toolType,
-          enablePressure: s.enablePressure,
-          boundingBox: s.boundingBox?.shift(offsetToMouse),
-          cachedPath: s.cachedPath, // Compartilha raster pesado da Skia
-        );
-
-        batchStrokes.add(clone);
-        allNewSelectedIds.add(newId);
-      }
-
-      allNewStrokes.addAll(batchStrokes);
-      note.addAllStrokes(batchStrokes);
-      processedCount = batchEnd;
-
-      setState(() {
-        _strokesVersion++;
-        
-        // Mudar para a ferramenta de seleção automaticamente e manter a seleção atualizada
-        _activeTool = 'select';
-        _isPenSubBarVisible = false;
-        
-        _selectionState = SelectionState(
-          type: _selectionType,
-          selectedStrokeIds: allNewSelectedIds,
-          bounds: bounds.shift(offsetToMouse),
-          dragOffset: Offset.zero,
-        );
-        _selectionUpdateNotifier.value++;
-      });
-
-      SchedulerBinding.instance.addPostFrameCallback((_) {
-        processBatch();
-      });
+      allNewStrokes.add(clone);
+      allNewSelectedIds.add(newId);
     }
 
-    processBatch();
+    note.addAllStrokes(allNewStrokes);
+    _undoManager.pushCommand(DuplicateStrokesCommand(allNewStrokes), execute: false, note: note);
+
+    setState(() {
+      _strokesVersion++;
+      _committedStrokesNotifier.value++;
+      _activeTool = 'select';
+      _isPenSubBarVisible = false;
+      _selectionState = SelectionState(
+        type: _selectionType,
+        selectedStrokeIds: allNewSelectedIds,
+        bounds: bounds.shift(offsetToMouse),
+        dragOffset: Offset.zero,
+      );
+      _selectionUpdateNotifier.value++;
+    });
   }
 
-  bool _isDuplicating = false;
   void _duplicateSelectedStrokes() {
     final note = _currentNote;
-    if (note == null || !_selectionState.hasSelection || _isDuplicating) return;
+    if (note == null || !_selectionState.hasSelection) return;
 
-    final selectedStrokes = _selectionState.selectedStrokeIds.map((id) => note.getStroke(id)).whereType<InkStroke>().toList();
+    final selectedStrokes = _selectionState.selectedStrokeIds
+        .map((id) => note.getStroke(id))
+        .whereType<InkStroke>()
+        .toList();
     if (selectedStrokes.isEmpty) return;
 
     DevHubServer.instance.logAction('Duplicar (${selectedStrokes.length} traços)');
 
-    _isDuplicating = true;
-    final totalCount = selectedStrokes.length;
-    const batchSize = 500;
-    int processedCount = 0;
-
+    const offset = Offset(20, 20);
+    final nowMicro = DateTime.now().microsecondsSinceEpoch;
     final allNewStrokes = <InkStroke>[];
     final allNewSelectedIds = <String>{};
-    const offset = Offset(20, 20);
-    final matrixStorage = Matrix4.translationValues(offset.dx, offset.dy, 0).storage;
-    final nowMicro = DateTime.now().microsecondsSinceEpoch;
 
-    void processBatch() {
-      if (!mounted || processedCount >= totalCount) {
-        if (allNewStrokes.isNotEmpty) {
-          _undoManager.pushCommand(DuplicateStrokesCommand(allNewStrokes), execute: false, note: note);
-        }
-        _isDuplicating = false;
-        return;
-      }
+    for (var i = 0; i < selectedStrokes.length; i++) {
+      final s = selectedStrokes[i];
+      final newId = '${nowMicro}_${_globalCounter++}_${s.id}';
 
-      final batchEnd = math.min(processedCount + batchSize, totalCount);
-      final batchStrokes = <InkStroke>[];
+      final clone = InkStroke(
+        id: newId,
+        points: s.points, // Flyweight
+        transform: s.transform + offset, // Deslocamento visual O(1)
+        color: s.color,
+        strokeWidth: s.strokeWidth,
+        toolType: s.toolType,
+        enablePressure: s.enablePressure,
+        boundingBox: s.boundingBox?.shift(offset),
+        cachedPath: s.cachedPath,
+        cachedRawPoints: s.cachedRawPoints,
+      );
 
-      for (var i = processedCount; i < batchEnd; i++) {
-        final s = selectedStrokes[i];
-        final newId = '${nowMicro}_${_globalCounter++}_${s.id}';
-
-        // Otimização Flyweight: 0 Alocações
-        final clone = InkStroke(
-          id: newId,
-          points: s.points, // Compartilha array original
-          transform: s.transform + offset, // Atualiza apenas a matriz visual
-          color: s.color,
-          strokeWidth: s.strokeWidth,
-          toolType: s.toolType,
-          enablePressure: s.enablePressure,
-          boundingBox: s.boundingBox?.shift(offset),
-          cachedPath: s.cachedPath, // Compartilha raster pesado
-        );
-
-        batchStrokes.add(clone);
-        allNewSelectedIds.add(newId);
-      }
-
-      allNewStrokes.addAll(batchStrokes);
-      note.addAllStrokes(batchStrokes);
-      processedCount = batchEnd;
-
-      setState(() {
-        _strokesVersion++;
-        _selectionState = _selectionState.copyWith(
-          selectedStrokeIds: allNewSelectedIds,
-          bounds: _selectionState.bounds?.shift(offset),
-        );
-        _selectionUpdateNotifier.value++;
-      });
-
-      SchedulerBinding.instance.addPostFrameCallback((_) {
-        processBatch();
-      });
+      allNewStrokes.add(clone);
+      allNewSelectedIds.add(newId);
     }
 
-    processBatch();
+    note.addAllStrokes(allNewStrokes);
+    _undoManager.pushCommand(DuplicateStrokesCommand(allNewStrokes), execute: false, note: note);
+
+    setState(() {
+      _strokesVersion++;
+      _committedStrokesNotifier.value++;
+      _selectionState = _selectionState.copyWith(
+        selectedStrokeIds: allNewSelectedIds,
+        bounds: _selectionState.bounds?.shift(offset),
+      );
+      _selectionUpdateNotifier.value++;
+    });
   }
 
   void _changeSelectedStrokesColor(Color newColor) {
@@ -519,6 +464,7 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> {
     setState(() {
       _undoManager.pushCommand(ChangeColorCommand(previousColors: previousColors, newColors: newColors), execute: true, note: note);
       _strokesVersion++;
+      _committedStrokesNotifier.value++;
     });
   }
 
@@ -533,6 +479,7 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> {
     setState(() {
       _undoManager.pushCommand(RemoveStrokesCommand(selectedStrokes), execute: true, note: note);
       _strokesVersion++;
+      _committedStrokesNotifier.value++;
       _selectionState = SelectionState.empty();
       _selectionUpdateNotifier.value++;
     });
@@ -642,10 +589,14 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> {
                           // Se já tem seleção e clicou dentro da Bounding Box -> arrastar traços selecionados
                           if (_selectionState.hasSelection &&
                               _selectionState.bounds!.inflate(10 / _zoomScale).contains(canvasPoint)) {
+                            // Pré-aquecimento da prévia para o dragZero
+                            _dragPictureCache.update(note, _selectionState.selectedStrokeIds);
+                            
                             _selectionState = _selectionState.copyWith(
                               isDraggingSelection: true,
                               dragOffset: Offset.zero,
                             );
+                            _committedStrokesNotifier.value++;
                             _selectionUpdateNotifier.value++;
                           } else {
                             // Começar potencial nova seleção
@@ -710,7 +661,11 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> {
                     },
                     onPointerUp: (event) {
                       if (_activeTool == 'pen' && _activeStroke != null && note != null) {
-                        final simplifiedPoints = InkStroke.simplifyRDP(_activeStroke!.points, 1.0);
+                        // Mantém o erro visual abaixo de ~0,35 px na escala atual.
+                        final simplifiedPoints = InkStroke.simplifyRDP(
+                          _activeStroke!.points,
+                          0.35 / _zoomScale,
+                        );
                         
                         if (simplifiedPoints.isNotEmpty) {
                           double minX = double.infinity, minY = double.infinity;
@@ -758,6 +713,7 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> {
                           setState(() {
                             _undoManager.pushCommand(AddStrokeCommand(finalStroke), execute: true, note: note);
                             _strokesVersion++;
+                            _committedStrokesNotifier.value++;
                             _activeStroke = null;
                             _isDrawing = false;
                           });
@@ -790,6 +746,7 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> {
                                   enablePressure: s.enablePressure,
                                   boundingBox: s.boundingBox?.shift(delta),
                                   cachedPath: s.cachedPath, // Flyweight (compartilha)
+                                  cachedRawPoints: s.cachedRawPoints,
                                 );
 
                                 originalStrokes.add(s);
@@ -810,12 +767,14 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> {
                           final newBounds = _selectionState.bounds?.shift(delta);
                           setState(() {
                             _strokesVersion++;
+                            _committedStrokesNotifier.value++;
                             _selectionState = _selectionState.copyWith(
                               isDraggingSelection: false,
                               dragOffset: Offset.zero,
                               bounds: newBounds,
                             );
                             _selectionStartCanvasPoint = null;
+                            _selectionUpdateNotifier.value++;
                           });
                           return;
                         }
@@ -826,12 +785,15 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> {
                         if (totalMove < 4.0) {
                           InkStroke? hitStroke;
                           final tolerance = 12.0 / _zoomScale;
+                          final candidateIds = note.spatialIndex.queryPoint(canvasPoint, tolerance);
                           // Procura do mais recente para o mais antigo (z-index)
                           for (int i = note.strokes.length - 1; i >= 0; i--) {
                             final s = note.strokes[i];
-                            if (SelectionGeometry.isPointNearStroke(canvasPoint, s, tolerance)) {
-                              hitStroke = s;
-                              break;
+                            if (candidateIds.contains(s.id)) {
+                              if (SelectionGeometry.isPointNearStroke(canvasPoint, s, tolerance)) {
+                                hitStroke = s;
+                                break;
+                              }
                             }
                           }
 
@@ -857,14 +819,24 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> {
                             _selectionState.startPoint != null &&
                             _selectionState.currentPoint != null) {
                           final rect = Rect.fromPoints(_selectionState.startPoint!, _selectionState.currentPoint!);
+                          final candidateIds = note.spatialIndex.queryRect(rect);
                           for (final s in note.strokes) {
-                            if (SelectionGeometry.isStrokeInRect(s, rect)) {
+                            if (candidateIds.contains(s.id) && SelectionGeometry.isStrokeInRect(s, rect)) {
                               selectedIds.add(s.id);
                             }
                           }
                         } else if (_selectionType == SelectionType.lasso && _selectionState.lassoPoints.length > 2) {
+                          double minX = double.infinity, minY = double.infinity, maxX = double.negativeInfinity, maxY = double.negativeInfinity;
+                          for (final p in _selectionState.lassoPoints) {
+                            if (p.dx < minX) minX = p.dx;
+                            if (p.dy < minY) minY = p.dy;
+                            if (p.dx > maxX) maxX = p.dx;
+                            if (p.dy > maxY) maxY = p.dy;
+                          }
+                          final rect = Rect.fromLTRB(minX, minY, maxX, maxY);
+                          final candidateIds = note.spatialIndex.queryRect(rect);
                           for (final s in note.strokes) {
-                            if (SelectionGeometry.isStrokeInLasso(s, _selectionState.lassoPoints)) {
+                            if (candidateIds.contains(s.id) && SelectionGeometry.isStrokeInLasso(s, _selectionState.lassoPoints)) {
                               selectedIds.add(s.id);
                             }
                           }
@@ -913,7 +885,7 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> {
                         // Camada 2: Traços Comitados (Samsung Notes Baking Model O(1) Chunks 1024x1024)
                         if (note != null)
                           ListenableBuilder(
-                            listenable: Listenable.merge([_panNotifier, _zoomNotifier, _isInteractingNotifier, _selectionUpdateNotifier]),
+                            listenable: Listenable.merge([_panNotifier, _zoomNotifier, _isInteractingNotifier, _committedStrokesNotifier]),
                             builder: (context, _) {
                               final pan = _panNotifier.value;
                               final zoom = _zoomNotifier.value;
@@ -973,7 +945,7 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> {
                                   size: Size.infinite,
                                   painter: SelectionOverlayPainter(
                                     selectionState: _selectionState,
-                                    allStrokes: note.strokes,
+                                    note: note,
                                     panOffset: pan,
                                     zoomScale: zoom,
                                     repaintNotifier: _selectionUpdateNotifier,
@@ -1287,20 +1259,38 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> {
     
     final eraserRadius = 24.0 / _zoomScale;
 
-    // Eixo 5: Eraser rápido O(log N) via Spatial Index + busca local O(P)
+    // A consulta espacial reduz o conjunto; o teste por segmento mantém a
+    // precisão mesmo quando há pouca amostragem de pontos.
     final candidateIds = note.spatialIndex.queryPoint(canvasPoint, eraserRadius);
     final toRemove = candidateIds
         .map((id) => note.getStroke(id))
         .whereType<InkStroke>()
-        .where((stroke) => stroke.points.any((p) => (p.point - canvasPoint).distance < eraserRadius))
+        .where((stroke) => !_pendingErasures.containsKey(stroke.id))
+        .where((stroke) => SelectionGeometry.isPointNearStroke(canvasPoint, stroke, eraserRadius))
         .toList();
 
     if (toRemove.isNotEmpty) {
-      setState(() {
-        _undoManager.pushCommand(RemoveStrokesCommand(toRemove), execute: true, note: note);
-        _strokesVersion++;
-      });
+      for (final stroke in toRemove) {
+        _pendingErasures[stroke.id] = stroke;
+      }
+      _scheduleEraseCommit(note);
     }
+  }
+
+  /// Uma passada de borracha pode receber centenas de eventos por segundo.
+  /// Agrupar as mutações elimina rebuilds e comandos de undo redundantes.
+  void _scheduleEraseCommit(NoteDocument note) {
+    if (_eraseCommitScheduled) return;
+    _eraseCommitScheduled = true;
+    SchedulerBinding.instance.addPostFrameCallback((_) {
+      _eraseCommitScheduled = false;
+      if (!mounted || _pendingErasures.isEmpty) return;
+      final erased = _pendingErasures.values.toList(growable: false);
+      _pendingErasures.clear();
+      _undoManager.pushCommand(RemoveStrokesCommand(erased), execute: true, note: note);
+      _strokesVersion++;
+      _committedStrokesNotifier.value++;
+    });
   }
 
   Map<String, String> _flattenTitles(NoteDocument doc) {

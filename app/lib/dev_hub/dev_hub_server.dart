@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/scheduler.dart';
 
 /// Evento de Jank registrado pelo DevHub
@@ -80,6 +81,7 @@ class DevHubServer {
   }
 
   Future<void> start({int port = 9876}) async {
+    if (!kDebugMode) return;
     if (_server != null) return;
 
     try {

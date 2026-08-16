@@ -18,6 +18,7 @@ class CanvasTile {
   ui.Picture? picture;
   bool isDirty = true;
   bool _needsTextureBake = false;
+  int lastUsedFrame = 0;
 
   CanvasTile(this.tileX, this.tileY);
 
@@ -92,8 +93,8 @@ class CanvasTile {
       );
       image?.dispose();
       image = img;
-      picture!.dispose();
-      picture = null;
+      // Mantém a display list vetorial para zoom alto e como fallback quando
+      // a textura for desalojada pelo orçamento de VRAM.
       _needsTextureBake = false;
       return true;
     } catch (_) {
@@ -118,10 +119,13 @@ class StrokePictureCache {
   static const double tileSize = 1024.0;
   /// Máximo de tiles "assados" (toImageSync) por frame para evitar picos de latência.
   static const int _maxBakesPerFrame = 2;
+  static const int _maxGpuTextures = 48;
+  static const double _maxTextureZoom = 1.25;
   final Map<int, Map<int, CanvasTile>> _tiles = {};
   int _lastVersion = -1;
   int _lastCount = -1;
   final Paint _reusablePaint = Paint();
+  int _frame = 0;
 
   CanvasTile _getOrCreateTile(int tx, int ty) {
     return _tiles.putIfAbsent(tx, () => {}).putIfAbsent(ty, () => CanvasTile(tx, ty));
@@ -146,7 +150,14 @@ class StrokePictureCache {
 
   /// Desenha APENAS os tiles que estão dentro do campo de visão da tela (Viewport Culling O(1)).
   /// Usa Baking Escalonado: máximo de [_maxBakesPerFrame] tiles convertidos em textura GPU por frame.
-  void drawViewportToCanvas(Canvas canvas, Rect viewportRect, {Set<String>? hiddenIds, bool isInteracting = false}) {
+  void drawViewportToCanvas(
+    Canvas canvas,
+    Rect viewportRect, {
+    Set<String>? hiddenIds,
+    bool isInteracting = false,
+    double zoomScale = 1.0,
+  }) {
+    _frame++;
     final minTx = (viewportRect.left / tileSize).floor();
     final maxTx = (viewportRect.right / tileSize).floor();
     final minTy = (viewportRect.top / tileSize).floor();
@@ -162,6 +173,7 @@ class StrokePictureCache {
       for (int ty = minTy; ty <= maxTy; ty++) {
         final tile = col[ty];
         if (tile == null || tile.strokes.isEmpty) continue;
+        tile.lastUsedFrame = _frame;
 
         if (hasHidden && tile.strokes.any((s) => hiddenIds.contains(s.id))) {
           // Apenas para os tiles que contêm traços selecionados sendo movidos, desenha dinamicamente
@@ -177,12 +189,12 @@ class StrokePictureCache {
 
           // Fase 2: Baking Escalonado — converter Picture → Textura GPU (máx. N por frame)
           // PULA O BAKING se estiver interagindo (ex: apagando) para evitar stutter massivo!
-          if (!isInteracting && tile.needsTextureBake && bakesThisFrame < _maxBakesPerFrame) {
+          if (!isInteracting && zoomScale <= _maxTextureZoom && tile.needsTextureBake && bakesThisFrame < _maxBakesPerFrame) {
             if (tile.tryBake()) bakesThisFrame++;
           }
 
           // Desenhar usando o formato mais eficiente disponível
-          if (tile.image != null) {
+          if (tile.image != null && zoomScale <= _maxTextureZoom) {
             // Textura GPU: 1 única draw call por tile (O(1) — mais rápido possível)
             canvas.drawImage(
               tile.image!,
@@ -200,6 +212,28 @@ class StrokePictureCache {
           }
         }
       }
+    }
+
+    if (bakesThisFrame > 0) {
+      _evictLeastRecentlyUsedTextures();
+    }
+  }
+
+  /// Mantém o uso de VRAM previsível. O Picture vetorial continua disponível
+  /// para qualquer tile cuja textura for descartada.
+  void _evictLeastRecentlyUsedTextures() {
+    final texturedTiles = <CanvasTile>[];
+    for (final column in _tiles.values) {
+      for (final tile in column.values) {
+        if (tile.image != null) texturedTiles.add(tile);
+      }
+    }
+    if (texturedTiles.length <= _maxGpuTextures) return;
+
+    texturedTiles.sort((a, b) => a.lastUsedFrame.compareTo(b.lastUsedFrame));
+    for (final tile in texturedTiles.take(texturedTiles.length - _maxGpuTextures)) {
+      tile.image?.dispose();
+      tile.image = null;
     }
   }
 
@@ -224,6 +258,14 @@ class StrokePictureCache {
   /// Remove um traço apenas dos tiles que o contêm, marcando apenas esses tiles como dirty.
   /// (Evita rebuild de 50.000 traços durante o uso da Borracha!)
   void removeStrokeFromTiles(String id, Rect bounds) {
+    removeStrokesFromTiles({id: bounds});
+  }
+
+  /// Remove vários traços e percorre cada tile afetado apenas uma vez.
+  void removeStrokesFromTiles(Map<String, Rect> strokeBounds) {
+    final affected = <CanvasTile, Set<String>>{};
+    for (final entry in strokeBounds.entries) {
+      final bounds = entry.value;
     final minTx = (bounds.left / tileSize).floor();
     final maxTx = (bounds.right / tileSize).floor();
     final minTy = (bounds.top / tileSize).floor();
@@ -235,15 +277,22 @@ class StrokePictureCache {
       for (int ty = minTy; ty <= maxTy; ty++) {
         final tile = col[ty];
         if (tile != null) {
-          tile.removeStroke(id);
+            affected.putIfAbsent(tile, () => <String>{}).add(entry.key);
         }
       }
+    }
+    }
+    for (final entry in affected.entries) {
+      final ids = entry.value;
+      entry.key.strokes.removeWhere((stroke) => ids.contains(stroke.id));
+      entry.key.isDirty = true;
+      entry.key._needsTextureBake = false;
     }
   }
 
   /// Atualiza a posição de um traço movido apenas nos tiles afetados
   void updateStrokeInTiles(InkStroke updatedStroke, Rect oldBounds, Rect newBounds) {
-    removeStrokeFromTiles(updatedStroke.id, oldBounds);
+    removeStrokesFromTiles({updatedStroke.id: oldBounds});
     insertStrokeToTiles(updatedStroke);
   }
 
@@ -329,12 +378,7 @@ class StrokePictureCache {
       // Otimização Extrema (GPU Tessellation Bypass)
       // Se for um rabisco muito denso, usar RawPoints é 10.000x mais rápido para a GPU do que Catmull-Rom + drawPath
       if (stroke.points.length > 50) {
-        final Float32List rawPoints = Float32List(stroke.points.length * 2);
-        for (int i = 0; i < stroke.points.length; i++) {
-          rawPoints[i * 2] = stroke.points[i].point.dx;
-          rawPoints[i * 2 + 1] = stroke.points[i].point.dy;
-        }
-        canvas.drawRawPoints(ui.PointMode.polygon, rawPoints, reusablePaint);
+        canvas.drawRawPoints(ui.PointMode.polygon, stroke.rawPoints, reusablePaint);
       } else {
         stroke.cachedPath ??= _buildSmoothCatmullRomPath(stroke.points);
         canvas.drawPath(stroke.cachedPath!, reusablePaint);
@@ -469,6 +513,7 @@ class CommittedStrokesPainter extends CustomPainter {
       viewportRect, 
       hiddenIds: hiddenStrokeIds,
       isInteracting: isInteracting,
+      zoomScale: zoomScale,
     );
 
     canvas.restore();
