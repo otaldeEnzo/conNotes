@@ -1,20 +1,18 @@
 import 'dart:math' as math;
 import 'dart:ui';
-import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import '../theme/moscaro_v2_tokens.dart';
 
 enum CanvasBackgroundType { dotGrid, pautado, isometric, emBranco }
 
-/// Engine de Renderização 2D do Canvas Infinito.
-/// Suporta Dot Grid dinâmico, Pautado, Grid Isométrico para engenharia/STEM e base para tesselação customizada.
+/// Engine de Renderização 2D do Canvas Infinito com suporte a Pautas de Caderno,
+/// Grid Isométrico Rígido (Lattice 3D STEM sem drift) e Delimitação do 4º Quadrante.
 class CanvasDotGridPainter extends CustomPainter {
   final Offset panOffset;
   final double zoomScale;
   final Offset? mousePosition;
   final CanvasBackgroundType backgroundType;
   final bool isDrawing;
-  static Float32List? _pointsBuffer;
 
   CanvasDotGridPainter({
     required this.panOffset,
@@ -40,101 +38,197 @@ class CanvasDotGridPainter extends CustomPainter {
       ).createShader(rect);
     canvas.drawRect(rect, bgPaint);
 
-    if (backgroundType == CanvasBackgroundType.emBranco) {
-      return;
-    }
+    // Salva o estado do Canvas e aplica a transformação mundial (World Space)
+    canvas.save();
+    canvas.translate(panOffset.dx, panOffset.dy);
+    canvas.scale(zoomScale);
 
-    final baseSpacing = 32.0 * zoomScale;
+    final double worldLeft = -panOffset.dx / zoomScale;
+    final double worldTop = -panOffset.dy / zoomScale;
+    final double worldRight = (size.width - panOffset.dx) / zoomScale;
+    final double worldBottom = (size.height - panOffset.dy) / zoomScale;
 
-    // 2. Modo Dot Grid com LOD dinâmico e Zero-Allocation por frame
+    // 2. Renderização de Padrões de Fundo (World Coordinates)
     if (backgroundType == CanvasBackgroundType.dotGrid) {
-      double spacing = baseSpacing;
-      while (spacing < 24.0) {
-        spacing *= 2.0; // LOD Inteligente: previne explosão de 200.000 pontos ao afastar o zoom
-      }
-      while (spacing > 64.0) {
-        spacing /= 2.0;
-      }
+      _paintDotGrid(canvas, worldLeft, worldTop, worldRight, worldBottom);
+    } else if (backgroundType == CanvasBackgroundType.pautado) {
+      _paintPautadoNotebook(canvas, worldLeft, worldTop, worldRight, worldBottom);
+    } else if (backgroundType == CanvasBackgroundType.isometric) {
+      _paintIsometricLattice(canvas, worldLeft, worldTop, worldRight, worldBottom);
+    }
 
-      final startX = (panOffset.dx % spacing) - spacing;
-      final startY = (panOffset.dy % spacing) - spacing;
-      final double dotRadius = (1.2 * zoomScale).clamp(0.8, 2.5);
+    // 3. Pautas Universais de Caderno (Margem Esquerda em X=80 e Cabeçalho em Y=102 sobre uma pauta)
+    _paintNotebookMarginAndHeader(canvas, worldLeft, worldTop, worldRight, worldBottom);
 
-      final Paint dotPaint = Paint()
-        ..color = const Color(0x20FFFFFF)
-        ..strokeWidth = dotRadius * 2
-        ..strokeCap = StrokeCap.round;
+    // 4. Delimitação da Origem do 4º Quadrante (Bordas X=0 e Y=0)
+    _paintOriginBoundaries(canvas, worldLeft, worldTop, worldRight, worldBottom);
 
-      int cols = ((size.width + spacing - startX) / spacing).ceil() + 1;
-      int rows = ((size.height + spacing - startY) / spacing).ceil() + 1;
-      int totalPoints = cols * rows;
+    canvas.restore();
+  }
 
-      if (_pointsBuffer == null || _pointsBuffer!.length < totalPoints * 2) {
-        _pointsBuffer = Float32List(math.max(totalPoints * 2, 4096));
-      }
+  /// Renderiza o Dot Grid com LOD dinâmico em coordenadas de mundo
+  void _paintDotGrid(Canvas canvas, double left, double top, double right, double bottom) {
+    double spacing = 32.0;
+    final scaledSpacing = spacing * zoomScale;
+    if (scaledSpacing < 20.0) {
+      spacing = 64.0;
+    } else if (scaledSpacing > 72.0) {
+      spacing = 16.0;
+    }
 
-      int count = 0;
-      final buf = _pointsBuffer!;
+    final double startX = (left / spacing).floor() * spacing;
+    final double startY = (top / spacing).floor() * spacing;
+    final double dotRadius = (1.2 / zoomScale).clamp(0.6, 2.2);
 
-      for (double x = startX; x < size.width + spacing; x += spacing) {
-        for (double y = startY; y < size.height + spacing; y += spacing) {
-          if (count + 1 < buf.length) {
-            buf[count++] = x;
-            buf[count++] = y;
-          }
-        }
-      }
+    final Paint dotPaint = Paint()
+      ..color = const Color(0x24FFFFFF)
+      ..strokeWidth = dotRadius * 2
+      ..strokeCap = StrokeCap.round;
 
-      if (count > 0) {
-        canvas.drawRawPoints(PointMode.points, Float32List.sublistView(buf, 0, count), dotPaint);
-      }
-    } 
-    // 3. Modo Pautado (Notebook STEM)
-    else if (backgroundType == CanvasBackgroundType.pautado) {
-      final startY = (panOffset.dy % baseSpacing) - baseSpacing;
-      final linePaint = Paint()
-        ..color = const Color(0x20FFFFFF)
-        ..strokeWidth = 1.0;
-
-      for (double y = startY; y < size.height + baseSpacing; y += baseSpacing) {
-        canvas.drawLine(Offset(0, y), Offset(size.width, y), linePaint);
+    final points = <Offset>[];
+    for (double x = startX; x <= right + spacing; x += spacing) {
+      if (x < 0) continue; // Confinado ao 4º quadrante (x >= 0)
+      for (double y = startY; y <= bottom + spacing; y += spacing) {
+        if (y < 0) continue; // Confinado ao 4º quadrante (y >= 0)
+        points.add(Offset(x, y));
       }
     }
-    // 4. Modo Isométrico (Engenharia / Geometria Espacial a 30° / 150°)
-    else if (backgroundType == CanvasBackgroundType.isometric) {
-      final isoPaint = Paint()
-        ..color = MoscaroTokens.auroraBlue.withOpacity(0.09)
-        ..strokeWidth = 1.0;
 
-      final double hSpacing = baseSpacing * math.sqrt(3);
-      final double vSpacing = baseSpacing;
+    if (points.isNotEmpty) {
+      canvas.drawPoints(PointMode.points, points, dotPaint);
+    }
+  }
 
-      final startX = (panOffset.dx % hSpacing) - hSpacing;
-      final startY = (panOffset.dy % (vSpacing * 2)) - (vSpacing * 2);
+  /// Renderiza o modo Pautado (Linhas horizontais regulares espaçadas a cada 34pt)
+  void _paintPautadoNotebook(Canvas canvas, double left, double top, double right, double bottom) {
+    const double lineSpacing = 34.0;
+    final double startY = math.max(0.0, (top / lineSpacing).floor() * lineSpacing);
 
-      // Linhas verticais
-      for (double x = startX; x < size.width + hSpacing; x += hSpacing) {
-        canvas.drawLine(Offset(x, 0), Offset(x, size.height), isoPaint);
-      }
+    final linePaint = Paint()
+      ..color = const Color(0x18FFFFFF)
+      ..strokeWidth = 1.0 / zoomScale;
 
-      // Linhas diagonais a 30° e 150°
-      final double diagLen = size.width + size.height * 2;
-      final double tan30 = math.tan(math.pi / 6);
+    // Linhas horizontais pautadas
+    for (double y = startY; y <= bottom + lineSpacing; y += lineSpacing) {
+      if (y < 0) continue;
+      canvas.drawLine(
+        Offset(math.max(0.0, left), y),
+        Offset(math.max(0.0, right), y),
+        linePaint,
+      );
+    }
+  }
 
-      for (double y = startY - diagLen; y < size.height + diagLen; y += vSpacing * 2) {
-        // Diagonal subindo
-        canvas.drawLine(
-          Offset(0, y),
-          Offset(size.width, y + size.width * tan30),
-          isoPaint,
-        );
-        // Diagonal descendo
-        canvas.drawLine(
-          Offset(0, y),
-          Offset(size.width, y - size.width * tan30),
-          isoPaint,
-        );
-      }
+  /// Pautas de Caderno Universais (presentes em todos os modos: Dot Grid, Isométrico, Pautado e Em Branco)
+  void _paintNotebookMarginAndHeader(Canvas canvas, double left, double top, double right, double bottom) {
+    // 1. Pauta de Cabeçalho (Header Rule em Y = 102.0, exatamente em cima da 3ª linha pautada)
+    const double headerY = 102.0;
+    if (headerY >= top && headerY <= bottom) {
+      final headerPaint = Paint()
+        ..color = MoscaroTokens.auroraBlue.withValues(alpha: 0.38)
+        ..strokeWidth = 1.4 / zoomScale;
+      canvas.drawLine(
+        Offset(math.max(0.0, left), headerY),
+        Offset(math.max(0.0, right), headerY),
+        headerPaint,
+      );
+    }
+
+    // 2. Pauta de Margem Vertical Esquerda (Red/Coral Margin Rule em X = 80.0)
+    const double marginX = 80.0;
+    if (marginX >= left && marginX <= right) {
+      final marginPaint = Paint()
+        ..color = const Color(0x48FF5577) // Linha sutil de margem rosa/coral
+        ..strokeWidth = 1.5 / zoomScale;
+      canvas.drawLine(
+        Offset(marginX, math.max(0.0, top)),
+        Offset(marginX, math.max(0.0, bottom)),
+        marginPaint,
+      );
+    }
+  }
+
+  /// Renderiza a malha Isométrica perfeita a 3 eixos (Vertical, +30° e -30°)
+  /// sem qualquer drift ou desalinhamento entre linhas durante pan/zoom.
+  void _paintIsometricLattice(Canvas canvas, double left, double top, double right, double bottom) {
+    const double l = 42.0; // Comprimento da aresta do triângulo equilátero
+    final double w = l * math.sqrt(3) / 2.0; // ~36.373 Espaçamento exato entre colunas verticais
+
+    final isoPaint = Paint()
+      ..color = MoscaroTokens.auroraBlue.withValues(alpha: 0.11)
+      ..strokeWidth = 1.0 / zoomScale
+      ..style = PaintingStyle.stroke;
+
+    // 1. Linhas Verticais (x = c * W)
+    final int cMin = math.max(0, (left / w).floor());
+    final int cMax = math.max(0, (right / w).ceil());
+
+    for (int c = cMin; c <= cMax; c++) {
+      final x = c * w;
+      canvas.drawLine(
+        Offset(x, math.max(0.0, top)),
+        Offset(x, math.max(0.0, bottom)),
+        isoPaint,
+      );
+    }
+
+    // 2. Diagonais a +30° (y = x / sqrt(3) + k * L)
+    final double sqrt3 = math.sqrt(3);
+    final double minKVal = top - right / sqrt3;
+    final double maxKVal = bottom - left / sqrt3;
+    final int kMin = (minKVal / l).floor() - 1;
+    final int kMax = (maxKVal / l).ceil() + 1;
+
+    for (int k = kMin; k <= kMax; k++) {
+      final double kL = k * l;
+      // Encontra intersecções com a caixa delimitadora do 4º quadrante
+      final double x1 = math.max(0.0, left);
+      final double y1 = x1 / sqrt3 + kL;
+      final double x2 = math.max(0.0, right);
+      final double y2 = x2 / sqrt3 + kL;
+
+      canvas.drawLine(Offset(x1, y1), Offset(x2, y2), isoPaint);
+    }
+
+    // 3. Diagonais a -30° (y = -x / sqrt(3) + m * L)
+    final double minMVal = top + left / sqrt3;
+    final double maxMVal = bottom + right / sqrt3;
+    final int mMin = (minMVal / l).floor() - 1;
+    final int mMax = (maxMVal / l).ceil() + 1;
+
+    for (int m = mMin; m <= mMax; m++) {
+      final double mL = m * l;
+      final double x1 = math.max(0.0, left);
+      final double y1 = -x1 / sqrt3 + mL;
+      final double x2 = math.max(0.0, right);
+      final double y2 = -x2 / sqrt3 + mL;
+
+      canvas.drawLine(Offset(x1, y1), Offset(x2, y2), isoPaint);
+    }
+  }
+
+  /// Desenha a borda luminosa e guias da origem do 4º Quadrante (x = 0, y = 0)
+  void _paintOriginBoundaries(Canvas canvas, double left, double top, double right, double bottom) {
+    final borderPaint = Paint()
+      ..color = MoscaroTokens.auroraBlue.withValues(alpha: 0.32)
+      ..strokeWidth = 1.8 / zoomScale;
+
+    // Borda Superior (Y = 0)
+    if (0.0 >= top && 0.0 <= bottom) {
+      canvas.drawLine(
+        Offset(math.max(0.0, left), 0.0),
+        Offset(math.max(0.0, right), 0.0),
+        borderPaint,
+      );
+    }
+
+    // Borda Esquerda (X = 0)
+    if (0.0 >= left && 0.0 <= right) {
+      canvas.drawLine(
+        Offset(0.0, math.max(0.0, top)),
+        Offset(0.0, math.max(0.0, bottom)),
+        borderPaint,
+      );
     }
   }
 
@@ -152,3 +246,4 @@ class CanvasDotGridPainter extends CustomPainter {
         oldDelegate.isDrawing != isDrawing;
   }
 }
+

@@ -8,53 +8,95 @@ enum SelectionType {
   lasso,     // Laço contínuo de formato livre (estilo Samsung Notes / OneNote)
 }
 
+/// Manipuladores de Transformação (8 Alças de Redimensionamento + Alça Superior de Rotação)
+enum SelectionHandleType {
+  none,
+  topLeft,
+  topCenter,
+  topRight,
+  centerRight,
+  bottomRight,
+  bottomCenter,
+  bottomLeft,
+  centerLeft,
+  rotation,
+}
+
 /// Estado imutável ou reativo da Seleção no Canvas
 class SelectionState {
   final SelectionType type;
   final bool isSelectingArea;      // Usuário está ativamente arrastando para selecionar (caixa ou laço)
   final bool isDraggingSelection;  // Usuário está arrastando os traços já selecionados para movê-los
+  final SelectionHandleType activeHandle; // Manipulador ativo sendo transformado
   final Offset? startPoint;
   final Offset? currentPoint;
   final List<Offset> lassoPoints;
   final Set<String> selectedStrokeIds;
   final Rect? bounds;
   final Offset dragOffset;         // Deslocamento temporário dos traços durante o arraste
+  final double rotationAngle;      // Rotação acumulada em radianos
+  final double scaleX;             // Escala acumulada no eixo X
+  final double scaleY;             // Escala acumulada no eixo Y
+  final Offset? transformPivot;    // Centro/âncora da transformação
+  final Rect? transformBounds;   // Caixa delimitadora redimensionada em tempo real pelas alças
 
   const SelectionState({
     this.type = SelectionType.rectangle,
     this.isSelectingArea = false,
     this.isDraggingSelection = false,
+    this.activeHandle = SelectionHandleType.none,
     this.startPoint,
     this.currentPoint,
     this.lassoPoints = const [],
     this.selectedStrokeIds = const {},
     this.bounds,
     this.dragOffset = Offset.zero,
+    this.rotationAngle = 0.0,
+    this.scaleX = 1.0,
+    this.scaleY = 1.0,
+    this.transformPivot,
+    this.transformBounds,
   });
 
   bool get hasSelection => selectedStrokeIds.isNotEmpty && bounds != null;
+  bool get isTransforming => activeHandle != SelectionHandleType.none;
 
   SelectionState copyWith({
     SelectionType? type,
     bool? isSelectingArea,
     bool? isDraggingSelection,
+    SelectionHandleType? activeHandle,
     Offset? startPoint,
     Offset? currentPoint,
     List<Offset>? lassoPoints,
     Set<String>? selectedStrokeIds,
     Rect? bounds,
     Offset? dragOffset,
+    double? rotationAngle,
+    double? scaleX,
+    double? scaleY,
+    Offset? transformPivot,
+    Rect? transformBounds,
+    bool clearTransformBounds = false,
+    bool clearTransformPivot = false,
+    bool clearPoints = false,
   }) {
     return SelectionState(
       type: type ?? this.type,
       isSelectingArea: isSelectingArea ?? this.isSelectingArea,
       isDraggingSelection: isDraggingSelection ?? this.isDraggingSelection,
-      startPoint: startPoint ?? this.startPoint,
-      currentPoint: currentPoint ?? this.currentPoint,
+      activeHandle: activeHandle ?? this.activeHandle,
+      startPoint: clearPoints ? null : (startPoint ?? this.startPoint),
+      currentPoint: clearPoints ? null : (currentPoint ?? this.currentPoint),
       lassoPoints: lassoPoints ?? this.lassoPoints,
       selectedStrokeIds: selectedStrokeIds ?? this.selectedStrokeIds,
       bounds: bounds ?? this.bounds,
       dragOffset: dragOffset ?? this.dragOffset,
+      rotationAngle: rotationAngle ?? this.rotationAngle,
+      scaleX: scaleX ?? this.scaleX,
+      scaleY: scaleY ?? this.scaleY,
+      transformPivot: clearTransformPivot ? null : (transformPivot ?? this.transformPivot),
+      transformBounds: clearTransformBounds ? null : (transformBounds ?? this.transformBounds),
     );
   }
 
@@ -252,5 +294,53 @@ class SelectionGeometry {
     final t = math.max(0, math.min(1, ((p.dx - v.dx) * (w.dx - v.dx) + (p.dy - v.dy) * (w.dy - v.dy)) / l2));
     final projection = Offset(v.dx + t * (w.dx - v.dx), v.dy + t * (w.dy - v.dy));
     return (p - projection).distanceSquared;
+  }
+
+  /// Calcula as posições dos 3 manipuladores de redimensionamento (Horizontal, Vertical e Geral)
+  static Map<SelectionHandleType, Offset> getHandlePositions(Rect bounds, double zoomScale, {double rotation = 0.0, Offset? pivot}) {
+    final center = pivot ?? bounds.center;
+    final inflated = bounds.inflate(6.0 / zoomScale);
+
+    Offset rotatePoint(Offset p) {
+      if (rotation == 0.0) return p;
+      final dx = p.dx - center.dx;
+      final dy = p.dy - center.dy;
+      final cosA = math.cos(rotation);
+      final sinA = math.sin(rotation);
+      return Offset(center.dx + dx * cosA - dy * sinA, center.dy + dx * sinA + dy * cosA);
+    }
+
+    return {
+      SelectionHandleType.centerRight: rotatePoint(Offset(inflated.right, inflated.center.dy)),
+      SelectionHandleType.bottomCenter: rotatePoint(Offset(inflated.center.dx, inflated.bottom)),
+      SelectionHandleType.bottomRight: rotatePoint(inflated.bottomRight),
+    };
+  }
+
+  /// Detecta se o ponto clicado atingiu um dos 9 manipuladores da seleção
+  static SelectionHandleType getHandleAtPoint(Offset point, Rect bounds, double zoomScale, {double rotation = 0.0, Offset? pivot}) {
+    final handles = getHandlePositions(bounds, zoomScale, rotation: rotation, pivot: pivot);
+    final hitTolerance = 14.0 / zoomScale;
+    final hitToleranceSq = hitTolerance * hitTolerance;
+
+    for (final entry in handles.entries) {
+      if ((point - entry.value).distanceSquared <= hitToleranceSq) {
+        return entry.key;
+      }
+    }
+    return SelectionHandleType.none;
+  }
+
+  /// Trava magnética em ângulos notáveis (0°, 45°, 90°, 135°, 180°, etc.)
+  static double snapAngle(double angleRadians) {
+    double degrees = (angleRadians * 180.0 / math.pi) % 360.0;
+    if (degrees < 0) degrees += 360.0;
+    const notable = [0.0, 45.0, 90.0, 135.0, 180.0, 225.0, 270.0, 315.0, 360.0];
+    for (final n in notable) {
+      if ((degrees - n).abs() <= 3.5 || (degrees - 360.0 - n).abs() <= 3.5) {
+        return (n % 360.0) * math.pi / 180.0;
+      }
+    }
+    return angleRadians;
   }
 }

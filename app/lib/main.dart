@@ -21,7 +21,12 @@ import 'widgets/selection_overlay_painter.dart';
 import 'widgets/selection_action_bar.dart';
 import 'widgets/selection_sub_bar.dart';
 import 'widgets/eraser_sub_bar.dart';
-import 'widgets/spatial_index.dart';
+import 'widgets/shapes_sub_bar.dart';
+import 'widgets/grid_menu_card.dart';
+import 'widgets/laser_pointer.dart';
+import 'widgets/smart_shapes.dart';
+import 'widgets/stem_ruler_model.dart';
+import 'widgets/stem_ruler_widget.dart';
 import 'widgets/undo_commands.dart';
 import 'ffi/native_bridge.dart';
 import 'dev_hub/dev_hub_server.dart';
@@ -56,13 +61,16 @@ class CanvasHomeScreen extends StatefulWidget {
   State<CanvasHomeScreen> createState() => _CanvasHomeScreenState();
 }
 
-class _CanvasHomeScreenState extends State<CanvasHomeScreen> {
+class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProviderStateMixin {
   // Estado de Documentos e Notas
   final List<NoteDocument> _notes = [];
   final List<NoteDocument> _trashNotes = [];
   final List<String> _activeNoteIds = [];
   String? _selectedNoteId;
   bool _isSidebarOpen = false;
+
+  // Motor do Ponteiro Laser
+  final LaserPointerEngine _laserEngine = LaserPointerEngine();
 
   // Estado de Navegação do Canvas Desacoplado (144Hz Zero-Rebuild)
   final ValueNotifier<Offset> _panNotifier = ValueNotifier(Offset.zero);
@@ -72,6 +80,11 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> {
 
   Offset get _panOffset => _panNotifier.value;
   double get _zoomScale => _zoomNotifier.value;
+
+  // Animação de Retorno à Zona Segura (4º Quadrante: x >= 0, y >= 0)
+  late AnimationController _bounceController;
+  Animation<Offset>? _bounceAnimation;
+  Timer? _scrollBounceTimer;
 
   // Estado de Ferramentas & Sub-Barra de Canetas Vivas
   String _activeTool = 'pen';
@@ -108,6 +121,28 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> {
   final TransientStrokesPictureCache _transientPictureCache = TransientStrokesPictureCache();
   final ValueNotifier<int> _transientUpdateNotifier = ValueNotifier(0);
 
+  // Estado de Formas Geométricas & Smart Shapes (Draw & Hold)
+  ShapeType _activeShapeType = ShapeType.line;
+  Offset? _shapeDragStartPoint;
+  Timer? _drawAndHoldTimer;
+  bool _isSmartShapeSnapped = false;
+  ShapeType? _snappedShapeType;
+  Offset? _smartShapeStartPoint;
+  Rect? _smartShapeInitialBounds;
+  Offset? _smartShapeCenter;
+  // Estado da Régua STEM Interativa (Fase 5.1)
+  StemRulerState _rulerState = const StemRulerState(isVisible: false);
+  final ValueNotifier<int> _rulerUpdateNotifier = ValueNotifier(0);
+  bool _isDraggingRuler = false;
+  bool _isRotatingRuler = false;
+  Offset? _rulerDragStart;
+  StemRulerState? _rulerInitialState;
+
+  bool _isGridMenuOpen = false;
+  double _smoothedPressure = 0.6;
+  int _lastPointerTimestampMs = 0;
+  Offset? _lastPointerCanvasPoint;
+
   // Interação (Renderização Híbrida)
   final ValueNotifier<bool> _isInteractingNotifier = ValueNotifier(false);
   Timer? _interactionTimer;
@@ -129,9 +164,20 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> {
   @override
   void initState() {
     super.initState();
+    _laserEngine.init(this);
     _activeSlotId = _penSlots.first.id;
     _addNewNote("Anotações STEM");
     HardwareKeyboard.instance.addHandler(_handleKeyEvent);
+
+    _bounceController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 250),
+    );
+    _bounceController.addListener(() {
+      if (_bounceAnimation != null) {
+        _panNotifier.value = _bounceAnimation!.value;
+      }
+    });
 
     // Configurar e Iniciar Servidor do Dev Hub em processo/janela separada
     DevHubServer.instance.onInjectStrokes = (count) {
@@ -157,6 +203,48 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> {
         DevHubServer.instance.activeTilesCount = note.pictureCache.totalTilesCount;
         DevHubServer.instance.gpuTexturesCount = note.pictureCache.gpuTexturesCount;
       }
+    });
+  }
+
+  void _checkAndAnimatePanToSafeZone() {
+    final currentPan = _panNotifier.value;
+    final targetX = math.min(0.0, currentPan.dx);
+    final targetY = math.min(0.0, currentPan.dy);
+    if (targetX != currentPan.dx || targetY != currentPan.dy) {
+      _bounceController.stop();
+      _bounceAnimation = Tween<Offset>(
+        begin: currentPan,
+        end: Offset(targetX, targetY),
+      ).animate(CurvedAnimation(
+        parent: _bounceController,
+        curve: Curves.easeOutCubic,
+      ));
+      _bounceController.forward(from: 0.0);
+    }
+  }
+
+  void _handlePanDelta(Offset delta) {
+    _setInteracting();
+    _bounceController.stop();
+    final current = _panNotifier.value;
+    double newX = current.dx + delta.dx;
+    double newY = current.dy + delta.dy;
+
+    // Resistência elástica (rubberband) mais rígida caso ultrapasse o limite do 4º quadrante (0, 0)
+    if (newX > 0) {
+      newX = current.dx + delta.dx * 0.12;
+    }
+    if (newY > 0) {
+      newY = current.dy + delta.dy * 0.12;
+    }
+
+    _panNotifier.value = Offset(newX, newY);
+  }
+
+  void _scheduleBounceCheck() {
+    _scrollBounceTimer?.cancel();
+    _scrollBounceTimer = Timer(const Duration(milliseconds: 90), () {
+      _checkAndAnimatePanToSafeZone();
     });
   }
 
@@ -275,9 +363,13 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> {
 
   @override
   void dispose() {
-    HardwareKeyboard.instance.removeHandler(_handleKeyEvent);
+    _laserEngine.dispose();
+    _bounceController.dispose();
     _telemetrySyncTimer?.cancel();
     _interactionTimer?.cancel();
+    _drawAndHoldTimer?.cancel();
+    _scrollBounceTimer?.cancel();
+    HardwareKeyboard.instance.removeHandler(_handleKeyEvent);
     _dragPictureCache.dispose();
     _transientPictureCache.dispose();
     _pendingErasures.clear();
@@ -493,6 +585,131 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> {
     });
   }
 
+  void _rotateSelectedStrokesBy(double radians) {
+    final note = _currentNote;
+    if (note == null || !_selectionState.hasSelection) return;
+
+    final bounds = _selectionState.bounds!;
+    final pivot = bounds.center;
+    final cosA = math.cos(radians);
+    final sinA = math.sin(radians);
+
+    final originalStrokes = <InkStroke>[];
+    final updatedStrokes = <InkStroke>[];
+
+    for (final id in _selectionState.selectedStrokeIds) {
+      final s = note.getStroke(id);
+      if (s != null) {
+        final newPoints = <StrokePoint>[];
+        for (final p in s.points) {
+          final localP = p.point + s.transform;
+          final dx = localP.dx - pivot.dx;
+          final dy = localP.dy - pivot.dy;
+          final newX = pivot.dx + dx * cosA - dy * sinA;
+          final newY = pivot.dy + dx * sinA + dy * cosA;
+          newPoints.add(StrokePoint(point: Offset(newX, newY), pressure: p.pressure, tilt: p.tilt));
+        }
+
+        final newBounds = SelectionGeometry.computePointsBounds(newPoints, s.strokeWidth);
+        final Path newCachedPath;
+        if (s.toolType == InkToolType.fountain || s.enablePressure) {
+          newCachedPath = FreehandOutlineRenderer.generateOutlinePath(
+            newPoints,
+            baseWidth: s.strokeWidth,
+            isTapered: s.toolType == InkToolType.fountain,
+          );
+        } else {
+          newCachedPath = InkStroke.buildCatmullRomPath(newPoints);
+        }
+
+        final transformed = InkStroke(
+          id: s.id,
+          points: newPoints,
+          color: s.color,
+          strokeWidth: s.strokeWidth,
+          toolType: s.toolType,
+          enablePressure: s.enablePressure,
+          boundingBox: newBounds,
+          cachedPath: newCachedPath,
+        );
+
+        originalStrokes.add(s);
+        updatedStrokes.add(transformed);
+      }
+    }
+
+    if (updatedStrokes.isEmpty) return;
+
+    _undoManager.pushCommand(
+      MoveStrokesCommand(originalStrokes: originalStrokes, updatedStrokes: updatedStrokes),
+      execute: true,
+      note: note,
+    );
+
+    final newCombinedBounds = SelectionGeometry.computeCombinedBounds(updatedStrokes);
+
+    setState(() {
+      _strokesVersion++;
+      _committedStrokesNotifier.value++;
+      _dragPictureCache.invalidate();
+      _selectionState = _selectionState.copyWith(
+        activeHandle: SelectionHandleType.none,
+        rotationAngle: 0.0,
+        bounds: newCombinedBounds,
+      );
+      _selectionUpdateNotifier.value++;
+    });
+  }
+
+  void _onRotatePanStart(DragStartDetails details) {
+    if (!_selectionState.hasSelection) return;
+    _setInteracting();
+    final bounds = _selectionState.bounds!;
+    _dragPictureCache.update(_currentNote!, _selectionState.selectedStrokeIds);
+    _selectionState = _selectionState.copyWith(
+      activeHandle: SelectionHandleType.rotation,
+      transformPivot: bounds.center,
+      rotationAngle: 0.0,
+    );
+    _committedStrokesNotifier.value++;
+    _selectionUpdateNotifier.value++;
+  }
+
+  void _onRotatePanUpdate(DragUpdateDetails details) {
+    if (!_selectionState.hasSelection || _selectionState.activeHandle != SelectionHandleType.rotation) return;
+    _setInteracting();
+    final canvasCenter = _selectionState.transformPivot ?? _selectionState.bounds!.center;
+    final screenCenter = canvasCenter * _zoomScale + _panOffset;
+    final currentPos = details.globalPosition;
+
+    final initialAngle = -math.pi / 2.0; // Posição 12h
+    final currentAngle = math.atan2(currentPos.dy - screenCenter.dy, currentPos.dx - screenCenter.dx);
+    final rawRotation = currentAngle - initialAngle;
+    final snappedRotation = SelectionGeometry.snapAngle(rawRotation);
+
+    _selectionState = _selectionState.copyWith(
+      rotationAngle: snappedRotation,
+    );
+    _selectionUpdateNotifier.value++;
+  }
+
+  void _onRotatePanEnd(DragEndDetails details) {
+    if (!_selectionState.hasSelection || _selectionState.activeHandle != SelectionHandleType.rotation) return;
+    final rot = _selectionState.rotationAngle;
+    if (rot.abs() > 0.01) {
+      _rotateSelectedStrokesBy(rot);
+    } else {
+      setState(() {
+        _selectionState = _selectionState.copyWith(
+          activeHandle: SelectionHandleType.none,
+          rotationAngle: 0.0,
+        );
+        _committedStrokesNotifier.value++;
+        _selectionUpdateNotifier.value++;
+      });
+    }
+  }
+
   void _changeSelectedStrokesColor(Color newColor) {
     final note = _currentNote;
     if (note == null || !_selectionState.hasSelection) return;
@@ -566,7 +783,8 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> {
 
     final Offset focalInCanvas = (focalPoint - currentPan) / currentZoom;
     _zoomNotifier.value = newScale;
-    _panNotifier.value = focalPoint - (focalInCanvas * newScale);
+    final rawPan = focalPoint - (focalInCanvas * newScale);
+    _panNotifier.value = Offset(math.min(0.0, rawPan.dx), math.min(0.0, rawPan.dy));
   }
 
   @override
@@ -600,11 +818,19 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> {
             children: [
               // 1. Fundo do Canvas Infinito & Traços
               MouseRegion(
+                cursor: _activeTool == 'laser' ? SystemMouseCursors.none : MouseCursor.defer,
                 onHover: (event) {
                   _mousePosNotifier.value = event.localPosition;
+                  if (_activeTool == 'laser') {
+                    final rawCanvasPoint = (event.localPosition - _panOffset) / _zoomScale;
+                    _laserEngine.updateHoverPosition(rawCanvasPoint);
+                  }
                 },
                 onExit: (_) {
                   _mousePosNotifier.value = null;
+                  if (_activeTool == 'laser') {
+                    _laserEngine.updateHoverPosition(null);
+                  }
                 },
                 child: GestureDetector(
                   onTapDown: (_) {
@@ -618,10 +844,17 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> {
                     onPointerSignal: (event) {
                       if (event is PointerScrollEvent) {
                         final isCtrlPressed = HardwareKeyboard.instance.isControlPressed;
+                        final isShiftPressed = HardwareKeyboard.instance.isShiftPressed;
                         if (isCtrlPressed) {
                           final delta = -event.scrollDelta.dy * 0.0015;
                           _setInteracting();
                           _handleZoomDelta(delta, event.localPosition);
+                        } else if (isShiftPressed) {
+                          _handlePanDelta(Offset(-event.scrollDelta.dy, 0.0));
+                          _scheduleBounceCheck();
+                        } else {
+                          _handlePanDelta(Offset(0.0, -event.scrollDelta.dy));
+                          _scheduleBounceCheck();
                         }
                       }
                     },
@@ -631,20 +864,119 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> {
                       if (isMiddleButton) return;
 
                       if (event.buttons == 1 && note != null) {
-                        final canvasPoint = (event.localPosition - _panOffset) / _zoomScale;
+                        final rawCanvasPoint = (event.localPosition - _panOffset) / _zoomScale;
+                        final canvasPoint = Offset(math.max(0.0, rawCanvasPoint.dx), math.max(0.0, rawCanvasPoint.dy));
+
+                        if (_activeTool == 'laser') {
+                          _setInteracting();
+                          _laserEngine.onPointerDown(canvasPoint);
+                          return;
+                        }
+
+                        _lastPointerTimestampMs = event.timeStamp.inMilliseconds;
+                        _lastPointerCanvasPoint = canvasPoint;
+                        if (event.kind != PointerDeviceKind.mouse && event.pressure > 0.0) {
+                          _smoothedPressure = event.pressure.clamp(0.2, 1.6);
+                        } else {
+                          _smoothedPressure = 0.6;
+                        }
+                        final double pressure = _smoothedPressure;
+
+                        // Interação direta com a Régua STEM (Arrastar ou Rotacionar)
+                        if (_rulerState.isVisible && _rulerState.containsPoint(canvasPoint)) {
+                          final isProtractor = _rulerState.isNearCenterProtractor(canvasPoint);
+                          _isRotatingRuler = isProtractor;
+                          _isDraggingRuler = !isProtractor;
+                          _rulerDragStart = canvasPoint;
+                          _rulerInitialState = _rulerState;
+                          _setInteracting();
+                          return;
+                        }
 
                         if (_activeTool == 'pen') {
                           final currentPreset = _activePenPreset;
+
+                          _isSmartShapeSnapped = false;
+                          _snappedShapeType = null;
+                          _smartShapeStartPoint = canvasPoint;
+
+                          final snapped = _rulerState.isVisible ? _rulerState.snapPoint(canvasPoint) : null;
+                          final effectiveStartPoint = snapped ?? canvasPoint;
 
                           setState(() {
                             _isDrawing = true;
                             _activeStroke = InkStroke(
                               id: DateTime.now().millisecondsSinceEpoch.toString(),
-                              points: [StrokePoint(point: canvasPoint, pressure: event.pressure)],
+                              points: [StrokePoint(point: effectiveStartPoint, pressure: pressure)],
                               color: currentPreset.color,
                               strokeWidth: currentPreset.strokeWidth,
                               toolType: currentPreset.toolType,
                               enablePressure: currentPreset.enablePressure,
+                            );
+                          });
+                          _activeStrokeUpdateNotifier.value++;
+
+                          // Iniciar temporizador Draw & Hold (400ms para Smart Shape Snap)
+                          _drawAndHoldTimer?.cancel();
+                          _drawAndHoldTimer = Timer(const Duration(milliseconds: 400), () {
+                            if (_isDrawing && _activeStroke != null && _activeStroke!.points.length >= 8) {
+                              final recognized = SmartShapeEngine.recognizeDrawnShape(_activeStroke!.points);
+                              if (recognized != null) {
+                                _isSmartShapeSnapped = true;
+                                _snappedShapeType = recognized;
+
+                                // Calcula a Bounding Box real do desenho livre do usuário
+                                double minX = double.infinity, minY = double.infinity;
+                                double maxX = double.negativeInfinity, maxY = double.negativeInfinity;
+                                for (final p in _activeStroke!.points) {
+                                  if (p.point.dx < minX) minX = p.point.dx;
+                                  if (p.point.dy < minY) minY = p.point.dy;
+                                  if (p.point.dx > maxX) maxX = p.point.dx;
+                                  if (p.point.dy > maxY) maxY = p.point.dy;
+                                }
+                                final drawnBounds = Rect.fromLTRB(minX, minY, maxX, maxY);
+                                _smartShapeInitialBounds = drawnBounds;
+                                _smartShapeCenter = drawnBounds.center;
+
+                                final shapePath = SmartShapeEngine.generateRecognizedPath(recognized, _activeStroke!.points, drawnBounds);
+                                final shapePoints = SmartShapeEngine.samplePathPoints(shapePath, pressure: pressure);
+
+                                _activeStroke = InkStroke(
+                                  id: _activeStroke!.id,
+                                  points: shapePoints,
+                                  color: _activeStroke!.color,
+                                  strokeWidth: _activeStroke!.strokeWidth,
+                                  toolType: currentPreset.toolType,
+                                  enablePressure: currentPreset.enablePressure,
+                                  cachedPath: shapePath,
+                                );
+                                _activeStrokeUpdateNotifier.value++;
+                              }
+                            }
+                          });
+                        } else if (_activeTool == 'shapes') {
+                          final currentPreset = _activePenPreset;
+                          _shapeDragStartPoint = canvasPoint;
+                          final initialPath = SmartShapeEngine.generateShapePath(
+                            _activeShapeType,
+                            canvasPoint,
+                            canvasPoint + const Offset(1, 1),
+                          );
+                          final initialPoints = SmartShapeEngine.samplePathPoints(
+                            initialPath,
+                            pressure: pressure,
+                          );
+
+                          setState(() {
+                            _isDrawing = true;
+                            _activeStroke = InkStroke(
+                              id: DateTime.now().millisecondsSinceEpoch.toString(),
+                              points: initialPoints,
+                              color: currentPreset.color,
+                              strokeWidth: currentPreset.strokeWidth,
+                              toolType: currentPreset.toolType,
+                              enablePressure: currentPreset.enablePressure,
+                              cachedPath: initialPath,
                             );
                           });
                           _activeStrokeUpdateNotifier.value++;
@@ -653,28 +985,47 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> {
                         } else if (_activeTool == 'select') {
                           _selectionStartCanvasPoint = canvasPoint;
 
-                          // Se já tem seleção e clicou dentro da Bounding Box -> arrastar traços selecionados
-                          if (_selectionState.hasSelection &&
-                              _selectionState.bounds!.inflate(10 / _zoomScale).contains(canvasPoint)) {
-                            // Pré-aquecimento da prévia para o dragZero
-                            _dragPictureCache.update(note, _selectionState.selectedStrokeIds);
-                            
-                            _selectionState = _selectionState.copyWith(
-                              isDraggingSelection: true,
-                              dragOffset: Offset.zero,
+                          if (_selectionState.hasSelection) {
+                            final bounds = _selectionState.bounds!;
+                            final handle = SelectionGeometry.getHandleAtPoint(
+                              canvasPoint,
+                              bounds,
+                              _zoomScale,
+                              rotation: _selectionState.rotationAngle,
                             );
-                            _committedStrokesNotifier.value++;
-                            _selectionUpdateNotifier.value++;
-                          } else {
-                            // Começar potencial nova seleção
-                            _selectionState = SelectionState(
-                              type: _selectionType,
-                              startPoint: canvasPoint,
-                              currentPoint: canvasPoint,
-                              lassoPoints: [canvasPoint],
-                            );
-                            _selectionUpdateNotifier.value++;
+
+                            if (handle != SelectionHandleType.none) {
+                              // Clicou em um dos 9 manipuladores (Redimensionar ou Rotacionar)
+                              _dragPictureCache.update(note, _selectionState.selectedStrokeIds);
+                              _selectionState = _selectionState.copyWith(
+                                activeHandle: handle,
+                                transformPivot: bounds.center,
+                                transformBounds: bounds,
+                              );
+                              _committedStrokesNotifier.value++;
+                              _selectionUpdateNotifier.value++;
+                              return;
+                            } else if (bounds.inflate(10 / _zoomScale).contains(canvasPoint)) {
+                              // Clicou dentro do corpo da Bounding Box -> arrastar traços
+                              _dragPictureCache.update(note, _selectionState.selectedStrokeIds);
+                              _selectionState = _selectionState.copyWith(
+                                isDraggingSelection: true,
+                                dragOffset: Offset.zero,
+                              );
+                              _committedStrokesNotifier.value++;
+                              _selectionUpdateNotifier.value++;
+                              return;
+                            }
                           }
+
+                          // Começar potencial nova seleção de área
+                          _selectionState = SelectionState(
+                            type: _selectionType,
+                            startPoint: canvasPoint,
+                            currentPoint: canvasPoint,
+                            lassoPoints: [canvasPoint],
+                          );
+                          _selectionUpdateNotifier.value++;
                         }
                       }
                     },
@@ -683,29 +1034,245 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> {
                       final isMiddleButton = event.buttons == 4;
 
                       if (isMiddleButton) {
-                        _setInteracting();
-                        _panNotifier.value += event.delta;
+                        _handlePanDelta(event.delta);
                         return;
                       }
 
                       if (event.buttons == 1 && note != null) {
-                        final canvasPoint = (event.localPosition - _panOffset) / _zoomScale;
+                        final rawCanvasPoint = (event.localPosition - _panOffset) / _zoomScale;
+                        final canvasPoint = Offset(math.max(0.0, rawCanvasPoint.dx), math.max(0.0, rawCanvasPoint.dy));
+
+                        if (_activeTool == 'laser') {
+                          _setInteracting();
+                          _laserEngine.onPointerMove(canvasPoint);
+                          return;
+                        }
+
+                        // Movimentação / Rotação da Régua STEM
+                        if (_isDraggingRuler && _rulerDragStart != null && _rulerInitialState != null) {
+                          _setInteracting();
+                          final delta = canvasPoint - _rulerDragStart!;
+                          _rulerState = _rulerInitialState!.copyWith(
+                            center: _rulerInitialState!.center + delta,
+                          );
+                          _rulerUpdateNotifier.value++;
+                          return;
+                        }
+
+                        if (_isRotatingRuler && _rulerInitialState != null && _rulerDragStart != null) {
+                          _setInteracting();
+                          final center = _rulerInitialState!.center;
+                          final initialAngle = math.atan2(_rulerDragStart!.dy - center.dy, _rulerDragStart!.dx - center.dx);
+                          final currentAngle = math.atan2(canvasPoint.dy - center.dy, canvasPoint.dx - center.dx);
+                          
+                          // Normalize diff to -pi to pi to avoid jumps when crossing the atan2 boundary
+                          double diff = currentAngle - initialAngle;
+                          while (diff > math.pi) diff -= 2 * math.pi;
+                          while (diff < -math.pi) diff += 2 * math.pi;
+
+                          // Sensibilidade altamente controlada (fator 0.15 para micro-ajustes precisos sem solavancos)
+                          var deltaAngle = diff * 0.15;
+                          final targetAngle = _rulerInitialState!.angle + deltaAngle;
+                          final snapped = StemRulerState.snapAngle(targetAngle);
+                          
+                          _rulerState = _rulerInitialState!.copyWith(
+                            angle: snapped,
+                          );
+                          _rulerUpdateNotifier.value++;
+                          return;
+                        }
+
+                        final double pressure;
+                        if (event.kind != PointerDeviceKind.mouse && event.pressure > 0.0) {
+                          pressure = event.pressure.clamp(0.2, 1.6);
+                        } else {
+                          final currentMs = event.timeStamp.inMilliseconds;
+                          final dt = math.max(1, currentMs - _lastPointerTimestampMs);
+                          final lastPt = _lastPointerCanvasPoint ?? canvasPoint;
+                          final dist = (canvasPoint - lastPt).distance;
+                          final speed = dist / dt; // pixels/ms
+
+                          // Velocidade alta (> 0.8) -> Traço mais fino (0.4)
+                          // Velocidade baixa (< 0.15) -> Traço mais encorpado (1.25)
+                          final targetPressure = (1.2 - speed * 0.65).clamp(0.35, 1.35);
+                          _smoothedPressure = _smoothedPressure * 0.65 + targetPressure * 0.35;
+                          pressure = _smoothedPressure;
+
+                          _lastPointerTimestampMs = currentMs;
+                          _lastPointerCanvasPoint = canvasPoint;
+                        }
 
                         if (_activeTool == 'pen' && _activeStroke != null) {
-                          final lastPoint = _activeStroke!.points.last.point;
-                          // 1.5px minimum distance filter (1.5^2 = 2.25)
-                          if ((canvasPoint - lastPoint).distanceSquared < 2.25) return;
+                          final currentPreset = _activePenPreset;
+                          final isShift = HardwareKeyboard.instance.isShiftPressed;
+                          final isCtrl = HardwareKeyboard.instance.isControlPressed;
 
-                          _activeStroke!.points.add(
-                            StrokePoint(point: canvasPoint, pressure: event.pressure),
+                          if (isShift || isCtrl) {
+                            _drawAndHoldTimer?.cancel();
+                            final shapeType = isCtrl ? ShapeType.arrow : ShapeType.line;
+                            final startPoint = _smartShapeStartPoint ?? _activeStroke!.points.first.point;
+                            final shapePath = SmartShapeEngine.generateShapePath(shapeType, startPoint, canvasPoint);
+                            final shapePoints = SmartShapeEngine.samplePathPoints(shapePath, pressure: pressure);
+
+                            _activeStroke = InkStroke(
+                              id: _activeStroke!.id,
+                              points: shapePoints,
+                              color: _activeStroke!.color,
+                              strokeWidth: _activeStroke!.strokeWidth,
+                              toolType: currentPreset.toolType,
+                              enablePressure: currentPreset.enablePressure,
+                              cachedPath: shapePath,
+                            );
+                            _activeStrokeUpdateNotifier.value++;
+                          } else if (_isSmartShapeSnapped && _snappedShapeType != null && _smartShapeStartPoint != null) {
+                            final recognized = _snappedShapeType!;
+                            final Rect newBounds;
+                            if (_smartShapeInitialBounds != null && _smartShapeCenter != null) {
+                              final initBounds = _smartShapeInitialBounds!;
+                              final center = _smartShapeCenter!;
+                              final delta = canvasPoint - _smartShapeStartPoint!;
+
+                              final newWidth = math.max(12.0, initBounds.width + delta.dx * 2);
+                              final newHeight = math.max(12.0, initBounds.height + delta.dy * 2);
+                              newBounds = Rect.fromCenter(center: center, width: newWidth, height: newHeight);
+                            } else {
+                              newBounds = Rect.fromPoints(_smartShapeStartPoint!, canvasPoint);
+                            }
+
+                            final shapePath = SmartShapeEngine.generateRecognizedPath(recognized, _activeStroke!.points, newBounds);
+                            final shapePoints = SmartShapeEngine.samplePathPoints(shapePath, pressure: pressure);
+
+                            _activeStroke = InkStroke(
+                              id: _activeStroke!.id,
+                              points: shapePoints,
+                              color: _activeStroke!.color,
+                              strokeWidth: _activeStroke!.strokeWidth,
+                              toolType: currentPreset.toolType,
+                              enablePressure: currentPreset.enablePressure,
+                              cachedPath: shapePath,
+                            );
+                            _activeStrokeUpdateNotifier.value++;
+                          } else {
+                            final snapped = _rulerState.isVisible ? _rulerState.snapPoint(canvasPoint) : null;
+                            final effectivePoint = snapped ?? canvasPoint;
+                            final lastPoint = _activeStroke!.points.last.point;
+                            if ((effectivePoint - lastPoint).distanceSquared >= 2.25) {
+                              _activeStroke!.points.add(
+                                StrokePoint(point: effectivePoint, pressure: pressure),
+                              );
+                              _activeStroke!.cachedRawPoints = null;
+                              _activeStroke!.cachedPath = null;
+                              _activeStrokeUpdateNotifier.value++;
+
+                              // Reiniciar temporizador de 400ms Draw & Hold
+                              _drawAndHoldTimer?.cancel();
+                              _drawAndHoldTimer = Timer(const Duration(milliseconds: 400), () {
+                                if (_isDrawing && _activeStroke != null && _activeStroke!.points.length >= 8) {
+                                  final recognized = SmartShapeEngine.recognizeDrawnShape(_activeStroke!.points);
+                                  if (recognized != null) {
+                                    _isSmartShapeSnapped = true;
+                                    _snappedShapeType = recognized;
+
+                                    double minX = double.infinity, minY = double.infinity;
+                                    double maxX = double.negativeInfinity, maxY = double.negativeInfinity;
+                                    for (final p in _activeStroke!.points) {
+                                      if (p.point.dx < minX) minX = p.point.dx;
+                                      if (p.point.dy < minY) minY = p.point.dy;
+                                      if (p.point.dx > maxX) maxX = p.point.dx;
+                                      if (p.point.dy > maxY) maxY = p.point.dy;
+                                    }
+                                    final drawnBounds = Rect.fromLTRB(minX, minY, maxX, maxY);
+                                    _smartShapeInitialBounds = drawnBounds;
+                                    _smartShapeCenter = drawnBounds.center;
+
+                                    final shapePath = SmartShapeEngine.generateRecognizedPath(recognized, _activeStroke!.points, drawnBounds);
+                                    final shapePoints = SmartShapeEngine.samplePathPoints(shapePath, pressure: pressure);
+
+                                    _activeStroke = InkStroke(
+                                      id: _activeStroke!.id,
+                                      points: shapePoints,
+                                      color: _activeStroke!.color,
+                                      strokeWidth: _activeStroke!.strokeWidth,
+                                      toolType: currentPreset.toolType,
+                                      enablePressure: currentPreset.enablePressure,
+                                      cachedPath: shapePath,
+                                    );
+                                    _activeStrokeUpdateNotifier.value++;
+                                  }
+                                }
+                              });
+                            }
+                          }
+                        } else if (_activeTool == 'shapes' && _shapeDragStartPoint != null && _activeStroke != null) {
+                          final currentPreset = _activePenPreset;
+                          final shapePath = SmartShapeEngine.generateShapePath(
+                            _activeShapeType,
+                            _shapeDragStartPoint!,
+                            canvasPoint,
                           );
-                          _activeStroke!.cachedRawPoints = null;
-                          _activeStroke!.cachedPath = null;
+                          final shapePoints = SmartShapeEngine.samplePathPoints(
+                            shapePath,
+                            pressure: pressure,
+                          );
+                          _activeStroke = InkStroke(
+                            id: _activeStroke!.id,
+                            points: shapePoints,
+                            color: currentPreset.color,
+                            strokeWidth: currentPreset.strokeWidth,
+                            toolType: currentPreset.toolType,
+                            enablePressure: currentPreset.enablePressure,
+                            cachedPath: shapePath,
+                          );
                           _activeStrokeUpdateNotifier.value++;
                         } else if (_activeTool == 'eraser') {
                           _eraseStrokesNear(canvasPoint);
                         } else if (_activeTool == 'select' && _selectionStartCanvasPoint != null) {
-                          if (_selectionState.isDraggingSelection) {
+                          if (_selectionState.isTransforming) {
+                            _setInteracting();
+                            final handle = _selectionState.activeHandle;
+                            final pivot = _selectionState.transformPivot ?? _selectionState.bounds!.center;
+
+                            if (handle == SelectionHandleType.rotation) {
+                              // Cálculo de rotação com Snap Magnético
+                              final initialAngle = -math.pi / 2.0; // Posição 12h (topo)
+                              final currentAngle = math.atan2(canvasPoint.dy - pivot.dy, canvasPoint.dx - pivot.dx);
+                              final rawRotation = currentAngle - initialAngle;
+                              final snappedRotation = SelectionGeometry.snapAngle(rawRotation);
+
+                              _selectionState = _selectionState.copyWith(
+                                rotationAngle: snappedRotation,
+                              );
+                              _selectionUpdateNotifier.value++;
+                            } else {
+                              // Redimensionamento pelas 3 Alças com ancoragem no canto superior-esquerdo (Fidelidade 100%)
+                              final bounds = _selectionState.bounds!;
+                              double newLeft = bounds.left;
+                              double newTop = bounds.top;
+                              double newRight = bounds.right;
+                              double newBottom = bounds.bottom;
+
+                              switch (handle) {
+                                case SelectionHandleType.centerRight:
+                                  newRight = math.max(newLeft + 12.0, canvasPoint.dx);
+                                  break;
+                                case SelectionHandleType.bottomCenter:
+                                  newBottom = math.max(newTop + 12.0, canvasPoint.dy);
+                                  break;
+                                case SelectionHandleType.bottomRight:
+                                  newRight = math.max(newLeft + 12.0, canvasPoint.dx);
+                                  newBottom = math.max(newTop + 12.0, canvasPoint.dy);
+                                  break;
+                                default:
+                                  break;
+                              }
+
+                              final newRect = Rect.fromLTRB(newLeft, newTop, newRight, newBottom);
+                              _selectionState = _selectionState.copyWith(
+                                transformBounds: newRect,
+                              );
+                              _selectionUpdateNotifier.value++;
+                            }
+                          } else if (_selectionState.isDraggingSelection) {
                             _setInteracting();
                             final delta = canvasPoint - _selectionStartCanvasPoint!;
                             _selectionState = _selectionState.copyWith(dragOffset: delta);
@@ -713,7 +1280,6 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> {
                           } else {
                             final dist = (canvasPoint - _selectionStartCanvasPoint!).distance;
                             if (dist > 4.0 || _selectionState.isSelectingArea) {
-                              // Eixo 7.1: Lasso Debounce (evita milhares de pontos O(1))
                               if (_selectionType == SelectionType.lasso && _selectionState.lassoPoints.isNotEmpty) {
                                 if ((canvasPoint - _selectionState.lassoPoints.last).distanceSquared < 16.0) return;
                               }
@@ -731,12 +1297,36 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> {
                     },
                     onPointerUp: (event) {
                       _mousePosNotifier.value = event.localPosition;
-                      if (_activeTool == 'pen' && _activeStroke != null && note != null) {
-                        // Mantém o erro visual abaixo de ~0,35 px na escala atual.
-                        final simplifiedPoints = InkStroke.simplifyRDP(
-                          _activeStroke!.points,
-                          0.35 / _zoomScale,
-                        );
+                      _drawAndHoldTimer?.cancel();
+
+                      if (_isDraggingRuler || _isRotatingRuler) {
+                        _isDraggingRuler = false;
+                        _isRotatingRuler = false;
+                        _rulerDragStart = null;
+                        _rulerInitialState = null;
+                        return;
+                      }
+
+                      if (_activeTool == 'laser') {
+                        _laserEngine.onPointerUp();
+                        return;
+                      }
+                      final wasShapeSnapped = _isSmartShapeSnapped;
+                      final shapeCachedPath = _activeStroke?.cachedPath;
+
+                      _isSmartShapeSnapped = false;
+                      _snappedShapeType = null;
+                      _smartShapeStartPoint = null;
+                      _smartShapeInitialBounds = null;
+                      _smartShapeCenter = null;
+                      _shapeDragStartPoint = null;
+
+                      _checkAndAnimatePanToSafeZone();
+
+                      if ((_activeTool == 'pen' || _activeTool == 'shapes') && _activeStroke != null && note != null) {
+                        final simplifiedPoints = (wasShapeSnapped || _activeTool == 'shapes' || shapeCachedPath != null)
+                            ? _activeStroke!.points
+                            : InkStroke.simplifyRDP(_activeStroke!.points, 0.35 / _zoomScale);
                         
                         if (simplifiedPoints.isNotEmpty) {
                           double minX = double.infinity, minY = double.infinity;
@@ -747,13 +1337,13 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> {
                             if (p.point.dx > maxX) maxX = p.point.dx;
                             if (p.point.dy > maxY) maxY = p.point.dy;
                           }
-                          // Padding básico para strokeWidth e possíveis marca-textos
                           final double padding = _activeStroke!.strokeWidth * 2;
                           final boundingBox = Rect.fromLTRB(minX - padding, minY - padding, maxX + padding, maxY + padding);
 
-                          // Pré-compilar caminho otimizado para não recalcular durante Pan e Zoom
                           final Path cachedPath;
-                          if (_activeStroke!.toolType == InkToolType.fountain || _activeStroke!.enablePressure) {
+                          if (shapeCachedPath != null) {
+                            cachedPath = shapeCachedPath;
+                          } else if (_activeStroke!.toolType == InkToolType.fountain || _activeStroke!.enablePressure) {
                             cachedPath = FreehandOutlineRenderer.generateOutlinePath(
                               simplifiedPoints,
                               baseWidth: _activeStroke!.strokeWidth,
@@ -774,7 +1364,6 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> {
                             cachedPath: cachedPath,
                           );
 
-                          // Sincroniza o traço com o motor Rust Nativo (Spatial Index & Undo)
                           final nativeDocId = note.nativeDocId;
                           if (nativeDocId != null && nativeDocId.isNotEmpty) {
                             ConnotesNativeBridge.instance.addStroke(
@@ -808,26 +1397,143 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> {
                       } else if (_activeTool == 'select' && _selectionStartCanvasPoint != null && note != null) {
                         final canvasPoint = (event.localPosition - _panOffset) / _zoomScale;
 
+                        // 1. Concluir Transformação (Redimensionar / Rotacionar)
+                        if (_selectionState.isTransforming) {
+                          final rotation = _selectionState.rotationAngle;
+                          final transformBounds = _selectionState.transformBounds;
+                          final bounds = _selectionState.bounds!;
+                          final isResizing = transformBounds != null &&
+                              _selectionState.activeHandle != SelectionHandleType.rotation &&
+                              _selectionState.activeHandle != SelectionHandleType.none;
+                          final pivot = _selectionState.transformPivot ?? bounds.center;
+
+                          if (isResizing || rotation != 0.0) {
+                            final originalStrokes = <InkStroke>[];
+                            final updatedStrokes = <InkStroke>[];
+                            final cosA = math.cos(rotation);
+                            final sinA = math.sin(rotation);
+
+                            final double scaleX = isResizing ? (transformBounds.width / bounds.width) : 1.0;
+                            final double scaleY = isResizing ? (transformBounds.height / bounds.height) : 1.0;
+
+                            for (final id in _selectionState.selectedStrokeIds) {
+                              final s = note.getStroke(id);
+                              if (s != null) {
+                                final newPoints = <StrokePoint>[];
+
+                                for (final p in s.points) {
+                                  final localP = p.point + s.transform;
+                                  final double newX;
+                                  final double newY;
+
+                                  if (isResizing) {
+                                    // Mapeamento afim direto 1:1 de bounds -> transformBounds
+                                    final u = (localP.dx - bounds.left) / bounds.width;
+                                    final v = (localP.dy - bounds.top) / bounds.height;
+                                    newX = transformBounds.left + u * transformBounds.width;
+                                    newY = transformBounds.top + v * transformBounds.height;
+                                  } else {
+                                    // Rotação em torno do centro do Bounding Box
+                                    final dx = localP.dx - pivot.dx;
+                                    final dy = localP.dy - pivot.dy;
+                                    newX = pivot.dx + dx * cosA - dy * sinA;
+                                    newY = pivot.dy + dx * sinA + dy * cosA;
+                                  }
+
+                                  newPoints.add(StrokePoint(
+                                    point: Offset(newX, newY),
+                                    pressure: p.pressure,
+                                  ));
+                                }
+
+                                final newStrokeWidth = (s.strokeWidth * math.sqrt(scaleX * scaleY)).clamp(0.5, 50.0);
+                                final newBounds = SelectionGeometry.computePointsBounds(newPoints, newStrokeWidth);
+
+                                final Path newCachedPath;
+                                if (s.toolType == InkToolType.fountain || s.enablePressure) {
+                                  newCachedPath = FreehandOutlineRenderer.generateOutlinePath(
+                                    newPoints,
+                                    baseWidth: newStrokeWidth,
+                                    isTapered: s.toolType == InkToolType.fountain,
+                                  );
+                                } else {
+                                  newCachedPath = InkStroke.buildCatmullRomPath(newPoints);
+                                }
+
+                                final transformedStroke = InkStroke(
+                                  id: s.id,
+                                  points: newPoints,
+                                  color: s.color,
+                                  strokeWidth: newStrokeWidth,
+                                  toolType: s.toolType,
+                                  enablePressure: s.enablePressure,
+                                  boundingBox: newBounds,
+                                  cachedPath: newCachedPath,
+                                );
+
+                                originalStrokes.add(s);
+                                updatedStrokes.add(transformedStroke);
+                              }
+                            }
+
+                            _undoManager.pushCommand(
+                              MoveStrokesCommand(
+                                originalStrokes: originalStrokes,
+                                updatedStrokes: updatedStrokes,
+                              ),
+                              execute: true,
+                              note: note,
+                            );
+                          }
+
+                          final newCombinedBounds = isResizing
+                              ? transformBounds
+                              : SelectionGeometry.computeCombinedBounds(
+                                  _selectionState.selectedStrokeIds
+                                      .map((id) => note.getStroke(id))
+                                      .whereType<InkStroke>()
+                                      .toList(),
+                                );
+
+                          setState(() {
+                            _strokesVersion++;
+                            _committedStrokesNotifier.value++;
+                            _selectionState = _selectionState.copyWith(
+                              activeHandle: SelectionHandleType.none,
+                              rotationAngle: 0.0,
+                              scaleX: 1.0,
+                              scaleY: 1.0,
+                              clearTransformBounds: true,
+                              clearTransformPivot: true,
+                              bounds: newCombinedBounds,
+                            );
+                            _dragPictureCache.invalidate();
+                            _selectionStartCanvasPoint = null;
+                            _selectionUpdateNotifier.value++;
+                          });
+                          return;
+                        }
+
+                        // 2. Concluir Arraste (Mover)
                         if (_selectionState.isDraggingSelection) {
                           final delta = _selectionState.dragOffset;
                           if (delta != Offset.zero) {
                             final originalStrokes = <InkStroke>[];
                             final updatedStrokes = <InkStroke>[];
 
-                            // Coletar traços movidos usando Otimização Flyweight (0 alocações)
                             for (final id in _selectionState.selectedStrokeIds) {
                               final s = note.getStroke(id);
                               if (s != null) {
                                 final updatedStroke = InkStroke(
                                   id: s.id,
-                                  points: s.points, // Flyweight (compartilha)
-                                  transform: s.transform + delta, // Apenas desloca o vetor visual!
+                                  points: s.points,
+                                  transform: s.transform + delta,
                                   color: s.color,
                                   strokeWidth: s.strokeWidth,
                                   toolType: s.toolType,
                                   enablePressure: s.enablePressure,
                                   boundingBox: s.boundingBox?.shift(delta),
-                                  cachedPath: s.cachedPath, // Flyweight (compartilha)
+                                  cachedPath: s.cachedPath,
                                   cachedRawPoints: s.cachedRawPoints,
                                 );
 
@@ -855,6 +1561,7 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> {
                               dragOffset: Offset.zero,
                               bounds: newBounds,
                             );
+                            _dragPictureCache.invalidate();
                             _selectionStartCanvasPoint = null;
                             _selectionUpdateNotifier.value++;
                           });
@@ -963,14 +1670,22 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> {
                           },
                         ),
 
-                        // Camada 2: Traços Comitados (Samsung Notes Baking Model O(1) Chunks 1024x1024)
+                        // Camada 2: Traços Comitados (Acelerada via Grid Sub-Chunks & Texturas D3D11 O(1))
                         if (note != null)
                           ListenableBuilder(
-                            listenable: Listenable.merge([_panNotifier, _zoomNotifier, _isInteractingNotifier, _committedStrokesNotifier]),
+                            listenable: Listenable.merge([
+                              _panNotifier,
+                              _zoomNotifier,
+                              _activeStrokeUpdateNotifier,
+                              _isInteractingNotifier,
+                              _committedStrokesNotifier,
+                              _selectionUpdateNotifier,
+                            ]),
                             builder: (context, _) {
                               final pan = _panNotifier.value;
                               final zoom = _zoomNotifier.value;
                               final isInteracting = _isInteractingNotifier.value;
+                              final hideSelected = _selectionState.isDraggingSelection || _selectionState.isTransforming;
                               return RepaintBoundary(
                                 child: CustomPaint(
                                   size: Size.infinite,
@@ -980,7 +1695,7 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> {
                                     strokes: note.strokes,
                                     strokesCount: note.strokes.length,
                                     strokesVersion: _strokesVersion,
-                                    hiddenStrokeIds: _selectionState.isDraggingSelection
+                                    hiddenStrokeIds: hideSelected
                                         ? _selectionState.selectedStrokeIds
                                         : null,
                                     panOffset: pan,
@@ -1075,6 +1790,45 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> {
                               );
                             },
                           ),
+
+                        // Camada 6: Rastro Incandescente do Laser Pointer (Efêmero 144Hz)
+                        RepaintBoundary(
+                          child: CustomPaint(
+                            size: Size.infinite,
+                            painter: LaserPointerPainter(
+                              engine: _laserEngine,
+                              panOffset: _panOffset,
+                              zoomScale: _zoomScale,
+                            ),
+                          ),
+                        ),
+
+                        // Camada 7: Régua STEM Interativa (Fase 5.1 - Vidro Líquido Moscaro com Guias de Precisão)
+                        if (_rulerState.isVisible)
+                          ListenableBuilder(
+                            listenable: Listenable.merge([_panNotifier, _zoomNotifier, _rulerUpdateNotifier]),
+                            builder: (context, _) {
+                              final pan = _panNotifier.value;
+                              final zoom = _zoomNotifier.value;
+                              return StemRulerWidget(
+                                state: _rulerState,
+                                panOffset: pan,
+                                zoomScale: zoom,
+                                onStateChanged: (newState) {
+                                  setState(() {
+                                    _rulerState = newState;
+                                  });
+                                  _rulerUpdateNotifier.value++;
+                                },
+                                onClose: () {
+                                  setState(() {
+                                    _rulerState = _rulerState.copyWith(isVisible: false);
+                                  });
+                                  _rulerUpdateNotifier.value++;
+                                },
+                              );
+                            },
+                          ),
                       ],
                     ),
                   ),
@@ -1084,12 +1838,16 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> {
               // 2. Barra de Ações Rápidas da Seleção (Flutuante sobre a Bounding Box)
               if (_selectionState.hasSelection && _currentNote != null)
                 Positioned(
-                  top: math.max(16, _selectionState.bounds!.top * _zoomScale + _panOffset.dy - 60),
-                  left: math.max(16, (_selectionState.bounds!.center.dx * _zoomScale + _panOffset.dx) - 80),
+                  top: math.max(16, _selectionState.bounds!.top * _zoomScale + _panOffset.dy - 50),
+                  left: math.max(16, (_selectionState.bounds!.center.dx * _zoomScale + _panOffset.dx) - 95),
                   child: SelectionActionBar(
                     availableColors: _penSlots.map((s) => s.color).toSet().toList(),
                     onDuplicate: _duplicateSelectedStrokes,
                     onChangeColor: _changeSelectedStrokesColor,
+                    onRotate90: () => _rotateSelectedStrokesBy(math.pi / 2.0),
+                    onRotatePanStart: _onRotatePanStart,
+                    onRotatePanUpdate: _onRotatePanUpdate,
+                    onRotatePanEnd: _onRotatePanEnd,
                     onDelete: _deleteSelectedStrokes,
                     onDeselect: _deselect,
                   ),
@@ -1158,114 +1916,184 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> {
                 ),
               ),
 
-              // 5. Sub-Barra Flutuante de Slots de Canetas (com Drag & Drop)
-              Positioned(
-                bottom: 96,
-                left: _isSidebarOpen ? 348 : 0,
-                right: 0,
-                child: Center(
-                  child: PenSlotsSubBar(
-                    isVisible: _activeTool == 'pen' && _isPenSubBarVisible,
-                    presets: _penSlots,
-                    activePresetId: _activeSlotId,
-                    onSelectPreset: (preset) {
+              // 4.5 Barreira transparente para fechar o Menu do Grid ao clicar fora
+              if (_isGridMenuOpen)
+                Positioned.fill(
+                  child: GestureDetector(
+                    behavior: HitTestBehavior.translucent,
+                    onTap: () {
                       setState(() {
-                        _activeSlotId = preset.id;
-                        _activeTool = 'pen';
-                        _selectionState = SelectionState.empty();
+                        _isGridMenuOpen = false;
                       });
                     },
-                    onUpdatePreset: (updated) {
-                      setState(() {
-                        final idx = _penSlots.indexWhere((s) => s.id == updated.id);
-                        if (idx != -1) {
-                          _penSlots[idx] = updated;
-                        }
-                      });
-                    },
-                    onReorderSlots: (oldIndex, newIndex) {
-                      setState(() {
-                        final item = _penSlots.removeAt(oldIndex);
-                        _penSlots.insert(newIndex, item);
-                      });
-                    },
-                    onAddNewSlot: () {
-                      final newId = DateTime.now().millisecondsSinceEpoch.toString();
-                      final newSlot = PenSlotPreset(
-                        id: newId,
-                        name: 'Slot ${_penSlots.length + 1}',
-                        color: MoscaroTokens.stemPalette[_penSlots.length % MoscaroTokens.stemPalette.length],
-                        strokeWidth: 3.0,
-                        toolType: InkToolType.technical,
-                        enablePressure: false,
-                      );
-                      setState(() {
-                        _penSlots.add(newSlot);
-                        _activeSlotId = newId;
-                        _activeTool = 'pen';
-                        _selectionState = SelectionState.empty();
-                      });
-                    },
-                    onDeleteSlot: (slotId) {
-                      setState(() {
-                        _penSlots.removeWhere((s) => s.id == slotId);
-                        if (_activeSlotId == slotId && _penSlots.isNotEmpty) {
-                          _activeSlotId = _penSlots.first.id;
-                        }
-                      });
-                    },
+                    child: Container(color: Colors.transparent),
                   ),
                 ),
-              ),
 
-              // 6. Sub-Barra Flutuante de Seleção (Retângulo vs Laço)
-              Positioned(
-                bottom: 96,
-                left: _isSidebarOpen ? 348 : 0,
-                right: 0,
-                child: Center(
-                  child: SelectionSubBar(
-                    isVisible: _activeTool == 'select',
-                    activeType: _selectionType,
-                    onSelectType: (newType) {
-                      setState(() {
-                        _selectionType = newType;
-                        _selectionState = SelectionState.empty();
-                      });
-                    },
-                  ),
-                ),
-              ),
+              // 5. Sub-Barras Flutuantes e Menu do Grid Unificados em Row com AnimatedSize (Zero Sobreposição Garantida)
+              if ((_activeTool == 'pen' && _isPenSubBarVisible) ||
+                  _activeTool == 'select' ||
+                  _activeTool == 'eraser' ||
+                  _activeTool == 'shapes' ||
+                  _isGridMenuOpen)
+                Positioned(
+                  bottom: 96,
+                  left: _isSidebarOpen ? 348 : 0,
+                  right: 0,
+                  child: Center(
+                    child: AnimatedSize(
+                      duration: const Duration(milliseconds: 250),
+                      curve: Curves.easeOutCubic,
+                      alignment: Alignment.bottomCenter,
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.end,
+                        children: [
+                          // 1. Sub-Barra de Slots de Caneta
+                          if (_activeTool == 'pen' && _isPenSubBarVisible)
+                            PenSlotsSubBar(
+                              isVisible: true,
+                              presets: _penSlots,
+                              activePresetId: _activeSlotId,
+                              onSelectPreset: (preset) {
+                                setState(() {
+                                  _activeSlotId = preset.id;
+                                  _activeTool = 'pen';
+                                  _selectionState = SelectionState.empty();
+                                });
+                              },
+                              onUpdatePreset: (updated) {
+                                setState(() {
+                                  final idx = _penSlots.indexWhere((s) => s.id == updated.id);
+                                  if (idx != -1) {
+                                    _penSlots[idx] = updated;
+                                  }
+                                });
+                              },
+                              onReorderSlots: (oldIndex, newIndex) {
+                                setState(() {
+                                  final item = _penSlots.removeAt(oldIndex);
+                                  _penSlots.insert(newIndex, item);
+                                });
+                              },
+                              onAddNewSlot: () {
+                                final newId = DateTime.now().millisecondsSinceEpoch.toString();
+                                final newSlot = PenSlotPreset(
+                                  id: newId,
+                                  name: 'Slot ${_penSlots.length + 1}',
+                                  color: MoscaroTokens.stemPalette[_penSlots.length % MoscaroTokens.stemPalette.length],
+                                  strokeWidth: 3.0,
+                                  toolType: InkToolType.technical,
+                                  enablePressure: false,
+                                );
+                                setState(() {
+                                  _penSlots.add(newSlot);
+                                  _activeSlotId = newId;
+                                  _activeTool = 'pen';
+                                  _selectionState = SelectionState.empty();
+                                });
+                              },
+                              onDeleteSlot: (slotId) {
+                                setState(() {
+                                  _penSlots.removeWhere((s) => s.id == slotId);
+                                  if (_activeSlotId == slotId && _penSlots.isNotEmpty) {
+                                    _activeSlotId = _penSlots.first.id;
+                                  }
+                                });
+                              },
+                            ),
 
-              // 6.5 Sub-Barra Flutuante da Borracha (Traço vs Precisão, Sliders & Presets)
-              Positioned(
-                bottom: 96,
-                left: _isSidebarOpen ? 348 : 0,
-                right: 0,
-                child: Center(
-                  child: EraserSubBar(
-                    isVisible: _activeTool == 'eraser',
-                    activeMode: _eraserConfig.mode,
-                    radius: _eraserConfig.radius,
-                    eraseHighlighterOnly: _eraserConfig.eraseHighlighterOnly,
-                    onSelectMode: (mode) {
-                      setState(() {
-                        _eraserConfig = _eraserConfig.copyWith(mode: mode);
-                      });
-                    },
-                    onChangeRadius: (rad) {
-                      setState(() {
-                        _eraserConfig = _eraserConfig.copyWith(radius: rad);
-                      });
-                    },
-                    onToggleHighlighterOnly: (val) {
-                      setState(() {
-                        _eraserConfig = _eraserConfig.copyWith(eraseHighlighterOnly: val);
-                      });
-                    },
+                          // 2. Sub-Barra de Seleção
+                          if (_activeTool == 'select')
+                            SelectionSubBar(
+                              isVisible: true,
+                              activeType: _selectionType,
+                              onSelectType: (newType) {
+                                setState(() {
+                                  _selectionType = newType;
+                                  _selectionState = SelectionState.empty();
+                                });
+                              },
+                            ),
+
+                          // 3. Sub-Barra da Borracha
+                          if (_activeTool == 'eraser')
+                            EraserSubBar(
+                              isVisible: true,
+                              activeMode: _eraserConfig.mode,
+                              radius: _eraserConfig.radius,
+                              eraseHighlighterOnly: _eraserConfig.eraseHighlighterOnly,
+                              onSelectMode: (mode) {
+                                setState(() {
+                                  _eraserConfig = _eraserConfig.copyWith(mode: mode);
+                                });
+                              },
+                              onChangeRadius: (rad) {
+                                setState(() {
+                                  _eraserConfig = _eraserConfig.copyWith(radius: rad);
+                                });
+                              },
+                              onToggleHighlighterOnly: (val) {
+                                setState(() {
+                                  _eraserConfig = _eraserConfig.copyWith(eraseHighlighterOnly: val);
+                                });
+                              },
+                            ),
+
+                          // 4. Sub-Barra de Formas Geométricas
+                          if (_activeTool == 'shapes')
+                            ShapesSubBar(
+                              isVisible: true,
+                              activeShape: _activeShapeType,
+                              onSelectShape: (shape) {
+                                setState(() {
+                                  _activeShapeType = shape;
+                                });
+                              },
+                            ),
+
+                          // Espaçador dinâmico entre a Sub-Barra ativa e o Menu do Grid
+                          if (((_activeTool == 'pen' && _isPenSubBarVisible) ||
+                                  _activeTool == 'select' ||
+                                  _activeTool == 'eraser' ||
+                                  _activeTool == 'shapes') &&
+                              _isGridMenuOpen)
+                            const SizedBox(width: 14),
+
+                          // 5. Menu Flutuante de Fundo / Grid com Animação Fluida Pop & Fade
+                          AnimatedSwitcher(
+                            duration: const Duration(milliseconds: 240),
+                            reverseDuration: const Duration(milliseconds: 180),
+                            switchInCurve: Curves.easeOutBack,
+                            switchOutCurve: Curves.easeInCubic,
+                            transitionBuilder: (child, animation) {
+                              return FadeTransition(
+                                opacity: animation,
+                                child: ScaleTransition(
+                                  scale: Tween<double>(begin: 0.88, end: 1.0).animate(animation),
+                                  alignment: Alignment.bottomRight,
+                                  child: child,
+                                ),
+                              );
+                            },
+                            child: _isGridMenuOpen
+                                ? GridMenuCard(
+                                    key: const ValueKey('grid_menu_open'),
+                                    currentBackground: _currentBackground,
+                                    onSelectBackground: (newBg) {
+                                      setState(() {
+                                        _currentBackground = newBg;
+                                        _isGridMenuOpen = false;
+                                      });
+                                    },
+                                  )
+                                : const SizedBox.shrink(key: ValueKey('grid_menu_closed')),
+                          ),
+                        ],
+                      ),
+                    ),
                   ),
                 ),
-              ),
 
               // 7. Barra de Ferramentas / ToolbarPill (Inferior)
               Positioned(
@@ -1278,13 +2106,34 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> {
                     isAIOpen: _isAIOpen,
                     isPenActive: _activeTool == 'pen',
                     isEraserActive: _activeTool == 'eraser',
+                    isShapesActive: _activeTool == 'shapes',
                     isSelectActive: _activeTool == 'select',
+                    isLaserActive: _activeTool == 'laser',
+                    isRulerActive: _rulerState.isVisible,
                     selectionType: _selectionType,
                     activePenPreset: _activePenPreset,
                     canUndo: canUndo,
                     canRedo: canRedo,
                     onUndo: _undo,
                     onRedo: _redo,
+                    isGridMenuOpen: _isGridMenuOpen,
+                    onToggleGridMenu: () {
+                      setState(() {
+                        _isGridMenuOpen = !_isGridMenuOpen;
+                      });
+                    },
+                    onToggleRuler: () {
+                      setState(() {
+                        final isNowVisible = !_rulerState.isVisible;
+                        // Ao abrir, posiciona a régua no centro da tela visível atual
+                        final viewportCenter = (-_panOffset + Offset(MediaQuery.of(context).size.width / 2, MediaQuery.of(context).size.height / 2)) / _zoomScale;
+                        _rulerState = _rulerState.copyWith(
+                          isVisible: isNowVisible,
+                          center: isNowVisible ? viewportCenter : null,
+                        );
+                      });
+                      _rulerUpdateNotifier.value++;
+                    },
                     onBackgroundChanged: (newBg) {
                       setState(() {
                         _currentBackground = newBg;
@@ -1304,10 +2153,24 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> {
                         _selectionState = SelectionState.empty();
                       });
                     },
+                    onSelectShapes: () {
+                      setState(() {
+                        _activeTool = 'shapes';
+                        _isPenSubBarVisible = false;
+                        _selectionState = SelectionState.empty();
+                      });
+                    },
                     onSelectTool: () {
                       setState(() {
                         _activeTool = 'select';
                         _isPenSubBarVisible = false;
+                      });
+                    },
+                    onSelectLaser: () {
+                      setState(() {
+                        _activeTool = 'laser';
+                        _isPenSubBarVisible = false;
+                        _selectionState = SelectionState.empty();
                       });
                     },
                     onToggleAI: () {

@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import '../theme/moscaro_v2_tokens.dart';
 import 'canvas_dot_grid_painter.dart';
 import 'svg_icon.dart';
-import 'moscaro_dropdown_button.dart';
 import 'ink_models.dart';
 import 'selection_models.dart';
 
@@ -12,8 +11,10 @@ class ToolbarPill extends StatefulWidget {
   final ValueChanged<CanvasBackgroundType> onBackgroundChanged;
   final VoidCallback onSelectPen;
   final VoidCallback onSelectEraser;
+  final VoidCallback onSelectShapes;
   final VoidCallback onSelectTool;
   final bool isSelectActive;
+  final bool isShapesActive;
   final SelectionType selectionType;
   final VoidCallback onToggleAI;
   final bool isAIOpen;
@@ -24,6 +25,12 @@ class ToolbarPill extends StatefulWidget {
   final VoidCallback onRedo;
   final bool canUndo;
   final bool canRedo;
+  final bool isLaserActive;
+  final VoidCallback onSelectLaser;
+  final bool isRulerActive;
+  final VoidCallback onToggleRuler;
+  final bool isGridMenuOpen;
+  final VoidCallback onToggleGridMenu;
 
   const ToolbarPill({
     super.key,
@@ -31,8 +38,14 @@ class ToolbarPill extends StatefulWidget {
     required this.onBackgroundChanged,
     required this.onSelectPen,
     required this.onSelectEraser,
+    required this.onSelectShapes,
     required this.onSelectTool,
     required this.isSelectActive,
+    this.isShapesActive = false,
+    this.isLaserActive = false,
+    required this.onSelectLaser,
+    this.isRulerActive = false,
+    required this.onToggleRuler,
     required this.selectionType,
     required this.onToggleAI,
     required this.isAIOpen,
@@ -43,6 +56,8 @@ class ToolbarPill extends StatefulWidget {
     required this.onRedo,
     required this.canUndo,
     required this.canRedo,
+    this.isGridMenuOpen = false,
+    required this.onToggleGridMenu,
   });
 
   @override
@@ -104,7 +119,7 @@ class _ToolbarPillState extends State<ToolbarPill> {
                 shape: BoxShape.circle,
                 border: Border.all(color: Colors.white, width: 1.0),
                 boxShadow: [
-                  BoxShadow(color: widget.activePenPreset.color.withOpacity(0.6), blurRadius: 4),
+                  BoxShadow(color: widget.activePenPreset.color.withValues(alpha: 0.6), blurRadius: 4),
                 ],
               ),
             ),
@@ -123,6 +138,17 @@ class _ToolbarPillState extends State<ToolbarPill> {
         ),
         const SizedBox(width: 4),
 
+        // 4.5. Formas Geométricas / Smart Shapes (SVG)
+        _buildHoverIconButton(
+          index: 5,
+          assetName: 'shapes',
+          tooltip: 'Formas Geométricas',
+          onPressed: widget.onSelectShapes,
+          iconSize: iconSize,
+          customActiveColor: widget.isShapesActive ? MoscaroTokens.auroraPurple : null,
+        ),
+        const SizedBox(width: 4),
+
         // 5. Ferramenta de Seleção (SVG)
         _buildHoverIconButton(
           index: 4,
@@ -132,48 +158,46 @@ class _ToolbarPillState extends State<ToolbarPill> {
           iconSize: iconSize,
           customActiveColor: widget.isSelectActive ? MoscaroTokens.auroraBlue : null,
         ),
-        const SizedBox(width: 8),
-        Container(width: 1, height: 20, color: Colors.white24),
-        const SizedBox(width: 8),
+        const SizedBox(width: 4),
 
-        // 5. Grid / Fundo (SVG)
-        MouseRegion(
-          onEnter: (_) => setState(() => _hoveredIndex = 2),
-          onExit: (_) => setState(() => _hoveredIndex = -1),
-          child: MoscaroDropdownButton<CanvasBackgroundType>(
-            tooltip: 'Fundo do Canvas',
-            icon: SvgIcon(
-              assetName: 'grid',
-              size: iconSize,
-              color: _hoveredIndex == 2 ? MoscaroTokens.auroraBlue : Colors.white,
-            ),
-            dropdownWidth: 200,
-            onSelected: widget.onBackgroundChanged,
-            items: const [
-              MoscaroDropdownItem(
-                value: CanvasBackgroundType.dotGrid,
-                child: Text('Dot Grid (com Glow)', style: TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w500)),
-              ),
-              MoscaroDropdownItem(
-                value: CanvasBackgroundType.isometric,
-                child: Text('Isométrico (STEM 3D)', style: TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w500)),
-              ),
-              MoscaroDropdownItem(
-                value: CanvasBackgroundType.pautado,
-                child: Text('Pautado (Notebook)', style: TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w500)),
-              ),
-              MoscaroDropdownItem(
-                value: CanvasBackgroundType.emBranco,
-                child: Text('Em Branco (Blank)', style: TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w500)),
-              ),
-            ],
-          ),
+        // 5.5. Ponteiro Laser (SVG)
+        _buildHoverIconButton(
+          index: 6,
+          assetName: 'laser',
+          tooltip: 'Ponteiro Laser (Apresentação)',
+          onPressed: widget.onSelectLaser,
+          iconSize: iconSize,
+          customActiveColor: widget.isLaserActive ? const Color(0xFFFF0055) : null,
+        ),
+        const SizedBox(width: 4),
+
+        // 5.6. Régua STEM Interativa (SVG)
+        _buildHoverIconButton(
+          index: 7,
+          assetName: 'ruler',
+          tooltip: 'Régua STEM (Fita Métrica e Guia)',
+          onPressed: widget.onToggleRuler,
+          iconSize: iconSize,
+          customActiveColor: widget.isRulerActive ? MoscaroTokens.auroraBlue : null,
         ),
         const SizedBox(width: 8),
         Container(width: 1, height: 20, color: Colors.white24),
         const SizedBox(width: 8),
 
-        // 6. Botão IA (SVG)
+        // 6. Grid / Fundo (SVG)
+        _buildHoverIconButton(
+          index: 2,
+          assetName: 'grid',
+          tooltip: 'Fundo do Canvas',
+          onPressed: widget.onToggleGridMenu,
+          iconSize: iconSize,
+          customActiveColor: widget.isGridMenuOpen ? MoscaroTokens.auroraBlue : null,
+        ),
+        const SizedBox(width: 8),
+        Container(width: 1, height: 20, color: Colors.white24),
+        const SizedBox(width: 8),
+
+        // 7. Botão IA (SVG)
         _buildHoverIconButton(
           index: 3,
           assetName: 'ai',

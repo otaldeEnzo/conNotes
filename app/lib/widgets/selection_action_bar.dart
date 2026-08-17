@@ -9,6 +9,10 @@ class SelectionActionBar extends StatefulWidget {
   final List<Color> availableColors;
   final VoidCallback onDuplicate;
   final ValueChanged<Color> onChangeColor;
+  final VoidCallback onRotate90;
+  final GestureDragStartCallback? onRotatePanStart;
+  final GestureDragUpdateCallback? onRotatePanUpdate;
+  final GestureDragEndCallback? onRotatePanEnd;
   final VoidCallback onDelete;
   final VoidCallback onDeselect;
 
@@ -17,6 +21,10 @@ class SelectionActionBar extends StatefulWidget {
     required this.availableColors,
     required this.onDuplicate,
     required this.onChangeColor,
+    required this.onRotate90,
+    this.onRotatePanStart,
+    this.onRotatePanUpdate,
+    this.onRotatePanEnd,
     required this.onDelete,
     required this.onDeselect,
   });
@@ -54,9 +62,9 @@ class _SelectionActionBarState extends State<SelectionActionBar> {
                     decoration: BoxDecoration(
                       color: color,
                       shape: BoxShape.circle,
-                      border: Border.all(color: Colors.white.withOpacity(0.85), width: 1.5),
+                      border: Border.all(color: Colors.white.withValues(alpha: 0.85), width: 1.5),
                       boxShadow: [
-                        BoxShadow(color: color.withOpacity(0.45), blurRadius: 6),
+                        BoxShadow(color: color.withValues(alpha: 0.45), blurRadius: 6),
                       ],
                     ),
                   ),
@@ -97,10 +105,14 @@ class _SelectionActionBarState extends State<SelectionActionBar> {
               ),
               const SizedBox(width: 4),
 
+              // 3. Rotação (Clique: +90° | Arrastar: 360° Livre)
+              _buildRotationButton(),
+              const SizedBox(width: 4),
+
               Container(width: 1, height: 16, color: Colors.white24),
               const SizedBox(width: 4),
 
-              // 3. Deletar
+              // 4. Deletar
               _buildActionButton(
                 assetName: 'trash',
                 tooltip: 'Excluir Traços (Delete)',
@@ -114,6 +126,36 @@ class _SelectionActionBarState extends State<SelectionActionBar> {
           padding: EdgeInsets.zero,
         ),
       ],
+    );
+  }
+
+  Widget _buildRotationButton() {
+    return Tooltip(
+      message: 'Girar (Clique: 90° | Arraste: Livre)',
+      child: GestureDetector(
+        onPanStart: widget.onRotatePanStart,
+        onPanUpdate: widget.onRotatePanUpdate,
+        onPanEnd: widget.onRotatePanEnd,
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
+            borderRadius: BorderRadius.circular(20),
+            onTap: widget.onRotate90,
+            child: Container(
+              padding: const EdgeInsets.all(7),
+              decoration: const BoxDecoration(
+                shape: BoxShape.circle,
+                color: Colors.transparent,
+              ),
+              child: const SvgIcon(
+                assetName: 'rotate',
+                size: 18,
+                color: Colors.white70,
+              ),
+            ),
+          ),
+        ),
+      ),
     );
   }
 
@@ -135,7 +177,7 @@ class _SelectionActionBarState extends State<SelectionActionBar> {
             padding: const EdgeInsets.all(7),
             decoration: BoxDecoration(
               shape: BoxShape.circle,
-              color: isActive ? MoscaroTokens.auroraBlue.withOpacity(0.2) : Colors.transparent,
+              color: isActive ? MoscaroTokens.auroraBlue.withValues(alpha: 0.2) : Colors.transparent,
             ),
             child: SvgIcon(
               assetName: assetName,

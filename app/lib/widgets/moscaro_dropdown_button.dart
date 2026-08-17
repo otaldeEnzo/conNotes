@@ -9,6 +9,9 @@ class MoscaroDropdownButton<T> extends StatefulWidget {
   final List<MoscaroDropdownItem<T>> items;
   final ValueChanged<T> onSelected;
   final double dropdownWidth;
+  final ValueChanged<bool>? onOpenChanged;
+  final double? customBottom;
+  final double? customLeft;
 
   const MoscaroDropdownButton({
     super.key,
@@ -17,6 +20,9 @@ class MoscaroDropdownButton<T> extends StatefulWidget {
     required this.items,
     required this.onSelected,
     this.dropdownWidth = 180.0,
+    this.onOpenChanged,
+    this.customBottom,
+    this.customLeft,
   });
 
   @override
@@ -33,9 +39,9 @@ class _MoscaroDropdownButtonState<T> extends State<MoscaroDropdownButton<T>> {
     final buttonOffset = renderBox.localToGlobal(Offset.zero);
     final buttonSize = renderBox.size;
 
-    // Centraliza o dropdown horizontalmente com o botão ativador
-    // centralização: (posição_X_do_botão) - (metade_da_largura_do_dropdown) + (metade_da_largura_do_botão)
-    final double dropdownLeft = buttonOffset.dx - (widget.dropdownWidth / 2) + (buttonSize.width / 2);
+    // Centraliza o dropdown horizontalmente com o botão ativador caso customLeft não seja informado
+    final double dropdownLeft = widget.customLeft ?? (buttonOffset.dx - (widget.dropdownWidth / 2) + (buttonSize.width / 2));
+    final double dropdownBottom = widget.customBottom ?? (MediaQuery.of(context).size.height - buttonOffset.dy + 8);
 
     _overlayEntry = OverlayEntry(
       builder: (context) => Stack(
@@ -51,7 +57,7 @@ class _MoscaroDropdownButtonState<T> extends State<MoscaroDropdownButton<T>> {
           // O Dropdown flutuante em Vidro Moscaro
           Positioned(
             left: dropdownLeft,
-            bottom: MediaQuery.of(context).size.height - buttonOffset.dy + 8, // Flutua 8px acima do botão
+            bottom: dropdownBottom,
             child: Material(
               color: Colors.transparent,
               child: Container(
@@ -98,11 +104,15 @@ class _MoscaroDropdownButtonState<T> extends State<MoscaroDropdownButton<T>> {
     );
 
     Overlay.of(context).insert(_overlayEntry!);
+    widget.onOpenChanged?.call(true);
   }
 
   void _closeDropdown() {
-    _overlayEntry?.remove();
-    _overlayEntry = null;
+    if (_overlayEntry != null) {
+      _overlayEntry?.remove();
+      _overlayEntry = null;
+      widget.onOpenChanged?.call(false);
+    }
   }
 
   @override

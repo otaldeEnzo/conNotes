@@ -83,12 +83,15 @@ class TileSubChunk {
     // Se algum traço deste chunk estiver oculto (ex: sendo movido ou apagado), desenha dinamicamente
     if (hiddenIds != null && strokes.any((s) => hiddenIds.contains(s.id))) {
       final paint = reusablePaint ?? Paint();
+      canvas.save();
+      canvas.translate(-tileX * StrokePictureCache.tileSize, -tileY * StrokePictureCache.tileSize);
       for (var i = 0; i < strokes.length; i++) {
         final s = strokes[i];
         if (!hiddenIds.contains(s.id)) {
           StrokePictureCache._drawSingleStroke(canvas, s, paint);
         }
       }
+      canvas.restore();
       return;
     }
 
@@ -519,7 +522,9 @@ class StrokePictureCache {
         ..strokeJoin = StrokeJoin.round
         ..style = PaintingStyle.stroke;
 
-      if (stroke.points.length > 50) {
+      if (stroke.cachedPath != null) {
+        canvas.drawPath(stroke.cachedPath!, reusablePaint);
+      } else if (stroke.points.length > 50) {
         canvas.drawRawPoints(ui.PointMode.polygon, stroke.rawPoints, reusablePaint);
       } else {
         stroke.cachedPath ??= _buildSmoothCatmullRomPath(stroke.points);
@@ -567,7 +572,7 @@ class StrokePictureCache {
   }
 }
 
-/// Gerador de contorno orgânico e caligráfico sem bugs de auto-interseção (ribbon segment quads).
+/// Gerador de contorno orgânico e caligráfico contínuo e suave (Continuous Ribbon Spline).
 class FreehandOutlineRenderer {
   static Path generateOutlinePath(List<StrokePoint> points, {
     required double baseWidth,
@@ -579,71 +584,119 @@ class FreehandOutlineRenderer {
 
     if (len == 1) {
       final p = points[0];
-      final r = (baseWidth * p.pressure.clamp(0.3, 1.5)) * 0.5;
-      path.addOval(Rect.fromCircle(center: p.point, radius: math.max(0.5, r)));
+      final r = (baseWidth * p.pressure.clamp(0.2, 1.8)) * 0.5;
+      path.addOval(Rect.fromCircle(center: p.point, radius: math.max(0.8, r)));
       return path;
     }
 
-    if (isTapered) {
-      // 1. Caneta Tinteiro / Caligráfica Chanfrada (Chiseled Nib a 45 graus)
-      final double angle = math.pi / 4.0; // 45°
-      final double cosA = math.cos(angle);
-      final double sinA = math.sin(angle);
-
-      for (int i = 0; i < len - 1; i++) {
-        final p0 = points[i].point;
-        final p1 = points[i + 1].point;
-
-        // Conicidade suave nas extremidades
-        double taper0 = 1.0;
-        double taper1 = 1.0;
-        if (i < 4) taper0 = ((i + 1) / 4.0).clamp(0.25, 1.0);
-        if (i + 1 > len - 5) taper1 = ((len - 1 - (i + 1)) / 4.0).clamp(0.25, 1.0);
-
-        final r0 = (baseWidth * 0.5 * points[i].pressure.clamp(0.4, 1.5) * taper0).clamp(0.5, baseWidth * 2.0);
-        final r1 = (baseWidth * 0.5 * points[i + 1].pressure.clamp(0.4, 1.5) * taper1).clamp(0.5, baseWidth * 2.0);
-
-        final nib0 = Offset(cosA * r0, sinA * r0);
-        final nib1 = Offset(cosA * r1, sinA * r1);
-
-        path.moveTo(p0.dx - nib0.dx, p0.dy - nib0.dy);
-        path.lineTo(p0.dx + nib0.dx, p0.dy + nib0.dy);
-        path.lineTo(p1.dx + nib1.dx, p1.dy + nib1.dy);
-        path.lineTo(p1.dx - nib1.dx, p1.dy - nib1.dy);
-        path.close();
-      }
-      return path;
-    }
-
-    // 2. Caneta de Pressão Orgânica com Quads Locais e Juntas Arredondadas
-    for (int i = 0; i < len - 1; i++) {
-      final p0 = points[i].point;
-      final p1 = points[i + 1].point;
+    if (len == 2) {
+      final p0 = points[0].point;
+      final p1 = points[1].point;
       final delta = p1 - p0;
       final dist = delta.distance;
-      if (dist < 0.001) continue;
-
+      if (dist < 0.001) {
+        path.addOval(Rect.fromCircle(center: p0, radius: baseWidth * 0.5));
+        return path;
+      }
       final normal = Offset(-delta.dy / dist, delta.dx / dist);
+      final r0 = (baseWidth * 0.5 * points[0].pressure.clamp(0.2, 1.8)).clamp(0.5, baseWidth * 2.0);
+      final r1 = (baseWidth * 0.5 * points[1].pressure.clamp(0.2, 1.8)).clamp(0.5, baseWidth * 2.0);
 
-      double taper0 = 1.0;
-      double taper1 = 1.0;
-      if (i < 4) taper0 = ((i + 1) / 4.0).clamp(0.2, 1.0);
-      if (i + 1 > len - 5) taper1 = ((len - 1 - (i + 1)) / 4.0).clamp(0.2, 1.0);
-
-      final r0 = (baseWidth * 0.5 * points[i].pressure.clamp(0.25, 1.6) * taper0).clamp(0.5, baseWidth * 2.0);
-      final r1 = (baseWidth * 0.5 * points[i + 1].pressure.clamp(0.25, 1.6) * taper1).clamp(0.5, baseWidth * 2.0);
-
-      path.moveTo(p0.dx - normal.dx * r0, p0.dy - normal.dy * r0);
-      path.lineTo(p0.dx + normal.dx * r0, p0.dy + normal.dy * r0);
+      path.moveTo(p0.dx + normal.dx * r0, p0.dy + normal.dy * r0);
       path.lineTo(p1.dx + normal.dx * r1, p1.dy + normal.dy * r1);
       path.lineTo(p1.dx - normal.dx * r1, p1.dy - normal.dy * r1);
+      path.lineTo(p0.dx - normal.dx * r0, p0.dy - normal.dy * r0);
       path.close();
-
       path.addOval(Rect.fromCircle(center: p0, radius: r0));
+      path.addOval(Rect.fromCircle(center: p1, radius: r1));
+      return path;
     }
-    final lastR = (baseWidth * 0.5 * points.last.pressure.clamp(0.25, 1.6) * 0.2).clamp(0.5, baseWidth);
-    path.addOval(Rect.fromCircle(center: points.last.point, radius: lastR));
 
+    // 1. Calcula normais e raios dinâmicos para cada ponto da coluna vertebral
+    final leftPoints = <Offset>[];
+    final rightPoints = <Offset>[];
+
+    for (int i = 0; i < len; i++) {
+      final curr = points[i].point;
+      Offset tangent;
+      if (i == 0) {
+        tangent = points[1].point - curr;
+      } else if (i == len - 1) {
+        tangent = curr - points[i - 1].point;
+      } else {
+        tangent = points[i + 1].point - points[i - 1].point;
+      }
+
+      final dist = tangent.distance;
+      Offset normal;
+      if (dist < 0.0001) {
+        normal = const Offset(0, 1);
+      } else {
+        normal = Offset(-tangent.dy / dist, tangent.dx / dist);
+      }
+
+      // Caneta tinteiro aplica modulação direcional a 45 graus
+      double angleMod = 1.0;
+      if (isTapered && dist >= 0.0001) {
+        final strokeAngle = math.atan2(tangent.dy, tangent.dx);
+        angleMod = (0.5 + 0.5 * math.cos(strokeAngle - math.pi / 4).abs()).clamp(0.35, 1.25);
+      }
+
+      // Conicidade suave nas pontas inicial e final (tapering natural)
+      double taper = 1.0;
+      const int taperCount = 5;
+      if (i < taperCount) {
+        taper = (i + 1) / (taperCount + 1);
+      } else if (i >= len - taperCount) {
+        taper = (len - i) / (taperCount + 1);
+      }
+      taper = taper.clamp(0.2, 1.0);
+
+      final double pFactor = points[i].pressure.clamp(0.15, 2.0);
+      final double radius = (baseWidth * 0.5 * pFactor * angleMod * taper).clamp(0.6, baseWidth * 2.5);
+
+      leftPoints.add(Offset(curr.dx + normal.dx * radius, curr.dy + normal.dy * radius));
+      rightPoints.add(Offset(curr.dx - normal.dx * radius, curr.dy - normal.dy * radius));
+    }
+
+    // 2. Constrói contorno de fita spline contínuo fechado
+    path.moveTo(leftPoints[0].dx, leftPoints[0].dy);
+
+    // Lado Esquerdo (Spline por pontos médios)
+    for (int i = 0; i < leftPoints.length - 1; i++) {
+      final p0 = leftPoints[i];
+      final p1 = leftPoints[i + 1];
+      final mid = Offset((p0.dx + p1.dx) / 2, (p0.dy + p1.dy) / 2);
+      path.quadraticBezierTo(p0.dx, p0.dy, mid.dx, mid.dy);
+    }
+    path.lineTo(leftPoints.last.dx, leftPoints.last.dy);
+
+    // Tampa da extremidade final (arredondada)
+    final lastRadius = ((leftPoints.last - rightPoints.last).distance * 0.5).clamp(0.5, baseWidth * 2.0);
+    path.arcToPoint(
+      rightPoints.last,
+      radius: Radius.circular(lastRadius),
+      clockwise: true,
+    );
+
+    // Lado Direito Reverso (Spline por pontos médios)
+    for (int i = rightPoints.length - 1; i > 0; i--) {
+      final p0 = rightPoints[i];
+      final p1 = rightPoints[i - 1];
+      final mid = Offset((p0.dx + p1.dx) / 2, (p0.dy + p1.dy) / 2);
+      path.quadraticBezierTo(p0.dx, p0.dy, mid.dx, mid.dy);
+    }
+    path.lineTo(rightPoints[0].dx, rightPoints[0].dy);
+
+    // Tampa da extremidade inicial (arredondada)
+    final firstRadius = ((leftPoints[0] - rightPoints[0]).distance * 0.5).clamp(0.5, baseWidth * 2.0);
+    path.arcToPoint(
+      leftPoints[0],
+      radius: Radius.circular(firstRadius),
+      clockwise: true,
+    );
+
+    path.close();
     return path;
   }
 }
@@ -861,26 +914,13 @@ class ActiveStrokePainter extends CustomPainter {
         return;
       }
 
-    if (stroke.toolType == InkToolType.highlighter) {
-      _reusablePaint
-        ..color = stroke.color.withOpacity(0.35)
-        ..strokeWidth = stroke.strokeWidth * 3.5
-        ..strokeCap = StrokeCap.square
-        ..strokeJoin = StrokeJoin.bevel
-        ..style = PaintingStyle.stroke;
-
-      final path = _buildSmoothCatmullRomPath(stroke.points);
-      canvas.drawPath(path, _reusablePaint);
-      return;
-    }
-
       // 1. Caneta Tinteiro / Caligráfica / Pressão Orgânica (Perfect Freehand)
       if (stroke.toolType == InkToolType.fountain || stroke.enablePressure) {
         _reusablePaint
           ..color = _getStrokeColor(stroke)
           ..style = PaintingStyle.fill;
 
-        final path = FreehandOutlineRenderer.generateOutlinePath(
+        final path = stroke.cachedPath ?? FreehandOutlineRenderer.generateOutlinePath(
           stroke.points,
           baseWidth: stroke.strokeWidth,
           isTapered: stroke.toolType == InkToolType.fountain,
@@ -898,7 +938,7 @@ class ActiveStrokePainter extends CustomPainter {
           ..strokeJoin = StrokeJoin.miter
           ..style = PaintingStyle.stroke;
 
-        final path = _buildSmoothCatmullRomPath(stroke.points);
+        final path = stroke.cachedPath ?? _buildSmoothCatmullRomPath(stroke.points);
         canvas.drawPath(path, _reusablePaint);
         return;
       }
@@ -912,7 +952,7 @@ class ActiveStrokePainter extends CustomPainter {
           ..strokeJoin = StrokeJoin.round
           ..style = PaintingStyle.stroke;
 
-        final path = _buildSmoothCatmullRomPath(stroke.points);
+        final path = stroke.cachedPath ?? _buildSmoothCatmullRomPath(stroke.points);
         canvas.drawPath(path, _reusablePaint);
         return;
       }
@@ -925,7 +965,9 @@ class ActiveStrokePainter extends CustomPainter {
         ..strokeJoin = StrokeJoin.round
         ..style = PaintingStyle.stroke;
 
-      if (stroke.points.length > 50) {
+      if (stroke.cachedPath != null) {
+        canvas.drawPath(stroke.cachedPath!, _reusablePaint);
+      } else if (stroke.points.length > 50) {
         final raw = Float32List(stroke.points.length * 2);
         for (int i = 0; i < stroke.points.length; i++) {
           raw[i * 2] = stroke.points[i].point.dx;
