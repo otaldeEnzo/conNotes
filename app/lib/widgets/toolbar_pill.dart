@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../theme/moscaro_v2_tokens.dart';
+import '../theme/stem_ink_theme_adapter.dart';
 import 'canvas_dot_grid_painter.dart';
 import 'svg_icon.dart';
 import 'ink_models.dart';
@@ -70,6 +71,13 @@ class _ToolbarPillState extends State<ToolbarPill> {
   @override
   Widget build(BuildContext context) {
     const double iconSize = 22.0;
+    final isLight = MoscaroTokens.isLight;
+    final iconColor = MoscaroTokens.iconInactive;
+    final dividerColor = isLight ? Colors.black12 : Colors.white24;
+    final displayPenColor = StemInkThemeAdapter.adaptStrokeColor(
+      widget.activePenPreset.color,
+      isLightTheme: isLight,
+    );
 
     return Row(
       mainAxisSize: MainAxisSize.min,
@@ -79,7 +87,7 @@ class _ToolbarPillState extends State<ToolbarPill> {
           icon: Icon(
             Icons.undo,
             size: 18,
-            color: widget.canUndo ? Colors.white70 : Colors.white24,
+            color: widget.canUndo ? iconColor : (isLight ? Colors.black26 : Colors.white24),
           ),
           onPressed: widget.canUndo ? widget.onUndo : null,
           tooltip: 'Desfazer (Ctrl + Z)',
@@ -89,13 +97,13 @@ class _ToolbarPillState extends State<ToolbarPill> {
           icon: Icon(
             Icons.redo,
             size: 18,
-            color: widget.canRedo ? Colors.white70 : Colors.white24,
+            color: widget.canRedo ? iconColor : (isLight ? Colors.black26 : Colors.white24),
           ),
           onPressed: widget.canRedo ? widget.onRedo : null,
           tooltip: 'Refazer (Ctrl + Y)',
         ),
         const SizedBox(width: 4),
-        Container(width: 1, height: 20, color: Colors.white24),
+        Container(width: 1, height: 20, color: dividerColor),
         const SizedBox(width: 6),
 
         // 3. Caneta STEM (SVG) com indicador da cor ativa do slot selecionado
@@ -108,18 +116,21 @@ class _ToolbarPillState extends State<ToolbarPill> {
               tooltip: 'Caneta STEM (${widget.activePenPreset.name})',
               onPressed: widget.onSelectPen,
               iconSize: iconSize,
-              customActiveColor: widget.isPenActive ? widget.activePenPreset.color : null,
+              customActiveColor: widget.isPenActive ? displayPenColor : null,
             ),
             Container(
               width: 10,
               height: 10,
               margin: const EdgeInsets.only(left: 2, right: 4),
               decoration: BoxDecoration(
-                color: widget.activePenPreset.color,
+                color: displayPenColor,
                 shape: BoxShape.circle,
-                border: Border.all(color: Colors.white, width: 1.0),
+                border: Border.all(color: isLight ? Colors.black38 : Colors.white, width: 1.0),
                 boxShadow: [
-                  BoxShadow(color: widget.activePenPreset.color.withValues(alpha: 0.6), blurRadius: 4),
+                  BoxShadow(
+                    color: displayPenColor.withValues(alpha: 0.5),
+                    blurRadius: 4,
+                  ),
                 ],
               ),
             ),
@@ -127,61 +138,61 @@ class _ToolbarPillState extends State<ToolbarPill> {
         ),
         const SizedBox(width: 4),
 
-        // 4. Borracha (SVG)
+        // 4. Borracha Inteligente (SVG)
         _buildHoverIconButton(
           index: 1,
           assetName: 'eraser',
-          tooltip: 'Borracha',
+          tooltip: 'Borracha Inteligente',
           onPressed: widget.onSelectEraser,
           iconSize: iconSize,
-          customActiveColor: widget.isEraserActive ? MoscaroTokens.auroraBlue : null,
+          customActiveColor: widget.isEraserActive ? MoscaroTokens.auroraPink : null,
         ),
         const SizedBox(width: 4),
 
-        // 4.5. Formas Geométricas / Smart Shapes (SVG)
+        // 4.1 Formas Geométricas (SVG)
         _buildHoverIconButton(
           index: 5,
           assetName: 'shapes',
-          tooltip: 'Formas Geométricas',
+          tooltip: 'Formas Inteligentes',
           onPressed: widget.onSelectShapes,
           iconSize: iconSize,
-          customActiveColor: widget.isShapesActive ? MoscaroTokens.auroraPurple : null,
+          customActiveColor: widget.isShapesActive ? MoscaroTokens.auroraAmber : null,
         ),
         const SizedBox(width: 4),
 
-        // 5. Ferramenta de Seleção (SVG)
+        // 4.2 Seleção e Transformação (SVG)
         _buildHoverIconButton(
-          index: 4,
-          assetName: widget.selectionType == SelectionType.rectangle ? 'select_rect' : 'select_lasso',
-          tooltip: 'Ferramenta de Seleção',
+          index: 6,
+          assetName: 'select',
+          tooltip: 'Seleção e Transformação (${widget.selectionType == SelectionType.rectangle ? "Retângulo" : "Laço"})',
           onPressed: widget.onSelectTool,
           iconSize: iconSize,
           customActiveColor: widget.isSelectActive ? MoscaroTokens.auroraBlue : null,
         ),
         const SizedBox(width: 4),
 
-        // 5.5. Ponteiro Laser (SVG)
+        // 4.3 Ponteiro Laser STEM (SVG)
         _buildHoverIconButton(
-          index: 6,
+          index: 7,
           assetName: 'laser',
-          tooltip: 'Ponteiro Laser (Apresentação)',
+          tooltip: 'Ponteiro Laser Efêmero (Apresentação STEM)',
           onPressed: widget.onSelectLaser,
           iconSize: iconSize,
-          customActiveColor: widget.isLaserActive ? const Color(0xFFFF0055) : null,
+          customActiveColor: widget.isLaserActive ? MoscaroTokens.auroraPink : null,
         ),
         const SizedBox(width: 4),
 
-        // 5.6. Régua STEM Interativa (SVG)
+        // 5. Régua & Transferidor STEM (SVG)
         _buildHoverIconButton(
-          index: 7,
+          index: 4,
           assetName: 'ruler',
-          tooltip: 'Régua STEM (Fita Métrica e Guia)',
+          tooltip: 'Instrumentos de Medição STEM (Régua / Transferidor)',
           onPressed: widget.onToggleRuler,
           iconSize: iconSize,
           customActiveColor: widget.isRulerActive ? MoscaroTokens.auroraBlue : null,
         ),
         const SizedBox(width: 8),
-        Container(width: 1, height: 20, color: Colors.white24),
+        Container(width: 1, height: 20, color: dividerColor),
         const SizedBox(width: 8),
 
         // 6. Grid / Fundo (SVG)
@@ -194,7 +205,7 @@ class _ToolbarPillState extends State<ToolbarPill> {
           customActiveColor: widget.isGridMenuOpen ? MoscaroTokens.auroraBlue : null,
         ),
         const SizedBox(width: 8),
-        Container(width: 1, height: 20, color: Colors.white24),
+        Container(width: 1, height: 20, color: dividerColor),
         const SizedBox(width: 8),
 
         // 7. Botão IA (SVG)
@@ -220,6 +231,7 @@ class _ToolbarPillState extends State<ToolbarPill> {
   }) {
     final bool isHovered = _hoveredIndex == index;
     final Color activeColor = customActiveColor ?? MoscaroTokens.auroraBlue;
+    final defaultColor = MoscaroTokens.isLight ? MoscaroTokens.iconInactive : Colors.white;
 
     return MouseRegion(
       onEnter: (_) => setState(() => _hoveredIndex = index),
@@ -228,7 +240,7 @@ class _ToolbarPillState extends State<ToolbarPill> {
         icon: SvgIcon(
           assetName: assetName,
           size: iconSize,
-          color: isHovered ? activeColor : (customActiveColor ?? Colors.white),
+          color: isHovered ? activeColor : (customActiveColor ?? defaultColor),
         ),
         onPressed: onPressed,
         tooltip: tooltip,

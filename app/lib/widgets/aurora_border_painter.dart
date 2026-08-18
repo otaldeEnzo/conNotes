@@ -25,7 +25,7 @@ class AuroraBorderPainter extends CustomPainter {
       ..shader = SweepGradient(
           center: Alignment.center,
           transform: GradientRotation(animationValue * 2 * math.pi),
-          colors: const [
+          colors: [
             MoscaroTokens.auroraBlue,
             MoscaroTokens.auroraPurple,
             MoscaroTokens.auroraPink,

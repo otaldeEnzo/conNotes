@@ -1,11 +1,13 @@
 import 'dart:math' as math;
 import 'dart:async';
+import 'dart:io';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/scheduler.dart';
 import 'theme/moscaro_v2_tokens.dart';
 import 'theme/moscaro_v2_extension.dart';
+import 'models/theme_models.dart';
 import 'widgets/canvas_dot_grid_painter.dart';
 import 'widgets/toolbar_pill.dart';
 import 'widgets/pen_slots_sub_bar.dart';
@@ -27,6 +29,14 @@ import 'widgets/laser_pointer.dart';
 import 'widgets/smart_shapes.dart';
 import 'widgets/stem_ruler_model.dart';
 import 'widgets/stem_ruler_widget.dart';
+import 'widgets/stem_protractor_model.dart';
+import 'widgets/stem_protractor_widget.dart';
+import 'widgets/ruler_sub_bar.dart';
+import 'widgets/settings_models.dart';
+import 'widgets/settings_tab_bar.dart';
+import 'widgets/settings_page_view.dart';
+import 'theme/moscaro_theme_controller.dart';
+import 'services/settings_service.dart';
 import 'widgets/undo_commands.dart';
 import 'ffi/native_bridge.dart';
 import 'dev_hub/dev_hub_server.dart';
@@ -43,13 +53,19 @@ class ConNotesApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'conNotes STEM Canvas',
-      debugShowCheckedModeBanner: false,
-      theme: ThemeData.dark().copyWith(
-        scaffoldBackgroundColor: MoscaroTokens.backgroundDeep,
-      ),
-      home: const CanvasHomeScreen(),
+    return ListenableBuilder(
+      listenable: MoscaroThemeController.instance,
+      builder: (context, _) {
+        final isLight = MoscaroTokens.isLight;
+        return MaterialApp(
+          title: 'conNotes STEM Canvas',
+          debugShowCheckedModeBanner: false,
+          theme: (isLight ? ThemeData.light() : ThemeData.dark()).copyWith(
+            scaffoldBackgroundColor: MoscaroTokens.backgroundDeep,
+          ),
+          home: const CanvasHomeScreen(),
+        );
+      },
     );
   }
 }
@@ -130,13 +146,20 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
   Offset? _smartShapeStartPoint;
   Rect? _smartShapeInitialBounds;
   Offset? _smartShapeCenter;
-  // Estado da Régua STEM Interativa (Fase 5.1)
+  // Estado das Ferramentas de Medição STEM (Régua e Transferidor - Fase 5.2)
+  MeasurementToolType _activeMeasurementTool = MeasurementToolType.ruler;
+  bool _isMeasurementSubBarVisible = false;
   StemRulerState _rulerState = const StemRulerState(isVisible: false);
+  StemProtractorState _protractorState = const StemProtractorState(isVisible: false);
   final ValueNotifier<int> _rulerUpdateNotifier = ValueNotifier(0);
   bool _isDraggingRuler = false;
   bool _isRotatingRuler = false;
   Offset? _rulerDragStart;
   StemRulerState? _rulerInitialState;
+  bool _isDraggingProtractor = false;
+  bool _isRotatingProtractor = false;
+  Offset? _protractorDragStart;
+  StemProtractorState? _protractorInitialState;
 
   bool _isGridMenuOpen = false;
   double _smoothedPressure = 0.6;
@@ -161,9 +184,110 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
   final Map<String, InkStroke> _pendingErasures = {};
   bool _eraseCommitScheduled = false;
 
+  // Estado das Configurações do conNotes (Fase 6)
+  AppSettingsState _settings = AppSettingsState.defaults();
+  bool _isSettingsOpen = false;
+  SettingsCategory _activeSettingsCategory = SettingsCategory.visual;
+
+  void _loadSavedSettings() async {
+    final loaded = await SettingsService.instance.loadSettings();
+    MoscaroTokens.blurSigma = loaded.blurSigma;
+    MoscaroThemeController.instance.initialize(
+      themeId: loaded.activeThemeId,
+      bgModeId: loaded.customBgMode,
+      customSolidHex: loaded.customBgColorHex,
+      customGradStartHex: loaded.customGradStartHex,
+      customGradEndHex: loaded.customGradEndHex,
+      textureId: loaded.customTextureType,
+      imagePath: loaded.customImagePath,
+      imageOpacity: loaded.customImageOpacity,
+      customThemes: loaded.customThemes,
+    );
+    if (mounted) {
+      setState(() {
+        _settings = loaded;
+      });
+    }
+  }
+
+  void _updateSettings(AppSettingsState newSettings) {
+    MoscaroTokens.blurSigma = newSettings.blurSigma;
+    MoscaroThemeController.instance.initialize(
+      themeId: newSettings.activeThemeId,
+      bgModeId: newSettings.customBgMode,
+      customSolidHex: newSettings.customBgColorHex,
+      customGradStartHex: newSettings.customGradStartHex,
+      customGradEndHex: newSettings.customGradEndHex,
+      textureId: newSettings.customTextureType,
+      imagePath: newSettings.customImagePath,
+      imageOpacity: newSettings.customImageOpacity,
+      customThemes: newSettings.customThemes,
+    );
+    setState(() {
+      _settings = newSettings;
+    });
+    SettingsService.instance.saveSettings(newSettings);
+  }
+
+  void _resetSettingsCategory() {
+    final def = AppSettingsState.defaults();
+    AppSettingsState updated = _settings;
+    switch (_activeSettingsCategory) {
+      case SettingsCategory.themes:
+        updated = _settings.copyWith(
+          activeThemeId: def.activeThemeId,
+          customBgMode: def.customBgMode,
+          customBgColorHex: def.customBgColorHex,
+          customGradStartHex: def.customGradStartHex,
+          customGradEndHex: def.customGradEndHex,
+          customTextureType: def.customTextureType,
+          customImagePath: def.customImagePath,
+          customImageOpacity: def.customImageOpacity,
+        );
+        break;
+      case SettingsCategory.visual:
+        updated = _settings.copyWith(
+          blurSigma: def.blurSigma,
+          enableAuroraBorders: def.enableAuroraBorders,
+          showTelemetryHud: def.showTelemetryHud,
+        );
+        break;
+      case SettingsCategory.canvas:
+        updated = _settings.copyWith(
+          gridSpacing: def.gridSpacing,
+          enableMouseGlow: def.enableMouseGlow,
+          mouseGlowRadius: def.mouseGlowRadius,
+        );
+        break;
+      case SettingsCategory.pen:
+        updated = _settings.copyWith(
+          rdpSmoothingTolerance: def.rdpSmoothingTolerance,
+          pressureSensitivity: def.pressureSensitivity,
+          drawAndHoldDurationMs: def.drawAndHoldDurationMs,
+        );
+        break;
+      case SettingsCategory.measurement:
+        updated = _settings.copyWith(
+          angleSnapStepDegrees: def.angleSnapStepDegrees,
+          inkSnapTolerance: def.inkSnapTolerance,
+        );
+        break;
+      case SettingsCategory.shortcuts:
+        break;
+      case SettingsCategory.ai:
+        updated = _settings.copyWith(
+          geminiApiKey: def.geminiApiKey,
+          defaultAiModel: def.defaultAiModel,
+        );
+        break;
+    }
+    _updateSettings(updated);
+  }
+
   @override
   void initState() {
     super.initState();
+    _loadSavedSettings();
     _laserEngine.init(this);
     _activeSlotId = _penSlots.first.id;
     _addNewNote("Anotações STEM");
@@ -204,6 +328,19 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
         DevHubServer.instance.gpuTexturesCount = note.pictureCache.gpuTexturesCount;
       }
     });
+
+    // Observador Dinâmico de Temas para atualização em 0ms de traços e UI
+    MoscaroThemeController.instance.addListener(_handleThemeChanged);
+  }
+
+  void _handleThemeChanged() {
+    for (final note in _notes) {
+      note.pictureCache.invalidatePictures();
+    }
+    _strokesVersion++;
+    _committedStrokesNotifier.value++;
+    _activeStrokeUpdateNotifier.value++;
+    if (mounted) setState(() {});
   }
 
   void _checkAndAnimatePanToSafeZone() {
@@ -363,6 +500,7 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
 
   @override
   void dispose() {
+    MoscaroThemeController.instance.removeListener(_handleThemeChanged);
     _laserEngine.dispose();
     _bounceController.dispose();
     _telemetrySyncTimer?.cancel();
@@ -384,9 +522,23 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
         return true;
       }
 
+      if (event.logicalKey == LogicalKeyboardKey.escape) {
+        if (_isSettingsOpen) {
+          setState(() {
+            _isSettingsOpen = false;
+          });
+          return true;
+        }
+      }
+
       final isCtrl = HardwareKeyboard.instance.isControlPressed;
       if (isCtrl) {
-        if (event.logicalKey == LogicalKeyboardKey.keyC) {
+        if (event.logicalKey == LogicalKeyboardKey.comma) {
+          setState(() {
+            _isSettingsOpen = !_isSettingsOpen;
+          });
+          return true;
+        } else if (event.logicalKey == LogicalKeyboardKey.keyC) {
           _copySelectedStrokes();
           return true;
         } else if (event.logicalKey == LogicalKeyboardKey.keyV) {
@@ -809,7 +961,20 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
         const SingleActivator(LogicalKeyboardKey.keyD, control: true): _duplicateSelectedStrokes,
         const SingleActivator(LogicalKeyboardKey.delete): _deleteSelectedStrokes,
         const SingleActivator(LogicalKeyboardKey.backspace): _deleteSelectedStrokes,
-        const SingleActivator(LogicalKeyboardKey.escape): _deselect,
+        const SingleActivator(LogicalKeyboardKey.comma, control: true): () {
+          setState(() {
+            _isSettingsOpen = !_isSettingsOpen;
+          });
+        },
+        const SingleActivator(LogicalKeyboardKey.escape): () {
+          if (_isSettingsOpen) {
+            setState(() {
+              _isSettingsOpen = false;
+            });
+          } else {
+            _deselect();
+          }
+        },
       },
       child: Focus(
         autofocus: true,
@@ -860,6 +1025,7 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
                     },
                     onPointerDown: (event) {
                       _mousePosNotifier.value = event.localPosition;
+                      if (_isSettingsOpen) return;
                       final isMiddleButton = event.buttons == 4;
                       if (isMiddleButton) return;
 
@@ -876,9 +1042,9 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
                         _lastPointerTimestampMs = event.timeStamp.inMilliseconds;
                         _lastPointerCanvasPoint = canvasPoint;
                         if (event.kind != PointerDeviceKind.mouse && event.pressure > 0.0) {
-                          _smoothedPressure = event.pressure.clamp(0.2, 1.6);
+                          _smoothedPressure = (event.pressure * _settings.pressureSensitivity).clamp(0.1, 2.0);
                         } else {
-                          _smoothedPressure = 0.6;
+                          _smoothedPressure = (0.6 * _settings.pressureSensitivity).clamp(0.1, 2.0);
                         }
                         final double pressure = _smoothedPressure;
 
@@ -893,6 +1059,17 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
                           return;
                         }
 
+                        // Interação direta com o Transferidor STEM (Arrastar ou Rotacionar)
+                        if (_protractorState.isVisible && _protractorState.containsPoint(canvasPoint)) {
+                          final isRotate = _protractorState.isNearRotateHandle(canvasPoint);
+                          _isRotatingProtractor = isRotate;
+                          _isDraggingProtractor = !isRotate;
+                          _protractorDragStart = canvasPoint;
+                          _protractorInitialState = _protractorState;
+                          _setInteracting();
+                          return;
+                        }
+
                         if (_activeTool == 'pen') {
                           final currentPreset = _activePenPreset;
 
@@ -900,7 +1077,10 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
                           _snappedShapeType = null;
                           _smartShapeStartPoint = canvasPoint;
 
-                          final snapped = _rulerState.isVisible ? _rulerState.snapPoint(canvasPoint) : null;
+                          // Atração magnética por instrumentos STEM (Régua ou Transferidor)
+                          final snapped = _rulerState.isVisible
+                              ? _rulerState.snapPoint(canvasPoint)
+                              : (_protractorState.isVisible ? _protractorState.snapPoint(canvasPoint) : null);
                           final effectiveStartPoint = snapped ?? canvasPoint;
 
                           setState(() {
@@ -1065,17 +1245,55 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
                           final initialAngle = math.atan2(_rulerDragStart!.dy - center.dy, _rulerDragStart!.dx - center.dx);
                           final currentAngle = math.atan2(canvasPoint.dy - center.dy, canvasPoint.dx - center.dx);
                           
-                          // Normalize diff to -pi to pi to avoid jumps when crossing the atan2 boundary
+                          // Rastreamento angular 1:1 contínuo (elimina qualquer salto ou descontinuidade)
                           double diff = currentAngle - initialAngle;
-                          while (diff > math.pi) diff -= 2 * math.pi;
-                          while (diff < -math.pi) diff += 2 * math.pi;
+                          while (diff > math.pi) {
+                            diff -= 2 * math.pi;
+                          }
+                          while (diff < -math.pi) {
+                            diff += 2 * math.pi;
+                          }
 
-                          // Sensibilidade altamente controlada (fator 0.15 para micro-ajustes precisos sem solavancos)
-                          var deltaAngle = diff * 0.15;
-                          final targetAngle = _rulerInitialState!.angle + deltaAngle;
+                          final targetAngle = _rulerInitialState!.angle + diff;
                           final snapped = StemRulerState.snapAngle(targetAngle);
                           
                           _rulerState = _rulerInitialState!.copyWith(
+                            angle: snapped,
+                          );
+                          _rulerUpdateNotifier.value++;
+                          return;
+                        }
+
+                        // Movimentação / Rotação do Transferidor STEM
+                        if (_isDraggingProtractor && _protractorDragStart != null && _protractorInitialState != null) {
+                          _setInteracting();
+                          final delta = canvasPoint - _protractorDragStart!;
+                          _protractorState = _protractorInitialState!.copyWith(
+                            center: _protractorInitialState!.center + delta,
+                          );
+                          _rulerUpdateNotifier.value++;
+                          return;
+                        }
+
+                        if (_isRotatingProtractor && _protractorInitialState != null && _protractorDragStart != null) {
+                          _setInteracting();
+                          final center = _protractorInitialState!.center;
+                          final initialAngle = math.atan2(_protractorDragStart!.dy - center.dy, _protractorDragStart!.dx - center.dx);
+                          final currentAngle = math.atan2(canvasPoint.dy - center.dy, canvasPoint.dx - center.dx);
+                          
+                          // Rastreamento angular 1:1 contínuo (elimina qualquer salto ou descontinuidade)
+                          double diff = currentAngle - initialAngle;
+                          while (diff > math.pi) {
+                            diff -= 2 * math.pi;
+                          }
+                          while (diff < -math.pi) {
+                            diff += 2 * math.pi;
+                          }
+
+                          final targetAngle = _protractorInitialState!.angle + diff;
+                          final snapped = StemProtractorState.snapAngle(targetAngle);
+                          
+                          _protractorState = _protractorInitialState!.copyWith(
                             angle: snapped,
                           );
                           _rulerUpdateNotifier.value++;
@@ -1153,7 +1371,9 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
                             );
                             _activeStrokeUpdateNotifier.value++;
                           } else {
-                            final snapped = _rulerState.isVisible ? _rulerState.snapPoint(canvasPoint) : null;
+                            final snapped = _rulerState.isVisible
+                                ? _rulerState.snapPoint(canvasPoint)
+                                : (_protractorState.isVisible ? _protractorState.snapPoint(canvasPoint) : null);
                             final effectivePoint = snapped ?? canvasPoint;
                             final lastPoint = _activeStroke!.points.last.point;
                             if ((effectivePoint - lastPoint).distanceSquared >= 2.25) {
@@ -1164,9 +1384,9 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
                               _activeStroke!.cachedPath = null;
                               _activeStrokeUpdateNotifier.value++;
 
-                              // Reiniciar temporizador de 400ms Draw & Hold
+                              // Reiniciar temporizador configurado de Draw & Hold
                               _drawAndHoldTimer?.cancel();
-                              _drawAndHoldTimer = Timer(const Duration(milliseconds: 400), () {
+                              _drawAndHoldTimer = Timer(Duration(milliseconds: _settings.drawAndHoldDurationMs), () {
                                 if (_isDrawing && _activeStroke != null && _activeStroke!.points.length >= 8) {
                                   final recognized = SmartShapeEngine.recognizeDrawnShape(_activeStroke!.points);
                                   if (recognized != null) {
@@ -1307,6 +1527,14 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
                         return;
                       }
 
+                      if (_isDraggingProtractor || _isRotatingProtractor) {
+                        _isDraggingProtractor = false;
+                        _isRotatingProtractor = false;
+                        _protractorDragStart = null;
+                        _protractorInitialState = null;
+                        return;
+                      }
+
                       if (_activeTool == 'laser') {
                         _laserEngine.onPointerUp();
                         return;
@@ -1326,7 +1554,7 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
                       if ((_activeTool == 'pen' || _activeTool == 'shapes') && _activeStroke != null && note != null) {
                         final simplifiedPoints = (wasShapeSnapped || _activeTool == 'shapes' || shapeCachedPath != null)
                             ? _activeStroke!.points
-                            : InkStroke.simplifyRDP(_activeStroke!.points, 0.35 / _zoomScale);
+                            : InkStroke.simplifyRDP(_activeStroke!.points, _settings.rdpSmoothingTolerance / _zoomScale);
                         
                         if (simplifiedPoints.isNotEmpty) {
                           double minX = double.infinity, minY = double.infinity;
@@ -1649,21 +1877,56 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
                     },
                     child: Stack(
                       children: [
-                        // Camada 1: Grade de Fundo (Dot Grid isolada de eventos de mouse para 144Hz liso)
+                        // Camada 0: Imagem de Fundo do Disco (Hardware Accelerated)
                         ListenableBuilder(
-                          listenable: Listenable.merge([_panNotifier, _zoomNotifier]),
+                          listenable: MoscaroThemeController.instance,
+                          builder: (context, _) {
+                            final themeCtrl = MoscaroThemeController.instance;
+                            final isImageMode = themeCtrl.backgroundMode == CanvasBackgroundMode.customImage ||
+                                (themeCtrl.currentTheme.bgMode == CanvasBackgroundMode.customImage && themeCtrl.currentTheme.bgImagePath != null);
+                            final path = themeCtrl.customImagePath ?? themeCtrl.currentTheme.bgImagePath;
+                            final opacity = themeCtrl.customImageOpacity;
+
+                            if (isImageMode && path != null && path.isNotEmpty && File(path).existsSync()) {
+                              return Positioned.fill(
+                                child: Image.file(
+                                  File(path),
+                                  fit: BoxFit.cover,
+                                  opacity: AlwaysStoppedAnimation(opacity),
+                                ),
+                              );
+                            }
+                            return const SizedBox.shrink();
+                          },
+                        ),
+
+                        // Camada 1: Grade de Fundo (Dot Grid com suporte a Temas e Texturas STEM)
+                        ListenableBuilder(
+                          listenable: Listenable.merge([_panNotifier, _zoomNotifier, _mousePosNotifier, MoscaroThemeController.instance]),
                           builder: (context, _) {
                             final pan = _panNotifier.value;
                             final zoom = _zoomNotifier.value;
+                            final mousePos = _mousePosNotifier.value;
+                            final themeCtrl = MoscaroThemeController.instance;
+
                             return RepaintBoundary(
                               child: CustomPaint(
                                 size: Size.infinite,
                                 painter: CanvasDotGridPainter(
                                   panOffset: pan,
                                   zoomScale: zoom,
-                                  mousePosition: null,
-                                  backgroundType: _currentBackground,
+                                  mousePosition: mousePos,
+                                  backgroundType: _isSettingsOpen ? CanvasBackgroundType.emBranco : _currentBackground,
                                   isDrawing: _isDrawing,
+                                  gridSpacing: _settings.gridSpacing,
+                                  enableMouseGlow: _settings.enableMouseGlow,
+                                  mouseGlowRadius: _settings.mouseGlowRadius,
+                                  theme: themeCtrl.currentTheme,
+                                  backgroundMode: themeCtrl.backgroundMode,
+                                  customSolidColor: themeCtrl.customSolidColor,
+                                  customGradientStart: themeCtrl.customGradientStart,
+                                  customGradientEnd: themeCtrl.customGradientEnd,
+                                  textureType: themeCtrl.textureType,
                                 ),
                               ),
                             );
@@ -1671,7 +1934,7 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
                         ),
 
                         // Camada 2: Traços Comitados (Acelerada via Grid Sub-Chunks & Texturas D3D11 O(1))
-                        if (note != null)
+                        if (!_isSettingsOpen && note != null)
                           ListenableBuilder(
                             listenable: Listenable.merge([
                               _panNotifier,
@@ -1709,27 +1972,28 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
                           ),
 
                         // Camada 2.5: Traços Transitórios (Ingestão Instantânea O(1) de Colagem Massiva)
-                        ListenableBuilder(
-                          listenable: Listenable.merge([_panNotifier, _zoomNotifier, _transientUpdateNotifier]),
-                          builder: (context, _) {
-                            final pan = _panNotifier.value;
-                            final zoom = _zoomNotifier.value;
-                            return RepaintBoundary(
-                              child: CustomPaint(
-                                size: Size.infinite,
-                                painter: TransientStrokesPainter(
-                                  cache: _transientPictureCache,
-                                  panOffset: pan,
-                                  zoomScale: zoom,
-                                  updateNotifier: _transientUpdateNotifier,
+                        if (!_isSettingsOpen)
+                          ListenableBuilder(
+                            listenable: Listenable.merge([_panNotifier, _zoomNotifier, _transientUpdateNotifier]),
+                            builder: (context, _) {
+                              final pan = _panNotifier.value;
+                              final zoom = _zoomNotifier.value;
+                              return RepaintBoundary(
+                                child: CustomPaint(
+                                  size: Size.infinite,
+                                  painter: TransientStrokesPainter(
+                                    cache: _transientPictureCache,
+                                    panOffset: pan,
+                                    zoomScale: zoom,
+                                    updateNotifier: _transientUpdateNotifier,
+                                  ),
                                 ),
-                              ),
-                            );
-                          },
-                        ),
+                              );
+                            },
+                          ),
 
                         // Camada 3: Traço Ativo (Desenhado em tempo real na ponta da caneta - Traço Vivo)
-                        if (note != null)
+                        if (!_isSettingsOpen && note != null)
                           ListenableBuilder(
                             listenable: Listenable.merge([_panNotifier, _zoomNotifier, _activeStrokeUpdateNotifier]),
                             builder: (context, _) {
@@ -1750,7 +2014,7 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
                           ),
 
                         // Camada 4: Overlay de Seleção e Bounding Box (Un-Baking em Bloco Único)
-                        if (note != null)
+                        if (!_isSettingsOpen && note != null)
                           ListenableBuilder(
                             listenable: Listenable.merge([_panNotifier, _zoomNotifier, _selectionUpdateNotifier]),
                             builder: (context, _) {
@@ -1773,7 +2037,7 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
                           ),
 
                         // Camada 5: Cursor Halo da Borracha (Sub-camada isolada ultra-fluida 1000Hz)
-                        if (_activeTool == 'eraser')
+                        if (!_isSettingsOpen && _activeTool == 'eraser')
                           ListenableBuilder(
                             listenable: _mousePosNotifier,
                             builder: (context, _) {
@@ -1792,19 +2056,20 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
                           ),
 
                         // Camada 6: Rastro Incandescente do Laser Pointer (Efêmero 144Hz)
-                        RepaintBoundary(
-                          child: CustomPaint(
-                            size: Size.infinite,
-                            painter: LaserPointerPainter(
-                              engine: _laserEngine,
-                              panOffset: _panOffset,
-                              zoomScale: _zoomScale,
+                        if (!_isSettingsOpen)
+                          RepaintBoundary(
+                            child: CustomPaint(
+                              size: Size.infinite,
+                              painter: LaserPointerPainter(
+                                engine: _laserEngine,
+                                panOffset: _panOffset,
+                                zoomScale: _zoomScale,
+                              ),
                             ),
                           ),
-                        ),
 
-                        // Camada 7: Régua STEM Interativa (Fase 5.1 - Vidro Líquido Moscaro com Guias de Precisão)
-                        if (_rulerState.isVisible)
+                        // Camada 7: Instrumentos de Medição STEM (Régua e Transferidor - Fase 5.2)
+                        if (!_isSettingsOpen && _rulerState.isVisible)
                           ListenableBuilder(
                             listenable: Listenable.merge([_panNotifier, _zoomNotifier, _rulerUpdateNotifier]),
                             builder: (context, _) {
@@ -1823,6 +2088,32 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
                                 onClose: () {
                                   setState(() {
                                     _rulerState = _rulerState.copyWith(isVisible: false);
+                                  });
+                                  _rulerUpdateNotifier.value++;
+                                },
+                              );
+                            },
+                          ),
+
+                        if (!_isSettingsOpen && _protractorState.isVisible)
+                          ListenableBuilder(
+                            listenable: Listenable.merge([_panNotifier, _zoomNotifier, _rulerUpdateNotifier]),
+                            builder: (context, _) {
+                              final pan = _panNotifier.value;
+                              final zoom = _zoomNotifier.value;
+                              return StemProtractorWidget(
+                                state: _protractorState,
+                                panOffset: pan,
+                                zoomScale: zoom,
+                                onStateChanged: (newState) {
+                                  setState(() {
+                                    _protractorState = newState;
+                                  });
+                                  _rulerUpdateNotifier.value++;
+                                },
+                                onClose: () {
+                                  setState(() {
+                                    _protractorState = _protractorState.copyWith(isVisible: false);
                                   });
                                   _rulerUpdateNotifier.value++;
                                 },
@@ -1853,68 +2144,110 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
                   ),
                 ),
 
-              // 3. TabBar Superior
+              // 3. Visualização de Configurações (SettingsPageView no Canvas com Fundo Unificado)
+              if (_isSettingsOpen)
+                Positioned.fill(
+                  top: 0,
+                  left: _isSidebarOpen ? 348 : 0,
+                  right: 0,
+                  bottom: 0,
+                  child: SettingsPageView(
+                    activeCategory: _activeSettingsCategory,
+                    settings: _settings,
+                    onUpdateSettings: _updateSettings,
+                    onResetCategory: _resetSettingsCategory,
+                  ),
+                ),
+
+              // 4. TabBar Superior (Alternância fluida entre Abas de Notas e Abas de Configurações)
               Positioned(
                 top: 24,
                 left: _isSidebarOpen ? 348 : 0,
                 right: 140,
                 child: Center(
-                  child: NoteTabBar(
-                    activeNoteIds: _activeNoteIds,
-                    noteTitles: noteTitles,
-                    selectedNoteId: _selectedNoteId,
-                    isSidebarOpen: _isSidebarOpen,
-                    onSelectNote: (noteId) {
-                      setState(() {
-                        _selectedNoteId = noteId;
-                        _selectionState = SelectionState.empty();
-                      });
-                    },
-                    onCloseNote: (noteId) {
-                      setState(() {
-                        _activeNoteIds.remove(noteId);
-                        if (_selectedNoteId == noteId) {
-                          _selectedNoteId = _activeNoteIds.isNotEmpty ? _activeNoteIds.last : null;
-                        }
-                        _selectionState = SelectionState.empty();
-                      });
-                    },
-                    onAddNote: () {
-                      _addNewNote("Nova Nota ${_notes.length + 1}");
-                    },
-                    onToggleSidebar: () {
-                      setState(() {
-                        _isSidebarOpen = !_isSidebarOpen;
-                      });
-                    },
+                  child: AnimatedSwitcher(
+                    duration: const Duration(milliseconds: 250),
+                    switchInCurve: Curves.easeOutCubic,
+                    switchOutCurve: Curves.easeInCubic,
+                    child: _isSettingsOpen
+                        ? SettingsTabBar(
+                            key: const ValueKey('settings_tab_bar'),
+                            activeCategory: _activeSettingsCategory,
+                            onSelectCategory: (cat) {
+                              setState(() {
+                                _activeSettingsCategory = cat;
+                              });
+                            },
+                            onBackToNotes: () {
+                              setState(() {
+                                _isSettingsOpen = false;
+                              });
+                            },
+                          )
+                        : NoteTabBar(
+                            key: const ValueKey('note_tab_bar'),
+                            activeNoteIds: _activeNoteIds,
+                            noteTitles: noteTitles,
+                            selectedNoteId: _selectedNoteId,
+                            isSidebarOpen: _isSidebarOpen,
+                            onOpenSettings: () {
+                              setState(() {
+                                _isSettingsOpen = true;
+                              });
+                            },
+                            onSelectNote: (noteId) {
+                              setState(() {
+                                _selectedNoteId = noteId;
+                                _selectionState = SelectionState.empty();
+                              });
+                            },
+                            onCloseNote: (noteId) {
+                              setState(() {
+                                _activeNoteIds.remove(noteId);
+                                if (_selectedNoteId == noteId) {
+                                  _selectedNoteId = _activeNoteIds.isNotEmpty ? _activeNoteIds.last : null;
+                                }
+                                _selectionState = SelectionState.empty();
+                              });
+                            },
+                            onAddNote: () {
+                              _addNewNote("Nova Nota ${_notes.length + 1}");
+                            },
+                            onToggleSidebar: () {
+                              setState(() {
+                                _isSidebarOpen = !_isSidebarOpen;
+                              });
+                            },
+                          ),
                   ),
                 ),
               ),
 
-              // 4. HUD de Zoom no Topo Superior Direito
-              Positioned(
-                top: 24,
-                right: 24,
-                child: ValueListenableBuilder<double>(
-                  valueListenable: _zoomNotifier,
-                  builder: (context, zoom, _) {
-                    return ZoomHudPill(
-                      zoomScale: zoom,
-                      onZoomIn: () {
-                        final center = Offset(MediaQuery.of(context).size.width / 2, MediaQuery.of(context).size.height / 2);
-                        _handleZoomDelta(0.15, center);
-                      },
-                      onZoomOut: () {
-                        final center = Offset(MediaQuery.of(context).size.width / 2, MediaQuery.of(context).size.height / 2);
-                        _handleZoomDelta(-0.15, center);
-                      },
-                      onResetZoom: () {
-                        _zoomNotifier.value = 1.0;
-                      },
-                    );
-                  },
+              // 4.1 HUD de Zoom no Topo Superior Direito
+              if (!_isSettingsOpen)
+                Positioned(
+                  top: 24,
+                  right: 24,
+                  child: ValueListenableBuilder<double>(
+                    valueListenable: _zoomNotifier,
+                    builder: (context, zoom, _) {
+                      return ZoomHudPill(
+                        zoomScale: zoom,
+                        onZoomIn: () {
+                          final center = Offset(MediaQuery.of(context).size.width / 2, MediaQuery.of(context).size.height / 2);
+                          _handleZoomDelta(0.15, center);
+                        },
+                        onZoomOut: () {
+                          final center = Offset(MediaQuery.of(context).size.width / 2, MediaQuery.of(context).size.height / 2);
+                          _handleZoomDelta(-0.15, center);
+                        },
+                        onResetZoom: () {
+                          _zoomNotifier.value = 1.0;
+                        },
+                      );
+                    },
+                  ),
                 ),
-              ),
 
               // 4.5 Barreira transparente para fechar o Menu do Grid ao clicar fora
               if (_isGridMenuOpen)
@@ -1931,11 +2264,15 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
                 ),
 
               // 5. Sub-Barras Flutuantes e Menu do Grid Unificados em Row com AnimatedSize (Zero Sobreposição Garantida)
-              if ((_activeTool == 'pen' && _isPenSubBarVisible) ||
-                  _activeTool == 'select' ||
-                  _activeTool == 'eraser' ||
-                  _activeTool == 'shapes' ||
-                  _isGridMenuOpen)
+              if (!_isSettingsOpen &&
+                  ((_activeTool == 'pen' && _isPenSubBarVisible) ||
+                      _activeTool == 'select' ||
+                      _activeTool == 'eraser' ||
+                      _activeTool == 'shapes' ||
+                      _isMeasurementSubBarVisible ||
+                      _rulerState.isVisible ||
+                      _protractorState.isVisible ||
+                      _isGridMenuOpen))
                 Positioned(
                   bottom: 96,
                   left: _isSidebarOpen ? 348 : 0,
@@ -2052,15 +2389,45 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
                               },
                             ),
 
+                          // 5. Sub-Barra de Instrumentos de Medição STEM (Régua e Transferidor - Fase 5.2)
+                          if (_isMeasurementSubBarVisible || _rulerState.isVisible || _protractorState.isVisible)
+                            RulerSubBar(
+                              isVisible: true,
+                              activeTool: _activeMeasurementTool,
+                              onSelectTool: (tool) {
+                                setState(() {
+                                  _activeMeasurementTool = tool;
+                                  final viewportCenter = (-_panOffset + Offset(MediaQuery.of(context).size.width / 2, MediaQuery.of(context).size.height / 2)) / _zoomScale;
+                                  if (tool == MeasurementToolType.ruler) {
+                                    _protractorState = _protractorState.copyWith(isVisible: false);
+                                    _rulerState = _rulerState.copyWith(
+                                      isVisible: true,
+                                      center: _rulerState.isVisible ? null : viewportCenter,
+                                    );
+                                  } else {
+                                    _rulerState = _rulerState.copyWith(isVisible: false);
+                                    _protractorState = _protractorState.copyWith(
+                                      isVisible: true,
+                                      center: _protractorState.isVisible ? null : viewportCenter,
+                                    );
+                                  }
+                                });
+                                _rulerUpdateNotifier.value++;
+                              },
+                            ),
+
                           // Espaçador dinâmico entre a Sub-Barra ativa e o Menu do Grid
                           if (((_activeTool == 'pen' && _isPenSubBarVisible) ||
                                   _activeTool == 'select' ||
                                   _activeTool == 'eraser' ||
-                                  _activeTool == 'shapes') &&
+                                  _activeTool == 'shapes' ||
+                                  _isMeasurementSubBarVisible ||
+                                  _rulerState.isVisible ||
+                                  _protractorState.isVisible) &&
                               _isGridMenuOpen)
                             const SizedBox(width: 14),
 
-                          // 5. Menu Flutuante de Fundo / Grid com Animação Fluida Pop & Fade
+                          // 6. Menu Flutuante de Fundo / Grid com Animação Fluida Pop & Fade
                           AnimatedSwitcher(
                             duration: const Duration(milliseconds: 240),
                             reverseDuration: const Duration(milliseconds: 180),
@@ -2096,7 +2463,8 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
                 ),
 
               // 7. Barra de Ferramentas / ToolbarPill (Inferior)
-              Positioned(
+              if (!_isSettingsOpen)
+                Positioned(
                 bottom: 32,
                 left: _isSidebarOpen ? 348 : 0,
                 right: 0,
@@ -2109,7 +2477,7 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
                     isShapesActive: _activeTool == 'shapes',
                     isSelectActive: _activeTool == 'select',
                     isLaserActive: _activeTool == 'laser',
-                    isRulerActive: _rulerState.isVisible,
+                    isRulerActive: _isMeasurementSubBarVisible || _rulerState.isVisible || _protractorState.isVisible,
                     selectionType: _selectionType,
                     activePenPreset: _activePenPreset,
                     canUndo: canUndo,
@@ -2124,13 +2492,32 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
                     },
                     onToggleRuler: () {
                       setState(() {
-                        final isNowVisible = !_rulerState.isVisible;
-                        // Ao abrir, posiciona a régua no centro da tela visível atual
-                        final viewportCenter = (-_panOffset + Offset(MediaQuery.of(context).size.width / 2, MediaQuery.of(context).size.height / 2)) / _zoomScale;
-                        _rulerState = _rulerState.copyWith(
-                          isVisible: isNowVisible,
-                          center: isNowVisible ? viewportCenter : null,
-                        );
+                        final bool isAnyMeasurementActive = _rulerState.isVisible || _protractorState.isVisible;
+                        if (isAnyMeasurementActive) {
+                          // Se já está ativo, clicar na toolbar fecha as ferramentas e a subbarra
+                          _isMeasurementSubBarVisible = false;
+                          _rulerState = _rulerState.copyWith(isVisible: false);
+                          _protractorState = _protractorState.copyWith(isVisible: false);
+                        } else {
+                          // Se está fechado, abre a subbarra e exibe a ferramenta ativa atual
+                          _isMeasurementSubBarVisible = true;
+                          _isPenSubBarVisible = false;
+                          _isGridMenuOpen = false;
+                          final viewportCenter = (-_panOffset + Offset(MediaQuery.of(context).size.width / 2, MediaQuery.of(context).size.height / 2)) / _zoomScale;
+                          if (_activeMeasurementTool == MeasurementToolType.ruler) {
+                            _protractorState = _protractorState.copyWith(isVisible: false);
+                            _rulerState = _rulerState.copyWith(
+                              isVisible: true,
+                              center: viewportCenter,
+                            );
+                          } else {
+                            _rulerState = _rulerState.copyWith(isVisible: false);
+                            _protractorState = _protractorState.copyWith(
+                              isVisible: true,
+                              center: viewportCenter,
+                            );
+                          }
+                        }
                       });
                       _rulerUpdateNotifier.value++;
                     },

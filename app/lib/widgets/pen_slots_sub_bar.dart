@@ -2,6 +2,7 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import '../theme/moscaro_v2_tokens.dart';
 import '../theme/moscaro_v2_extension.dart';
+import '../theme/stem_ink_theme_adapter.dart';
 import 'ink_models.dart';
 import 'precision_color_picker.dart';
 
@@ -180,7 +181,7 @@ class _PenSlotsSubBarState extends State<PenSlotsSubBar> {
                   const SizedBox(width: 4),
                   // Botão Adicionar Novo Slot
                   IconButton(
-                    icon: const Icon(Icons.add, size: 18, color: MoscaroTokens.auroraBlue),
+                    icon: Icon(Icons.add, size: 18, color: MoscaroTokens.auroraBlue),
                     onPressed: widget.onAddNewSlot,
                     tooltip: 'Novo Slot de Caneta',
                     padding: EdgeInsets.zero,
@@ -190,6 +191,7 @@ class _PenSlotsSubBarState extends State<PenSlotsSubBar> {
               ),
             ).moscaroV2(
               borderRadius: MoscaroTokens.radiusPill,
+              enableBlur: MoscaroTokens.enableSubBarsBlur,
               padding: EdgeInsets.zero,
             ),
           ),
@@ -199,6 +201,9 @@ class _PenSlotsSubBarState extends State<PenSlotsSubBar> {
   }
 
   Widget _buildSlotPill(BuildContext context, PenSlotPreset preset, bool isSelected, {bool isGhost = false}) {
+    final isLight = MoscaroTokens.isLight;
+    final displayColor = StemInkThemeAdapter.adaptStrokeColor(preset.color, isLightTheme: isLight);
+
     return Builder(
       builder: (slotContext) {
         return GestureDetector(
@@ -220,24 +225,26 @@ class _PenSlotsSubBarState extends State<PenSlotsSubBar> {
             margin: const EdgeInsets.symmetric(horizontal: 3, vertical: 3),
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
             decoration: BoxDecoration(
-              color: isSelected ? Colors.white.withOpacity(0.08) : Colors.transparent,
+              color: isSelected
+                  ? (isLight ? displayColor.withValues(alpha: 0.15) : Colors.white.withValues(alpha: 0.08))
+                  : Colors.transparent,
               borderRadius: BorderRadius.circular(14),
               border: Border.all(
-                color: isSelected ? preset.color : Colors.white12,
+                color: isSelected ? displayColor : (isLight ? Colors.black12 : Colors.white12),
                 width: isSelected ? 1.5 : 1.0,
               ),
               boxShadow: isSelected
-                  ? [BoxShadow(color: preset.color.withOpacity(0.4), blurRadius: 8)]
+                  ? [BoxShadow(color: displayColor.withValues(alpha: 0.4), blurRadius: 8)]
                   : null,
             ),
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                // Ícone da ferramenta pintado exatamente na cor do preset
+                // Ícone da ferramenta adaptado harmonicamente ao tema ativo
                 Icon(
                   _getToolIcon(preset.toolType),
                   size: 16,
-                  color: preset.color,
+                  color: displayColor,
                 ),
                 const SizedBox(width: 6),
                 // Ponto indicador do diâmetro/espessura
@@ -245,7 +252,7 @@ class _PenSlotsSubBarState extends State<PenSlotsSubBar> {
                   width: (preset.strokeWidth * 1.5).clamp(3.0, 10.0),
                   height: (preset.strokeWidth * 1.5).clamp(3.0, 10.0),
                   decoration: BoxDecoration(
-                    color: preset.color,
+                    color: displayColor,
                     shape: BoxShape.circle,
                   ),
                 ),

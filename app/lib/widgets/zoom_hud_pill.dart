@@ -2,8 +2,7 @@ import 'package:flutter/material.dart';
 import '../theme/moscaro_v2_tokens.dart';
 import '../theme/moscaro_v2_extension.dart';
 
-/// HUD de Navegação e Zoom do Canvas no formato Pílula Moscaro v2.
-/// Fica posicionado no topo superior direito, alinhado com a TabBar sem sobreposição.
+/// HUD de Navegação e Zoom do Canvas no formato Pílula Moscaro v2 (Adaptativo Dark/Light).
 class ZoomHudPill extends StatelessWidget {
   final double zoomScale;
   final VoidCallback onZoomIn;
@@ -21,6 +20,8 @@ class ZoomHudPill extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final int percentage = (zoomScale * 100).round();
+    final textPrimary = MoscaroTokens.textPrimary;
+    final iconColor = MoscaroTokens.iconInactive;
 
     return Container(
       height: 38,
@@ -30,7 +31,7 @@ class ZoomHudPill extends StatelessWidget {
         children: [
           // Botão Menos (-)
           IconButton(
-            icon: const Icon(Icons.remove, size: 16, color: Colors.white70),
+            icon: Icon(Icons.remove, size: 16, color: iconColor),
             onPressed: onZoomOut,
             padding: EdgeInsets.zero,
             constraints: const BoxConstraints(minWidth: 26, minHeight: 26),
@@ -45,8 +46,8 @@ class ZoomHudPill extends StatelessWidget {
               padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
               child: Text(
                 '$percentage%',
-                style: const TextStyle(
-                  color: Colors.white,
+                style: TextStyle(
+                  color: textPrimary,
                   fontSize: 12,
                   fontWeight: FontWeight.w600,
                   letterSpacing: 0.2,
@@ -57,7 +58,7 @@ class ZoomHudPill extends StatelessWidget {
           const SizedBox(width: 2),
           // Botão Mais (+)
           IconButton(
-            icon: const Icon(Icons.add, size: 16, color: Colors.white70),
+            icon: Icon(Icons.add, size: 16, color: iconColor),
             onPressed: onZoomIn,
             padding: EdgeInsets.zero,
             constraints: const BoxConstraints(minWidth: 26, minHeight: 26),

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../theme/moscaro_v2_tokens.dart';
 import '../theme/moscaro_v2_extension.dart';
 import 'prompt_input_box.dart';
+import 'svg_icon.dart';
 
 /// Painel Lateral Direito da IA em formato Pílula Vertical moscaro-v2 (Área de Chat)
 class AiSidebar extends StatelessWidget {
@@ -40,10 +41,10 @@ class AiSidebar extends StatelessWidget {
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               Row(
-                children: const [
-                  Icon(Icons.psychology, color: MoscaroTokens.auroraBlue, size: 22),
-                  SizedBox(width: 8),
-                  Text(
+                children: [
+                  SvgIcon(assetName: 'ai', color: MoscaroTokens.auroraBlue, size: 20),
+                  const SizedBox(width: 8),
+                  const Text(
                     'Assistente STEM IA',
                     style: TextStyle(
                       color: Colors.white,

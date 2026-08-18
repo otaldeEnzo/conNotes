@@ -66,7 +66,7 @@ class _PromptInputBoxState extends State<PromptInputBox> with SingleTickerProvid
                   ),
                 ),
                 IconButton(
-                  icon: const Icon(Icons.arrow_upward, color: MoscaroTokens.auroraBlue, size: 20),
+                  icon: Icon(Icons.arrow_upward, color: MoscaroTokens.auroraBlue, size: 20),
                   onPressed: () {
                     if (_textController.text.trim().isNotEmpty) {
                       widget.onSubmit(_textController.text);

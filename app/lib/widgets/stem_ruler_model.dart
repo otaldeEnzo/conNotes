@@ -1,6 +1,12 @@
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
 
+/// Tipo de instrumento de medição STEM ativo
+enum MeasurementToolType {
+  ruler,
+  protractor,
+}
+
 /// Estado e geometria da Régua STEM Interativa.
 class StemRulerState {
   final Offset center; // Posição do centro da régua em coordenadas do Canvas
@@ -123,15 +129,12 @@ class StemRulerState {
 
   /// Trava magnética automática em ângulos notáveis de engenharia/matemática (0°, 15°, 30°, 45°, 60°, 90°, 120°, 135°, 150°, 180°)
   static double snapAngle(double angleRadians) {
-    double degrees = (angleRadians * 180.0 / math.pi) % 180.0;
-    if (degrees < 0) degrees += 180.0;
-
+    final degrees = angleRadians * 180.0 / math.pi;
     const step = 15.0;
-    final rounded = (degrees / step).round() * step;
-    if ((degrees - rounded).abs() <= 2.5) {
-      return (rounded % 180.0) * math.pi / 180.0;
+    final nearest = (degrees / step).roundToDouble() * step;
+    if ((degrees - nearest).abs() <= 2.5) {
+      return nearest * math.pi / 180.0;
     }
-
-    return angleRadians % math.pi;
+    return angleRadians;
   }
 }

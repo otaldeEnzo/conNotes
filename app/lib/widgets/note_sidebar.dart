@@ -55,7 +55,7 @@ class _NoteSidebarState extends State<NoteSidebar> {
     for (final note in notes) {
       final matchesSearch = note.title.toLowerCase().contains(_searchQuery.toLowerCase());
       final filteredChildren = _filterNotes(note.children);
-      
+
       if (matchesSearch || filteredChildren.isNotEmpty) {
         filtered.add(NoteDocument(
           id: note.id,
@@ -73,15 +73,19 @@ class _NoteSidebarState extends State<NoteSidebar> {
   @override
   Widget build(BuildContext context) {
     final filteredNotes = _filterNotes(widget.rootNotes);
+    final isLight = MoscaroTokens.isLight;
+    final textPrimary = MoscaroTokens.textPrimary;
+    final textSecondary = MoscaroTokens.textSecondary;
+    final iconColor = MoscaroTokens.iconInactive;
 
     return AnimatedPositioned(
       duration: const Duration(milliseconds: 350),
       curve: Curves.easeInOutCubic,
-      left: widget.isOpen ? 24 : -340,
+      left: widget.isOpen ? 24 : -370,
       top: 24,
       bottom: 24,
       child: SizedBox(
-        width: 300,
+        width: 330,
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
@@ -90,9 +94,9 @@ class _NoteSidebarState extends State<NoteSidebar> {
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 Text(
-                  _isSelectionMode ? 'Selecionadas (${_selectedNoteIds.length})' : 'Notas',
-                  style: const TextStyle(
-                    color: Colors.white,
+                  _isSelectionMode ? 'Selecionadas (${_selectedNoteIds.length})' : 'Cadernos & Notas',
+                  style: TextStyle(
+                    color: textPrimary,
                     fontWeight: FontWeight.bold,
                     fontSize: 16,
                   ),
@@ -103,7 +107,7 @@ class _NoteSidebarState extends State<NoteSidebar> {
                     IconButton(
                       icon: Icon(
                         _isSelectionMode ? Icons.check_circle : Icons.check_circle_outline,
-                        color: _isSelectionMode ? MoscaroTokens.auroraBlue : Colors.white60,
+                        color: _isSelectionMode ? MoscaroTokens.auroraBlue : iconColor,
                         size: 20,
                       ),
                       onPressed: () {
@@ -128,7 +132,7 @@ class _NoteSidebarState extends State<NoteSidebar> {
                       )
                     else
                       IconButton(
-                        icon: const Icon(Icons.note_add, color: MoscaroTokens.auroraBlue, size: 22),
+                        icon: Icon(Icons.note_add_outlined, color: MoscaroTokens.auroraBlue, size: 22),
                         onPressed: widget.onAddNote,
                         tooltip: 'Nova Nota',
                       ),
@@ -136,29 +140,31 @@ class _NoteSidebarState extends State<NoteSidebar> {
                 ),
               ],
             ),
-            const SizedBox(height: 6),
+            const SizedBox(height: 8),
             // Busca
             TextField(
               controller: _searchController,
               onChanged: (val) => setState(() => _searchQuery = val),
-              style: const TextStyle(color: Colors.white, fontSize: 13),
+              style: TextStyle(color: textPrimary, fontSize: 13),
               decoration: InputDecoration(
                 hintText: 'Buscar nota...',
-                hintStyle: const TextStyle(color: Colors.white38, fontSize: 12),
-                prefixIcon: const Icon(Icons.search, color: Colors.white38, size: 18),
-                border: OutlineInputBorder(
+                hintStyle: TextStyle(color: textSecondary.withValues(alpha: 0.6), fontSize: 12),
+                prefixIcon: Icon(Icons.search, color: iconColor, size: 18),
+                filled: true,
+                fillColor: isLight ? Colors.black.withValues(alpha: 0.04) : Colors.white.withValues(alpha: 0.05),
+                enabledBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(12),
-                  borderSide: const BorderSide(color: MoscaroTokens.borderGlow),
+                  borderSide: BorderSide(color: isLight ? Colors.black12 : Colors.white12),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide(color: MoscaroTokens.auroraBlue, width: 1.3),
                 ),
                 contentPadding: const EdgeInsets.symmetric(vertical: 8),
               ),
-            ).moscaroV2(
-              borderRadius: 12,
-              padding: EdgeInsets.zero,
-              borderWidth: 0,
             ),
             const SizedBox(height: 12),
-            const Divider(height: 1, color: Colors.white12),
+            Divider(height: 1, color: isLight ? Colors.black12 : Colors.white12),
             const SizedBox(height: 12),
             // Lista Principal de Notas
             Expanded(
@@ -170,14 +176,16 @@ class _NoteSidebarState extends State<NoteSidebar> {
                 builder: (context, candidateData, rejectedData) {
                   return Container(
                     decoration: BoxDecoration(
-                      color: candidateData.isNotEmpty ? Colors.white.withOpacity(0.02) : Colors.transparent,
+                      color: candidateData.isNotEmpty
+                          ? (isLight ? MoscaroTokens.auroraBlue.withValues(alpha: 0.08) : Colors.white.withValues(alpha: 0.02))
+                          : Colors.transparent,
                       borderRadius: BorderRadius.circular(12),
                     ),
                     child: filteredNotes.isEmpty
-                        ? const Center(
+                        ? Center(
                             child: Text(
                               'Sem resultados',
-                              style: TextStyle(color: Colors.white24, fontSize: 13),
+                              style: TextStyle(color: textSecondary.withValues(alpha: 0.5), fontSize: 13),
                             ),
                           )
                         : ScrollConfiguration(
@@ -198,6 +206,7 @@ class _NoteSidebarState extends State<NoteSidebar> {
         ),
       ).moscaroV2(
         borderRadius: MoscaroTokens.radiusPanel,
+        enableBlur: MoscaroTokens.enableSidebarBlur,
         padding: const EdgeInsets.all(18),
       ),
     );
@@ -220,9 +229,8 @@ class _NoteSidebarState extends State<NoteSidebar> {
             feedback: Material(
               color: Colors.transparent,
               child: SizedBox(
-                width: 264 - indent,
-                child: _buildNotePill(note, isExpanded, hasChildren, false, isGhost: true)
-                    .moscaroV2(borderRadius: 10, padding: EdgeInsets.zero, borderWidth: 1.2),
+                width: 290 - indent,
+                child: _buildNotePill(note, isExpanded, hasChildren, false, isGhost: true),
               ),
             ),
             childWhenDragging: Opacity(
@@ -250,21 +258,26 @@ class _NoteSidebarState extends State<NoteSidebar> {
 
   Widget _buildNotePill(NoteDocument note, bool isExpanded, bool hasChildren, bool isCandidate, {bool isGhost = false}) {
     final bool isSelected = _selectedNoteIds.contains(note.id);
-    
-    final Color pillColor = isGhost 
-        ? Colors.black.withOpacity(0.4) 
-        : (isSelected 
-            ? Colors.white.withOpacity(0.06)
-            : (isCandidate ? Colors.white.withOpacity(0.08) : Colors.white.withOpacity(0.03)));
+    final isLight = MoscaroTokens.isLight;
+    final textPrimary = MoscaroTokens.textPrimary;
+    final iconColor = MoscaroTokens.iconInactive;
+
+    final Color pillColor = isGhost
+        ? Colors.black.withValues(alpha: 0.4)
+        : (isSelected
+            ? (isLight ? MoscaroTokens.auroraBlue.withValues(alpha: 0.12) : Colors.white.withValues(alpha: 0.06))
+            : (isCandidate
+                ? (isLight ? MoscaroTokens.auroraBlue.withValues(alpha: 0.08) : Colors.white.withValues(alpha: 0.08))
+                : (isLight ? Colors.black.withValues(alpha: 0.02) : Colors.white.withValues(alpha: 0.03))));
 
     return Container(
       decoration: BoxDecoration(
         color: pillColor,
         borderRadius: BorderRadius.circular(10),
         border: Border.all(
-          color: isSelected 
-              ? MoscaroTokens.auroraBlue.withOpacity(0.8) 
-              : (isCandidate ? MoscaroTokens.auroraBlue : Colors.white10),
+          color: isSelected
+              ? MoscaroTokens.auroraBlue.withValues(alpha: 0.8)
+              : (isCandidate ? MoscaroTokens.auroraBlue : (isLight ? Colors.black12 : Colors.white10)),
           width: 1.2,
         ),
       ),
@@ -305,29 +318,34 @@ class _NoteSidebarState extends State<NoteSidebar> {
                       },
                       child: Icon(
                         isExpanded ? Icons.keyboard_arrow_down : Icons.keyboard_arrow_right,
-                        color: Colors.white70,
+                        color: iconColor,
                         size: 18,
                       ),
                     )
-                  : const Icon(Icons.description, color: Colors.white54, size: 16)),
+                  : Icon(Icons.description_outlined, color: iconColor, size: 16)),
           title: Text(
             note.title,
-            style: const TextStyle(color: Colors.white, fontSize: 13),
+            style: TextStyle(
+              color: isSelected ? (isLight ? MoscaroTokens.auroraBlue : textPrimary) : textPrimary,
+              fontSize: 13,
+              fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
+            ),
+            overflow: TextOverflow.ellipsis,
           ),
-          trailing: _isSelectionMode 
+          trailing: _isSelectionMode
               ? null
               : Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     IconButton(
-                      icon: const SvgIcon(assetName: 'trash', size: 16, color: Colors.white38),
+                      icon: const SvgIcon(assetName: 'trash', size: 16, color: MoscaroTokens.auroraPink),
                       onPressed: () => widget.onMoveToTrash([note.id]),
                       padding: EdgeInsets.zero,
                       constraints: const BoxConstraints(),
                       tooltip: 'Mover para Lixeira',
                     ),
                     const SizedBox(width: 6),
-                    const Icon(Icons.drag_indicator, color: Colors.white24, size: 14),
+                    Icon(Icons.drag_indicator, color: isLight ? Colors.black26 : Colors.white24, size: 14),
                   ],
                 ),
           onTap: _isSelectionMode
@@ -347,15 +365,17 @@ class _NoteSidebarState extends State<NoteSidebar> {
   }
 
   Widget _buildTrashFolder() {
+    final isLight = MoscaroTokens.isLight;
+    final textSecondary = MoscaroTokens.textSecondary;
+
     return Container(
       decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.02),
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: Colors.white10, width: 1.0),
+        color: isLight ? Colors.black.withValues(alpha: 0.03) : Colors.white.withValues(alpha: 0.02),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: isLight ? Colors.black12 : Colors.white10, width: 1.0),
       ),
       child: ClipRRect(
-        borderRadius: BorderRadius.circular(20),
-        // BUGFIX: Adicionando Material de proteção para o ListTile que é instanciado internamente pelo ExpansionTile
+        borderRadius: BorderRadius.circular(16),
         child: Material(
           color: Colors.transparent,
           child: Theme(
@@ -367,7 +387,7 @@ class _NoteSidebarState extends State<NoteSidebar> {
                   const SizedBox(width: 8),
                   Text(
                     'Lixeira (${widget.trashNotes.length})',
-                    style: const TextStyle(color: Colors.white70, fontSize: 13, fontWeight: FontWeight.bold),
+                    style: TextStyle(color: textSecondary, fontSize: 13, fontWeight: FontWeight.bold),
                   ),
                 ],
               ),
@@ -387,7 +407,7 @@ class _NoteSidebarState extends State<NoteSidebar> {
                   const SizedBox(width: 8),
                   Icon(
                     _isTrashExpanded ? Icons.keyboard_arrow_down : Icons.keyboard_arrow_right,
-                    color: Colors.white38,
+                    color: textSecondary.withValues(alpha: 0.6),
                   ),
                 ],
               ),
@@ -398,11 +418,11 @@ class _NoteSidebarState extends State<NoteSidebar> {
               },
               children: [
                 if (widget.trashNotes.isEmpty)
-                  const Padding(
-                    padding: EdgeInsets.symmetric(vertical: 12),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 12),
                     child: Text(
                       'Lixeira vazia',
-                      style: TextStyle(color: Colors.white24, fontSize: 12),
+                      style: TextStyle(color: textSecondary.withValues(alpha: 0.4), fontSize: 12),
                     ),
                   )
                 else
@@ -416,9 +436,9 @@ class _NoteSidebarState extends State<NoteSidebar> {
                             margin: const EdgeInsets.only(bottom: 6),
                             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                             decoration: BoxDecoration(
-                              color: Colors.white.withOpacity(0.03),
+                              color: isLight ? Colors.black.withValues(alpha: 0.04) : Colors.white.withValues(alpha: 0.03),
                               borderRadius: BorderRadius.circular(10),
-                              border: Border.all(color: Colors.white10, width: 1.0),
+                              border: Border.all(color: isLight ? Colors.black12 : Colors.white10, width: 1.0),
                             ),
                             child: Row(
                               mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -426,7 +446,7 @@ class _NoteSidebarState extends State<NoteSidebar> {
                                 Flexible(
                                   child: Text(
                                     note.title,
-                                    style: const TextStyle(color: Colors.white60, fontSize: 12),
+                                    style: TextStyle(color: textSecondary, fontSize: 12),
                                     overflow: TextOverflow.ellipsis,
                                   ),
                                 ),

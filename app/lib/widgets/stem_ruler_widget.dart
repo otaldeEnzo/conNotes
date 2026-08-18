@@ -45,7 +45,7 @@ class _StemRulerWidgetState extends State<StemRulerWidget> {
           ),
           title: Row(
             children: [
-              const SvgIcon(assetName: 'rotate', size: 20, color: MoscaroTokens.auroraBlue),
+              SvgIcon(assetName: 'rotate', size: 20, color: MoscaroTokens.auroraBlue),
               const SizedBox(width: 8),
               const Text(
                 'Ajustar Ângulo da Régua',
@@ -69,7 +69,7 @@ class _StemRulerWidgetState extends State<StemRulerWidget> {
                 style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold),
                 decoration: InputDecoration(
                   suffixText: '°',
-                  suffixStyle: const TextStyle(color: MoscaroTokens.auroraBlue, fontSize: 18),
+                  suffixStyle: TextStyle(color: MoscaroTokens.auroraBlue, fontSize: 18),
                   filled: true,
                   fillColor: Colors.white.withValues(alpha: 0.05),
                   enabledBorder: OutlineInputBorder(
@@ -78,7 +78,7 @@ class _StemRulerWidgetState extends State<StemRulerWidget> {
                   ),
                   focusedBorder: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(8),
-                    borderSide: const BorderSide(color: MoscaroTokens.auroraBlue, width: 1.5),
+                    borderSide: BorderSide(color: MoscaroTokens.auroraBlue, width: 1.5),
                   ),
                 ),
                 onSubmitted: (val) {
@@ -103,7 +103,7 @@ class _StemRulerWidgetState extends State<StemRulerWidget> {
                 foregroundColor: MoscaroTokens.auroraBlue,
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(8),
-                  side: const BorderSide(color: MoscaroTokens.auroraBlue),
+                  side: BorderSide(color: MoscaroTokens.auroraBlue),
                 ),
               ),
               onPressed: () {
@@ -146,11 +146,12 @@ class _StemRulerWidgetState extends State<StemRulerWidget> {
               width: scaledLength,
               height: scaledWidth,
             ).moscaroV2(
-              blurSigma: 25.0, // Aumentado para garantir que seja visível
+              blurSigma: 25.0,
+              enableBlur: MoscaroTokens.enableInstrumentsBlur,
               backgroundColor: const Color(0xFF0A0E18).withValues(alpha: 0.42),
               borderRadius: 12.0 * widget.zoomScale,
               borderWidth: 0,
-              borderColor: Colors.transparent, // A borda já é desenhada pelo CustomPainter
+              borderColor: Colors.transparent,
               padding: EdgeInsets.zero,
             ),
           ),
@@ -354,8 +355,8 @@ class StemRulerPainter extends CustomPainter {
     final deg = state.displayDegrees;
     final textSpan = TextSpan(
       text: '$deg°',
-      style: const TextStyle(
-        color: Colors.white,
+      style: TextStyle(
+        color: MoscaroTokens.canvasTextColor,
         fontSize: 12.0,
         fontWeight: FontWeight.bold,
         letterSpacing: 0.5,

@@ -1,8 +1,87 @@
-/target
+# ==========================================
+# conNotes - Global .gitignore
+# ==========================================
+
+# 1. Rust & Core Build Artifacts
+target/
+**/target/
+**/*.rs.bk
+Cargo.lock
+
+# 2. Flutter & Dart Build Artifacts
+app/build/
+**/build/
+.dart_tool/
+**/.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+.pub-cache/
+.pub/
+**/doc/api/
+**/ios/Flutter/.last_build_id
+
+# Ephemeral Engine Files (Windows / Linux / macOS / iOS / Android)
+app/windows/flutter/ephemeral/
+**/windows/flutter/ephemeral/
+app/linux/flutter/ephemeral/
+**/linux/flutter/ephemeral/
+app/macos/Flutter/ephemeral/
+**/macos/Flutter/ephemeral/
+app/ios/Flutter/ephemeral/
+**/ios/Flutter/ephemeral/
+**/android/app/debug/
+**/android/app/profile/
+**/android/app/release/
+
+# 3. Local Runtime State & User Data
+app/settings.json
+**/settings.json
 *.db
+*.db-journal
 *.db.backup
+*.sqlite
+*.sqlite3
+
+# 4. Logs & Diagnostic Dumps
+*.log
+*.crash
+app.*.symbols
+app.*.map.json
+
+# 5. Secrets, Environment Variables & Keys
 .env
-*.txt
-*.md
-*.png
+.env.*
+*.env
+*.keystore
+*.jks
+key.properties
+*.p12
+*.mobileprovision
+
+# 6. IDEs & Editors
+.idea/
+*.iml
+*.ipr
+*.iws
+.vscode/
+*.swp
+*.swo
+*~
+.history/
+.atom/
+.buildlog/
+
+# 7. Operating System Artifacts
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+desktop.ini
+
+# 8. Internal Analysis Tools & Knowledge Graphs
 /graphify-out/
+graphify-out/

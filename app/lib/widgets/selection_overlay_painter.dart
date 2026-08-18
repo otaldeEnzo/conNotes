@@ -3,6 +3,7 @@ import 'dart:ui' as ui;
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import '../theme/moscaro_v2_tokens.dart';
+import '../theme/stem_ink_theme_adapter.dart';
 import 'canvas_layers.dart';
 import 'ink_models.dart';
 import 'note_models.dart';
@@ -292,9 +293,10 @@ class SelectionOverlayPainter extends CustomPainter {
     }
 
     try {
+      final adapted = StemInkThemeAdapter.adaptStrokeColor(stroke.color, isLightTheme: MoscaroTokens.isLight);
       final color = stroke.toolType == InkToolType.highlighter
-          ? stroke.color.withOpacity(0.35)
-          : (stroke.toolType == InkToolType.pencil ? stroke.color.withOpacity(0.65) : stroke.color);
+          ? adapted.withValues(alpha: 0.35)
+          : (stroke.toolType == InkToolType.pencil ? adapted.withValues(alpha: 0.65) : adapted);
 
       reusablePaint
         ..color = color
@@ -357,11 +359,12 @@ class SelectionOverlayPainter extends CustomPainter {
       }
 
       final newStrokeWidth = (stroke.strokeWidth * geomScale).clamp(0.5, 50.0);
+      final adapted = StemInkThemeAdapter.adaptStrokeColor(stroke.color, isLightTheme: MoscaroTokens.isLight);
 
       // Renderização direta 1:1 idêntica aos traços finais
       if (stroke.toolType == InkToolType.fountain || stroke.enablePressure) {
         reusablePaint
-          ..color = stroke.color
+          ..color = adapted
           ..style = PaintingStyle.fill;
         final path = FreehandOutlineRenderer.generateOutlinePath(
           mappedPoints,
@@ -371,8 +374,8 @@ class SelectionOverlayPainter extends CustomPainter {
         canvas.drawPath(path, reusablePaint);
       } else {
         final color = stroke.toolType == InkToolType.highlighter
-            ? stroke.color.withOpacity(0.35)
-            : (stroke.toolType == InkToolType.pencil ? stroke.color.withOpacity(0.65) : stroke.color);
+            ? adapted.withValues(alpha: 0.35)
+            : (stroke.toolType == InkToolType.pencil ? adapted.withValues(alpha: 0.65) : adapted);
 
         reusablePaint
           ..color = color

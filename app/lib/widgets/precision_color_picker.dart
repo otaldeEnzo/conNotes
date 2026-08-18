@@ -99,6 +99,12 @@ class _PrecisionColorPickerState extends State<PrecisionColorPicker> {
 
   @override
   Widget build(BuildContext context) {
+    final isLight = MoscaroTokens.isLight;
+    final textPrimary = MoscaroTokens.textPrimary;
+    final textSecondary = MoscaroTokens.textSecondary;
+    final dividerColor = isLight ? Colors.black12 : Colors.white12;
+    final borderColor = isLight ? Colors.black12 : Colors.white24;
+
     return Container(
       width: 280,
       decoration: BoxDecoration(
@@ -120,16 +126,16 @@ class _PrecisionColorPickerState extends State<PrecisionColorPicker> {
                     decoration: BoxDecoration(
                       color: _currentColor,
                       shape: BoxShape.circle,
-                      border: Border.all(color: Colors.white, width: 1.5),
+                      border: Border.all(color: isLight ? Colors.black26 : Colors.white, width: 1.5),
                       boxShadow: [
-                        BoxShadow(color: _currentColor.withOpacity(0.6), blurRadius: 10),
+                        BoxShadow(color: _currentColor.withValues(alpha: 0.6), blurRadius: 10),
                       ],
                     ),
                   ),
                   const SizedBox(width: 8),
-                  const Text(
+                  Text(
                     'Ajustar Caneta',
-                    style: TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.bold),
+                    style: TextStyle(color: textPrimary, fontSize: 13, fontWeight: FontWeight.bold),
                   ),
                 ],
               ),
@@ -144,19 +150,19 @@ class _PrecisionColorPickerState extends State<PrecisionColorPicker> {
             ],
           ),
           const SizedBox(height: 8),
-          const Divider(height: 1, color: Colors.white12),
+          Divider(height: 1, color: dividerColor),
           const SizedBox(height: 8),
 
           // 2. Seletor do Tipo de Ferramenta
-          const Text('Tipo de Ferramenta', style: TextStyle(color: Colors.white60, fontSize: 11)),
+          Text('Tipo de Ferramenta', style: TextStyle(color: textSecondary, fontSize: 11)),
           const SizedBox(height: 6),
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              _buildToolTypeButton('Técnica', InkToolType.technical, Icons.edit),
-              _buildToolTypeButton('Tinteiro', InkToolType.fountain, Icons.brush),
-              _buildToolTypeButton('Lápis', InkToolType.pencil, Icons.create),
-              _buildToolTypeButton('Marca', InkToolType.highlighter, Icons.highlight),
+              _buildToolTypeButton('Técnica', InkToolType.technical, Icons.edit, isLight, textPrimary, textSecondary),
+              _buildToolTypeButton('Tinteiro', InkToolType.fountain, Icons.brush, isLight, textPrimary, textSecondary),
+              _buildToolTypeButton('Lápis', InkToolType.pencil, Icons.create, isLight, textPrimary, textSecondary),
+              _buildToolTypeButton('Marca', InkToolType.highlighter, Icons.highlight, isLight, textPrimary, textSecondary),
             ],
           ),
           const SizedBox(height: 8),
@@ -166,9 +172,9 @@ class _PrecisionColorPickerState extends State<PrecisionColorPicker> {
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                const Text('Sensibilidade à Pressão', style: TextStyle(color: Colors.white70, fontSize: 12)),
+                Text('Sensibilidade à Pressão', style: TextStyle(color: textSecondary, fontSize: 12)),
                 Transform.scale(
-                  scale: 0.72, // Reduzido o switch para proporções elegantes e proporcionais ao texto
+                  scale: 0.72,
                   child: Switch(
                     value: _enablePressure,
                     activeColor: MoscaroTokens.auroraBlue,
@@ -182,13 +188,13 @@ class _PrecisionColorPickerState extends State<PrecisionColorPicker> {
             ),
 
           const SizedBox(height: 4),
-          const Divider(height: 1, color: Colors.white12),
+          Divider(height: 1, color: dividerColor),
           const SizedBox(height: 8),
 
           // 3. Matriz 2D de Alta Precisão (Saturação x Brilho)
-          const Text('Espectro de Precisão 2D', style: TextStyle(color: Colors.white60, fontSize: 11)),
+          Text('Espectro de Precisão 2D', style: TextStyle(color: textSecondary, fontSize: 11)),
           const SizedBox(height: 6),
-          _build2DColorMatrix(),
+          _build2DColorMatrix(borderColor),
           const SizedBox(height: 8),
 
           // 4. Slider de Matiz (Hue)
@@ -220,7 +226,7 @@ class _PrecisionColorPickerState extends State<PrecisionColorPicker> {
                         decoration: BoxDecoration(
                           color: col,
                           shape: BoxShape.circle,
-                          border: Border.all(color: Colors.white24, width: 1),
+                          border: Border.all(color: borderColor, width: 1),
                         ),
                       ),
                     );
@@ -234,14 +240,14 @@ class _PrecisionColorPickerState extends State<PrecisionColorPicker> {
                 child: TextField(
                   controller: _hexController,
                   onChanged: _updateColorFromHex,
-                  style: const TextStyle(color: Colors.white, fontSize: 11, fontFamily: 'monospace'),
+                  style: TextStyle(color: textPrimary, fontSize: 11, fontFamily: 'monospace'),
                   decoration: InputDecoration(
                     contentPadding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
                     filled: true,
-                    fillColor: Colors.white.withOpacity(0.04),
+                    fillColor: isLight ? Colors.black.withValues(alpha: 0.04) : Colors.white.withValues(alpha: 0.04),
                     border: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(8),
-                      borderSide: const BorderSide(color: Colors.white24),
+                      borderSide: BorderSide(color: borderColor),
                     ),
                   ),
                 ),
@@ -249,15 +255,15 @@ class _PrecisionColorPickerState extends State<PrecisionColorPicker> {
             ],
           ),
           const SizedBox(height: 10),
-          const Divider(height: 1, color: Colors.white12),
+          Divider(height: 1, color: dividerColor),
           const SizedBox(height: 8),
 
           // 6. Espessura do Traço
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              const Text('Espessura', style: TextStyle(color: Colors.white60, fontSize: 11)),
-              Text('${_strokeWidth.toStringAsFixed(1)} px', style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold)),
+              Text('Espessura', style: TextStyle(color: textSecondary, fontSize: 11)),
+              Text('${_strokeWidth.toStringAsFixed(1)} px', style: TextStyle(color: textPrimary, fontSize: 11, fontWeight: FontWeight.bold)),
             ],
           ),
           SliderTheme(
@@ -266,7 +272,7 @@ class _PrecisionColorPickerState extends State<PrecisionColorPicker> {
               thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
               thumbColor: MoscaroTokens.auroraBlue,
               activeTrackColor: MoscaroTokens.auroraBlue,
-              inactiveTrackColor: Colors.white12,
+              inactiveTrackColor: isLight ? Colors.black12 : Colors.white12,
               overlayShape: SliderComponentShape.noOverlay,
             ),
             child: Slider(
@@ -288,7 +294,7 @@ class _PrecisionColorPickerState extends State<PrecisionColorPicker> {
     );
   }
 
-  Widget _buildToolTypeButton(String label, InkToolType type, IconData icon) {
+  Widget _buildToolTypeButton(String label, InkToolType type, IconData icon, bool isLight, Color textPrimary, Color textSecondary) {
     final isSelected = _toolType == type;
     return GestureDetector(
       onTap: () {
@@ -298,21 +304,21 @@ class _PrecisionColorPickerState extends State<PrecisionColorPicker> {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
         decoration: BoxDecoration(
-          color: isSelected ? MoscaroTokens.auroraBlue.withOpacity(0.15) : Colors.transparent,
+          color: isSelected ? MoscaroTokens.auroraBlue.withValues(alpha: isLight ? 0.2 : 0.15) : Colors.transparent,
           borderRadius: BorderRadius.circular(10),
           border: Border.all(
-            color: isSelected ? MoscaroTokens.auroraBlue : Colors.white12,
+            color: isSelected ? MoscaroTokens.auroraBlue : (isLight ? Colors.black12 : Colors.white12),
             width: 1.0,
           ),
         ),
         child: Column(
           children: [
-            Icon(icon, size: 16, color: isSelected ? MoscaroTokens.auroraBlue : Colors.white60),
+            Icon(icon, size: 16, color: isSelected ? MoscaroTokens.auroraBlue : textSecondary),
             const SizedBox(height: 2),
             Text(
               label,
               style: TextStyle(
-                color: isSelected ? Colors.white : Colors.white60,
+                color: isSelected ? (isLight ? MoscaroTokens.auroraBlue : textPrimary) : textSecondary,
                 fontSize: 10,
                 fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
               ),
@@ -323,7 +329,7 @@ class _PrecisionColorPickerState extends State<PrecisionColorPicker> {
     );
   }
 
-  Widget _build2DColorMatrix() {
+  Widget _build2DColorMatrix(Color borderColor) {
     return LayoutBuilder(
       builder: (context, constraints) {
         final double width = constraints.maxWidth;
@@ -338,7 +344,7 @@ class _PrecisionColorPickerState extends State<PrecisionColorPicker> {
             height: height,
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(10),
-              border: Border.all(color: Colors.white24, width: 1.0),
+              border: Border.all(color: borderColor, width: 1.0),
               gradient: LinearGradient(
                 begin: Alignment.centerLeft,
                 end: Alignment.centerRight,

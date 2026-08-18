@@ -1,7 +1,8 @@
 import 'dart:math' as math;
 import 'dart:ui' as ui;
-import 'dart:typed_data';
 import 'package:flutter/material.dart';
+import '../theme/moscaro_v2_tokens.dart';
+import '../theme/stem_ink_theme_adapter.dart';
 import 'ink_models.dart';
 import 'selection_models.dart';
 
@@ -98,6 +99,12 @@ class TileSubChunk {
     if (picture != null) {
       canvas.drawPicture(picture!);
     }
+  }
+
+  void invalidatePicture() {
+    picture?.dispose();
+    picture = null;
+    isDirty = true;
   }
 
   void dispose() {
@@ -268,6 +275,18 @@ class CanvasTile {
     } catch (_) {
       _needsTextureBake = false;
       return false;
+    }
+  }
+
+  void invalidatePictures() {
+    image?.dispose();
+    image = null;
+    picture?.dispose();
+    picture = null;
+    isDirty = true;
+    _needsTextureBake = true;
+    for (var i = 0; i < _chunks.length; i++) {
+      _chunks[i].invalidatePicture();
     }
   }
 
@@ -444,6 +463,15 @@ class StrokePictureCache {
     insertStrokeToTiles(updatedStroke);
   }
 
+  /// Invalida todas as texturas e Pictures compostos SEM apagar os traços dos tiles
+  void invalidatePictures() {
+    for (final col in _tiles.values) {
+      for (final tile in col.values) {
+        tile.invalidatePictures();
+      }
+    }
+  }
+
   void clear() {
     for (final col in _tiles.values) {
       for (final tile in col.values) {
@@ -489,7 +517,7 @@ class StrokePictureCache {
       // 2. Marca-texto (Highlighter)
       if (stroke.toolType == InkToolType.highlighter) {
         reusablePaint
-          ..color = stroke.color.withOpacity(0.35)
+          ..color = _getStrokeColor(stroke)
           ..strokeWidth = stroke.strokeWidth * 3.5
           ..strokeCap = StrokeCap.square
           ..strokeJoin = StrokeJoin.miter
@@ -503,7 +531,7 @@ class StrokePictureCache {
       // 3. Lápis Grafite (Pencil)
       if (stroke.toolType == InkToolType.pencil) {
         reusablePaint
-          ..color = stroke.color.withOpacity(0.65)
+          ..color = _getStrokeColor(stroke)
           ..strokeWidth = stroke.strokeWidth
           ..strokeCap = StrokeCap.round
           ..strokeJoin = StrokeJoin.round
@@ -516,7 +544,7 @@ class StrokePictureCache {
 
       // 4. Traço Técnico Uniforme
       reusablePaint
-        ..color = stroke.color
+        ..color = _getStrokeColor(stroke)
         ..strokeWidth = stroke.strokeWidth
         ..strokeCap = StrokeCap.round
         ..strokeJoin = StrokeJoin.round
@@ -538,9 +566,10 @@ class StrokePictureCache {
   }
 
   static Color _getStrokeColor(InkStroke stroke) {
-    if (stroke.toolType == InkToolType.highlighter) return stroke.color.withOpacity(0.35);
-    if (stroke.toolType == InkToolType.pencil) return stroke.color.withOpacity(0.65);
-    return stroke.color;
+    final adapted = StemInkThemeAdapter.adaptStrokeColor(stroke.color, isLightTheme: MoscaroTokens.isLight);
+    if (stroke.toolType == InkToolType.highlighter) return adapted.withValues(alpha: 0.35);
+    if (stroke.toolType == InkToolType.pencil) return adapted.withValues(alpha: 0.65);
+    return adapted;
   }
 
   static Path _buildSmoothCatmullRomPath(List<StrokePoint> points) {
@@ -713,9 +742,6 @@ class CommittedStrokesPainter extends CustomPainter {
   final StrokePictureCache pictureCache;
   final bool isInteracting;
 
-  // Pool de Paint reutilizável (Zero allocation por frame)
-  final Paint _reusablePaint = Paint();
-
   CommittedStrokesPainter({
     required this.strokes,
     required this.strokesCount,
@@ -789,9 +815,10 @@ class TransientStrokesPictureCache {
       if (stroke.transform != Offset.zero) {
         canvas.translate(stroke.transform.dx, stroke.transform.dy);
       }
+      final color = StrokePictureCache._getStrokeColor(stroke);
       if (stroke.points.length > 50) {
         reusablePaint
-          ..color = stroke.color
+          ..color = color
           ..strokeWidth = stroke.strokeWidth
           ..strokeCap = StrokeCap.round
           ..style = PaintingStyle.stroke;
@@ -799,7 +826,7 @@ class TransientStrokesPictureCache {
       } else {
         stroke.cachedPath ??= StrokePictureCache._buildSmoothCatmullRomPath(stroke.points);
         reusablePaint
-          ..color = stroke.color
+          ..color = color
           ..strokeWidth = stroke.strokeWidth
           ..strokeCap = StrokeCap.round
           ..style = PaintingStyle.stroke;
@@ -820,7 +847,6 @@ class TransientStrokesPictureCache {
   void clear() {
     _picture?.dispose();
     _picture = null;
-    _strokeCount = 0;
   }
 
   void dispose() {
@@ -863,20 +889,17 @@ class TransientStrokesPainter extends CustomPainter {
   }
 }
 
-/// Painter isolado que desenha APENAS o traço atualmente sendo desenhado.
-/// Vinculado a um ValueNotifier para repintar 144Hz SEM disparar setState() no app.
+/// Painter ultra-eficiente para o traço em desenho ativo (144 Hz).
 class ActiveStrokePainter extends CustomPainter {
   final InkStroke? activeStroke;
-  final ValueNotifier<int> updateNotifier;
+  final ValueNotifier<int>? updateNotifier;
   final Offset panOffset;
   final double zoomScale;
-
-  // Pool de Paint reutilizável (Zero allocation por frame)
   final Paint _reusablePaint = Paint();
 
   ActiveStrokePainter({
     required this.activeStroke,
-    required this.updateNotifier,
+    this.updateNotifier,
     required this.panOffset,
     required this.zoomScale,
   }) : super(repaint: updateNotifier);
@@ -890,15 +913,7 @@ class ActiveStrokePainter extends CustomPainter {
     canvas.translate(panOffset.dx, panOffset.dy);
     canvas.scale(zoomScale);
 
-    _drawStroke(canvas, stroke);
-
-    canvas.restore();
-  }
-
-  void _drawStroke(Canvas canvas, InkStroke stroke) {
-    if (stroke.points.isEmpty) return;
-
-    final bool hasTransform = stroke.transform != Offset.zero;
+    final hasTransform = stroke.transform != Offset.zero;
     if (hasTransform) {
       canvas.save();
       canvas.translate(stroke.transform.dx, stroke.transform.dy);
@@ -932,7 +947,7 @@ class ActiveStrokePainter extends CustomPainter {
       // 2. Marca-texto (Highlighter)
       if (stroke.toolType == InkToolType.highlighter) {
         _reusablePaint
-          ..color = stroke.color.withOpacity(0.35)
+          ..color = _getStrokeColor(stroke)
           ..strokeWidth = stroke.strokeWidth * 3.5
           ..strokeCap = StrokeCap.square
           ..strokeJoin = StrokeJoin.miter
@@ -946,7 +961,7 @@ class ActiveStrokePainter extends CustomPainter {
       // 3. Lápis Grafite (Pencil)
       if (stroke.toolType == InkToolType.pencil) {
         _reusablePaint
-          ..color = stroke.color.withOpacity(0.65)
+          ..color = _getStrokeColor(stroke)
           ..strokeWidth = stroke.strokeWidth
           ..strokeCap = StrokeCap.round
           ..strokeJoin = StrokeJoin.round
@@ -959,7 +974,7 @@ class ActiveStrokePainter extends CustomPainter {
 
       // 4. Traço Técnico Uniforme
       _reusablePaint
-        ..color = stroke.color
+        ..color = _getStrokeColor(stroke)
         ..strokeWidth = stroke.strokeWidth
         ..strokeCap = StrokeCap.round
         ..strokeJoin = StrokeJoin.round
@@ -968,12 +983,7 @@ class ActiveStrokePainter extends CustomPainter {
       if (stroke.cachedPath != null) {
         canvas.drawPath(stroke.cachedPath!, _reusablePaint);
       } else if (stroke.points.length > 50) {
-        final raw = Float32List(stroke.points.length * 2);
-        for (int i = 0; i < stroke.points.length; i++) {
-          raw[i * 2] = stroke.points[i].point.dx;
-          raw[i * 2 + 1] = stroke.points[i].point.dy;
-        }
-        canvas.drawRawPoints(ui.PointMode.polygon, raw, _reusablePaint);
+        canvas.drawRawPoints(ui.PointMode.polygon, stroke.rawPoints, _reusablePaint);
       } else {
         final path = _buildSmoothCatmullRomPath(stroke.points);
         canvas.drawPath(path, _reusablePaint);
@@ -986,9 +996,10 @@ class ActiveStrokePainter extends CustomPainter {
   }
 
   Color _getStrokeColor(InkStroke stroke) {
-    if (stroke.toolType == InkToolType.highlighter) return stroke.color.withOpacity(0.35);
-    if (stroke.toolType == InkToolType.pencil) return stroke.color.withOpacity(0.65);
-    return stroke.color;
+    final adapted = StemInkThemeAdapter.adaptStrokeColor(stroke.color, isLightTheme: MoscaroTokens.isLight);
+    if (stroke.toolType == InkToolType.highlighter) return adapted.withValues(alpha: 0.35);
+    if (stroke.toolType == InkToolType.pencil) return adapted.withValues(alpha: 0.65);
+    return adapted;
   }
 
   Path _buildSmoothCatmullRomPath(List<StrokePoint> points) {

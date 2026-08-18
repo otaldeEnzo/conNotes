@@ -52,7 +52,7 @@ class GridMenuCard extends StatelessWidget {
                       Text(
                         item.$2,
                         style: TextStyle(
-                          color: isSelected ? MoscaroTokens.auroraBlue : Colors.white,
+                          color: isSelected ? MoscaroTokens.auroraBlue : MoscaroTokens.textPrimary,
                           fontSize: 13,
                           fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
                         ),
@@ -61,7 +61,7 @@ class GridMenuCard extends StatelessWidget {
                         Container(
                           width: 6,
                           height: 6,
-                          decoration: const BoxDecoration(
+                          decoration: BoxDecoration(
                             color: MoscaroTokens.auroraBlue,
                             shape: BoxShape.circle,
                           ),
@@ -70,7 +70,7 @@ class GridMenuCard extends StatelessWidget {
                   ),
                 ),
               ),
-              if (!isLast) const Divider(height: 1, color: Colors.white12),
+              if (!isLast) Divider(height: 1, color: MoscaroTokens.borderSubtle),
             ],
           );
         }).toList(),

@@ -36,18 +36,6 @@ class SelectionSubBar extends StatelessWidget {
             child: Container(
               height: 44,
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-              decoration: BoxDecoration(
-                color: MoscaroTokens.glassWhite,
-                borderRadius: BorderRadius.circular(MoscaroTokens.radiusPill),
-                border: Border.all(color: MoscaroTokens.borderGlow),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.35),
-                    blurRadius: 16,
-                    offset: const Offset(0, 4),
-                  ),
-                ],
-              ),
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
