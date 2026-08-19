@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'dart:ui';
 import 'package:flutter/material.dart';
 import '../models/theme_models.dart';
@@ -37,6 +38,7 @@ class _ThemeEditorModalState extends State<ThemeEditorModal> {
   late Color _backgroundDeep;
   late Color _backgroundSurface;
   late List<Color> _gradientColors;
+  late List<double> _gradientStops;
   String? _bgImagePath;
   late double _bgImageOpacity;
   late CanvasTextureType _textureType;
@@ -70,6 +72,7 @@ class _ThemeEditorModalState extends State<ThemeEditorModal> {
     _backgroundDeep = init.backgroundDeep;
     _backgroundSurface = init.backgroundSurface;
     _gradientColors = List<Color>.from(init.effectiveGradientColors);
+    _gradientStops = List<double>.from(init.effectiveGradientStops);
     _bgImagePath = init.bgImagePath;
     _bgImageOpacity = init.bgImageOpacity;
     _textureType = init.textureType;
@@ -118,6 +121,7 @@ class _ThemeEditorModalState extends State<ThemeEditorModal> {
       backgroundDeep: _backgroundDeep,
       backgroundSurface: _backgroundSurface,
       gradientColors: _gradientColors,
+      gradientStops: _gradientStops,
       bgImagePath: _bgImagePath,
       bgImageOpacity: _bgImageOpacity,
       textureType: _textureType,
@@ -145,6 +149,7 @@ class _ThemeEditorModalState extends State<ThemeEditorModal> {
     setState(() {
       _backgroundDeep = generated.backgroundDeep;
       _gradientColors = List<Color>.from(generated.effectiveGradientColors);
+      _gradientStops = List<double>.from(generated.effectiveGradientStops);
       _accentSecondary = generated.accentSecondary;
       _dotGridColor = generated.dotGridColor;
       _mouseGlowColor = generated.mouseGlowColor;
@@ -162,6 +167,7 @@ class _ThemeEditorModalState extends State<ThemeEditorModal> {
       _backgroundDeep = generated.backgroundDeep;
       _backgroundSurface = generated.backgroundSurface;
       _gradientColors = List<Color>.from(generated.effectiveGradientColors);
+      _gradientStops = List<double>.from(generated.effectiveGradientStops);
       _accentPrimary = generated.accentPrimary;
       _accentSecondary = generated.accentSecondary;
       _dotGridColor = generated.dotGridColor;
@@ -268,27 +274,37 @@ class _ThemeEditorModalState extends State<ThemeEditorModal> {
                       borderRadius: BorderRadius.circular(16),
                       child: Stack(
                         children: [
-                          // Fundo do Canvas (Gradiente de N cores ou Sólido)
-                          Positioned.fill(
-                            child: Container(
-                              decoration: BoxDecoration(
-                                gradient: _bgMode == CanvasBackgroundMode.solidColor
-                                    ? null
-                                    : LinearGradient(
-                                        begin: Alignment.topLeft,
-                                        end: Alignment.bottomRight,
-                                        colors: _gradientColors.length >= 2
-                                            ? _gradientColors
-                                            : [_backgroundSurface, _backgroundDeep],
-                                        stops: [
-                                          for (int i = 0; i < (_gradientColors.length >= 2 ? _gradientColors.length : 2); i++)
-                                            i / ((_gradientColors.length >= 2 ? _gradientColors.length : 2) - 1)
-                                        ],
-                                      ),
-                                color: _bgMode == CanvasBackgroundMode.solidColor ? _backgroundSurface : null,
+                          if (_bgMode == CanvasBackgroundMode.customImage && _bgImagePath != null && File(_bgImagePath!).existsSync())
+                            Positioned.fill(
+                              child: Image.file(
+                                File(_bgImagePath!),
+                                fit: BoxFit.cover,
+                                opacity: AlwaysStoppedAnimation(_bgImageOpacity),
+                              ),
+                            )
+                          else
+                            Positioned.fill(
+                              child: Container(
+                                decoration: BoxDecoration(
+                                  gradient: _bgMode == CanvasBackgroundMode.solidColor
+                                      ? null
+                                      : LinearGradient(
+                                          begin: Alignment.topLeft,
+                                          end: Alignment.bottomRight,
+                                          colors: _gradientColors.length >= 2
+                                              ? _gradientColors
+                                              : [_backgroundSurface, _backgroundDeep],
+                                          stops: _gradientStops.length == _gradientColors.length
+                                              ? _gradientStops
+                                              : [
+                                                  for (int i = 0; i < (_gradientColors.length >= 2 ? _gradientColors.length : 2); i++)
+                                                    i / ((_gradientColors.length >= 2 ? _gradientColors.length : 2) - 1)
+                                                ],
+                                        ),
+                                  color: _bgMode == CanvasBackgroundMode.solidColor ? _backgroundSurface : null,
+                                ),
                               ),
                             ),
-                          ),
                           // Pontos do Grid e Glow Simulado
                           Positioned.fill(
                             child: CustomPaint(
@@ -550,6 +566,7 @@ class _ThemeEditorModalState extends State<ThemeEditorModal> {
                           backgroundSurface: _backgroundSurface,
                           backgroundDeep: _backgroundDeep,
                           gradientColors: _gradientColors,
+                          gradientStops: _gradientStops,
                           bgImagePath: _bgImagePath,
                           bgImageOpacity: _bgImageOpacity,
                           textureType: _textureType,
@@ -581,6 +598,17 @@ class _ThemeEditorModalState extends State<ThemeEditorModal> {
                               _gradientColors = colors;
                               if (colors.isNotEmpty) _backgroundSurface = colors.first;
                               if (colors.length >= 2) _backgroundDeep = colors.last;
+                              if (_gradientStops.length != colors.length) {
+                                _gradientStops = [
+                                  for (int i = 0; i < colors.length; i++) i / (colors.length - 1)
+                                ];
+                              }
+                            });
+                            _triggerLivePreview();
+                          },
+                          onGradientStopsChanged: (stops) {
+                            setState(() {
+                              _gradientStops = stops;
                             });
                             _triggerLivePreview();
                           },

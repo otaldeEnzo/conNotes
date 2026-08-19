@@ -221,6 +221,7 @@ class ThemeDefinition {
   final Color backgroundDeep;
   final Color backgroundSurface;
   final List<Color>? gradientColors;
+  final List<double>? gradientStops;
   final String? bgImagePath;
   final double bgImageOpacity;
   final CanvasTextureType textureType;
@@ -252,6 +253,7 @@ class ThemeDefinition {
     required this.backgroundDeep,
     required this.backgroundSurface,
     this.gradientColors,
+    this.gradientStops,
     this.bgImagePath,
     this.bgImageOpacity = 0.5,
     this.textureType = CanvasTextureType.none,
@@ -277,6 +279,17 @@ class ThemeDefinition {
       return gradientColors!;
     }
     return [backgroundSurface, backgroundDeep];
+  }
+
+  /// Retorna os offsets percentuais efetivos das paradas de cor (de 0.0 a 1.0)
+  List<double> get effectiveGradientStops {
+    final count = effectiveGradientColors.length;
+    if (gradientStops != null && gradientStops!.length == count) {
+      return gradientStops!;
+    }
+    return [
+      for (int i = 0; i < count; i++) i / (count - 1)
+    ];
   }
 
   // Contraste Inteligente para Texto do Canvas e Instrumentos (WCAG AAA)
@@ -526,6 +539,7 @@ class ThemeDefinition {
     Color? backgroundDeep,
     Color? backgroundSurface,
     List<Color>? gradientColors,
+    List<double>? gradientStops,
     String? bgImagePath,
     double? bgImageOpacity,
     CanvasTextureType? textureType,
@@ -551,6 +565,7 @@ class ThemeDefinition {
       backgroundDeep: backgroundDeep ?? this.backgroundDeep,
       backgroundSurface: backgroundSurface ?? this.backgroundSurface,
       gradientColors: gradientColors ?? this.gradientColors,
+      gradientStops: gradientStops ?? this.gradientStops,
       bgImagePath: bgImagePath ?? this.bgImagePath,
       bgImageOpacity: bgImageOpacity ?? this.bgImageOpacity,
       textureType: textureType ?? this.textureType,
@@ -578,6 +593,7 @@ class ThemeDefinition {
       'backgroundDeep': '#${backgroundDeep.toARGB32().toRadixString(16).padLeft(8, '0')}',
       'backgroundSurface': '#${backgroundSurface.toARGB32().toRadixString(16).padLeft(8, '0')}',
       'gradientColors': gradientColors?.map((c) => '#${c.toARGB32().toRadixString(16).padLeft(8, '0')}').toList(),
+      'gradientStops': gradientStops,
       'bgImagePath': bgImagePath,
       'bgImageOpacity': bgImageOpacity,
       'textureType': textureType.id,
@@ -616,6 +632,10 @@ class ThemeDefinition {
         ?.map((item) => parseHex(item.toString(), Colors.white))
         .toList();
 
+    final List<double>? gradStops = (json['gradientStops'] as List<dynamic>?)
+        ?.map((item) => (item as num).toDouble())
+        .toList();
+
     return ThemeDefinition(
       preset: AppThemePreset.custom,
       customId: json['customId'] as String? ?? 'custom_${DateTime.now().millisecondsSinceEpoch}',
@@ -625,6 +645,7 @@ class ThemeDefinition {
       backgroundDeep: parseHex(json['backgroundDeep'] as String?, moscaroCyan.backgroundDeep),
       backgroundSurface: parseHex(json['backgroundSurface'] as String?, moscaroCyan.backgroundSurface),
       gradientColors: gradColors,
+      gradientStops: gradStops,
       bgImagePath: json['bgImagePath'] as String?,
       bgImageOpacity: (json['bgImageOpacity'] as num?)?.toDouble() ?? 0.5,
       textureType: CanvasTextureType.fromId(json['textureType'] as String? ?? 'none'),

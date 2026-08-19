@@ -10,6 +10,7 @@ class ThemeBgTypeSelector extends StatelessWidget {
   final Color backgroundSurface;
   final Color backgroundDeep;
   final List<Color> gradientColors;
+  final List<double>? gradientStops;
   final String? bgImagePath;
   final double bgImageOpacity;
   final CanvasTextureType textureType;
@@ -18,6 +19,7 @@ class ThemeBgTypeSelector extends StatelessWidget {
   final ValueChanged<Color> onSurfaceColorChanged;
   final ValueChanged<Color> onDeepColorChanged;
   final ValueChanged<List<Color>> onGradientColorsChanged;
+  final ValueChanged<List<double>>? onGradientStopsChanged;
   final ValueChanged<String?> onImagePathChanged;
   final ValueChanged<double> onImageOpacityChanged;
   final ValueChanged<CanvasTextureType> onTextureTypeChanged;
@@ -28,6 +30,7 @@ class ThemeBgTypeSelector extends StatelessWidget {
     required this.backgroundSurface,
     required this.backgroundDeep,
     required this.gradientColors,
+    this.gradientStops,
     this.bgImagePath,
     required this.bgImageOpacity,
     required this.textureType,
@@ -36,6 +39,7 @@ class ThemeBgTypeSelector extends StatelessWidget {
     required this.onSurfaceColorChanged,
     required this.onDeepColorChanged,
     required this.onGradientColorsChanged,
+    this.onGradientStopsChanged,
     required this.onImagePathChanged,
     required this.onImageOpacityChanged,
     required this.onTextureTypeChanged,
@@ -192,8 +196,10 @@ class ThemeBgTypeSelector extends StatelessWidget {
       case CanvasBackgroundMode.gradient:
         return ThemeGradientStopsEditor(
           colors: gradientColors,
+          stops: gradientStops,
           accentColor: accentColor,
           onColorsChanged: onGradientColorsChanged,
+          onStopsChanged: onGradientStopsChanged,
         );
 
       case CanvasBackgroundMode.solidColor:

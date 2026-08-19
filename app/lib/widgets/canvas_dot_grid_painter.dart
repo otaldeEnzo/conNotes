@@ -52,8 +52,14 @@ class CanvasDotGridPainter extends CustomPainter {
     if (effectiveBgMode == CanvasBackgroundMode.solidColor) {
       bgPaint.color = theme.isCustom ? theme.backgroundSurface : customSolidColor;
       canvas.drawRect(rect, bgPaint);
+    } else if (effectiveBgMode == CanvasBackgroundMode.customImage) {
+      // Deixa a camada do painter transparente para que a imagem do disco (Renderizada na Camada 0) fique visível
+      bgPaint.color = Colors.transparent;
+      canvas.drawRect(rect, bgPaint);
+    } else if (effectiveBgMode == CanvasBackgroundMode.stemWallpaper) {
+      _paintStemWallpaperBackground(canvas, rect);
     } else if (effectiveBgMode == CanvasBackgroundMode.gradient ||
-        (theme.gradientColors != null && theme.gradientColors!.length >= 2) ||
+        (theme.gradientColors != null && theme.gradientColors!.length >= 2 && theme.isCustom) ||
         theme.bgMode == CanvasBackgroundMode.gradient) {
       final List<Color> colors = (theme.gradientColors != null && theme.gradientColors!.length >= 2)
           ? theme.gradientColors!
@@ -61,9 +67,13 @@ class CanvasDotGridPainter extends CustomPainter {
               ? theme.effectiveGradientColors
               : [customGradientStart, customGradientEnd]);
       
-      final List<double> stops = [
-        for (int i = 0; i < colors.length; i++) i / (colors.length - 1)
-      ];
+      final List<double> stops = (theme.gradientStops != null && theme.gradientStops!.length == colors.length)
+          ? theme.gradientStops!
+          : (theme.effectiveGradientStops.length == colors.length
+              ? theme.effectiveGradientStops
+              : [
+                  for (int i = 0; i < colors.length; i++) i / (colors.length - 1)
+                ]);
 
       bgPaint.shader = LinearGradient(
         begin: Alignment.topLeft,
@@ -71,11 +81,6 @@ class CanvasDotGridPainter extends CustomPainter {
         colors: colors,
         stops: stops,
       ).createShader(rect);
-      canvas.drawRect(rect, bgPaint);
-    } else if (backgroundMode == CanvasBackgroundMode.stemWallpaper) {
-      _paintStemWallpaperBackground(canvas, rect);
-    } else if (backgroundMode == CanvasBackgroundMode.customImage) {
-      bgPaint.color = Colors.transparent;
       canvas.drawRect(rect, bgPaint);
     } else {
       bgPaint.shader = RadialGradient(

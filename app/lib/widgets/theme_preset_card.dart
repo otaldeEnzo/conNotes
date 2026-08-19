@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import '../models/theme_models.dart';
 import 'moscaro_glass_popup_menu.dart';
@@ -80,21 +81,30 @@ class _ThemePresetCardState extends State<ThemePresetCard> {
                 Expanded(
                   child: Container(
                     decoration: BoxDecoration(
-                      color: t.bgMode == CanvasBackgroundMode.solidColor ? t.backgroundDeep : null,
-                      gradient: t.bgMode == CanvasBackgroundMode.solidColor
+                      color: t.bgMode == CanvasBackgroundMode.solidColor
+                          ? t.backgroundDeep
+                          : (t.bgMode == CanvasBackgroundMode.customImage ? Colors.transparent : null),
+                      gradient: (t.bgMode == CanvasBackgroundMode.solidColor || t.bgMode == CanvasBackgroundMode.customImage)
                           ? null
                           : LinearGradient(
                               colors: t.effectiveGradientColors,
-                              stops: [
-                                for (int i = 0; i < t.effectiveGradientColors.length; i++)
-                                  i / (t.effectiveGradientColors.length - 1)
-                              ],
+                              stops: t.effectiveGradientStops,
                               begin: Alignment.topLeft,
                               end: Alignment.bottomRight,
                             ),
                     ),
                     child: Stack(
                       children: [
+                        // Imagem de Fundo (se modo Imagem Customizada)
+                        if (t.bgMode == CanvasBackgroundMode.customImage && t.bgImagePath != null && File(t.bgImagePath!).existsSync())
+                          Positioned.fill(
+                            child: Image.file(
+                              File(t.bgImagePath!),
+                              fit: BoxFit.cover,
+                              opacity: AlwaysStoppedAnimation(t.bgImageOpacity),
+                            ),
+                          ),
+
                         // Padrão de Pontos em miniatura
                         CustomPaint(
                           size: Size.infinite,
