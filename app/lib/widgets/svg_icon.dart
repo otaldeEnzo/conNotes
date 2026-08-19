@@ -4,9 +4,12 @@ import 'package:flutter_svg/flutter_svg.dart';
 /// Componente padronizado para exibição estrita de ícones SVG.
 /// Regra: Emojis são expressamente proibidos em todo o aplicativo conNotes.
 class SvgIcon extends StatelessWidget {
-  final String assetName;
+  final String? name;
+  final String? assetName;
   final double size;
   final Color color;
+
+  String get iconKey => name ?? assetName ?? 'file';
 
   static const Map<String, String> _builtinSvgStrings = {
     'laser': '''<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -68,18 +71,102 @@ class SvgIcon extends StatelessWidget {
   <path d="m9.06 11.9 8.07-8.06a2.85 2.85 0 1 1 4.03 4.03l-8.06 8.08"/>
   <path d="M7.07 14.94c-1.66 0-3 1.35-3 3.02 0 1.33-2.5 1.52-2 2.04 1.5 1.5 6.5 1.5 8 0 .52-.5.71-2-.04-2-1.67 0-2.96-1.34-2.96-3.06z"/>
 </svg>''',
+    'folder': '''<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+  <path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.93a2 2 0 0 1-1.66-.9l-.82-1.2A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z"/>
+</svg>''',
+    'file': '''<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+  <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/>
+  <polyline points="14 2 14 8 20 8"/>
+</svg>''',
+    'trash': '''<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+  <path d="M3 6h18"/>
+  <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/>
+  <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/>
+</svg>''',
+    'search': '''<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+  <circle cx="11" cy="11" r="8"/>
+  <path d="m21 21-4.3-4.3"/>
+</svg>''',
+    'plus': '''<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+  <path d="M5 12h14"/>
+  <path d="M12 5v14"/>
+</svg>''',
+    'edit': '''<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+  <path d="M12 20h9"/>
+  <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/>
+</svg>''',
+    'book': '''<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+  <path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1-2.5-2.5Z"/>
+  <path d="M6 6h10"/>
+  <path d="M6 10h10"/>
+</svg>''',
+    'atom': '''<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+  <circle cx="12" cy="12" r="2"/>
+  <ellipse cx="12" cy="12" rx="9" ry="4" transform="rotate(30 12 12)"/>
+  <ellipse cx="12" cy="12" rx="9" ry="4" transform="rotate(90 12 12)"/>
+  <ellipse cx="12" cy="12" rx="9" ry="4" transform="rotate(150 12 12)"/>
+</svg>''',
+    'code': '''<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+  <polyline points="16 18 22 12 16 6"/>
+  <polyline points="8 6 2 12 8 18"/>
+</svg>''',
+    'layers': '''<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+  <polygon points="12 2 2 7 12 12 22 7 12 2"/>
+  <polyline points="2 17 12 22 22 17"/>
+  <polyline points="2 12 12 17 22 12"/>
+</svg>''',
+    'save': '''<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+  <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/>
+  <polyline points="17 21 17 13 7 13 7 21"/>
+  <polyline points="7 3 7 8 15 8"/>
+</svg>''',
+    'restore': '''<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+  <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/>
+  <path d="M3 3v5h5"/>
+</svg>''',
+    'chevron_right': '''<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+  <path d="m9 18 6-6-6-6"/>
+</svg>''',
+    'chevron_down': '''<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+  <path d="m6 9 6 6 6-6"/>
+</svg>''',
+    'more_vertical': '''<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+  <circle cx="12" cy="12" r="1.5"/>
+  <circle cx="12" cy="5" r="1.5"/>
+  <circle cx="12" cy="19" r="1.5"/>
+</svg>''',
+    'circuit': '''<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+  <rect width="18" height="18" x="3" y="3" rx="2"/>
+  <path d="M12 9v6"/>
+  <path d="M16 12H8"/>
+  <circle cx="9" cy="9" r="1" fill="currentColor"/>
+  <circle cx="15" cy="15" r="1" fill="currentColor"/>
+</svg>''',
+    'math': '''<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+  <path d="M4 7h16"/>
+  <path d="M4 17h16"/>
+  <line x1="7" x2="17" y1="4" y2="20"/>
+  <line x1="17" x2="7" y1="4" y2="20"/>
+</svg>''',
+    'globe': '''<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+  <circle cx="12" cy="12" r="10"/>
+  <path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/>
+  <path d="M2 12h20"/>
+</svg>''',
   };
 
   const SvgIcon({
     super.key,
-    required this.assetName,
+    this.name,
+    this.assetName,
     this.size = 20.0,
     this.color = Colors.white,
   });
 
   @override
   Widget build(BuildContext context) {
-    final inlineSvg = _builtinSvgStrings[assetName];
+    final key = iconKey;
+    final inlineSvg = _builtinSvgStrings[key];
     if (inlineSvg != null) {
       return SvgPicture.string(
         inlineSvg,
@@ -90,7 +177,7 @@ class SvgIcon extends StatelessWidget {
     }
 
     return SvgPicture.asset(
-      'assets/icons/$assetName.svg',
+      'assets/icons/$key.svg',
       width: size,
       height: size,
       colorFilter: ColorFilter.mode(color, BlendMode.srcIn),

@@ -8,6 +8,9 @@ import 'settings_shortcuts_view.dart';
 import 'settings_sandbox_card.dart';
 import 'settings_theme_view.dart';
 import '../theme/moscaro_theme_controller.dart';
+import '../services/workspace_storage_service.dart';
+import '../services/windows_file_dialog_service.dart';
+import 'svg_icon.dart';
 
 /// Visualizador Principal da Página de Configurações no Canvas (Moscaro v2 Pro Max).
 /// Transforma o canvas inteiro em uma superfície limpa de Vidro Líquido Moscaro (sem pautas ou grade).
@@ -189,6 +192,7 @@ class _SettingsPageViewState extends State<SettingsPageView> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       key: const ValueKey('visual_settings'),
       children: [
+        _buildWorkspaceDirectoryTile(context),
         SettingsSliderTile(
           title: 'Intensidade do Blur (Vidro Líquido)',
           description: 'Define o desfoque de fundo dos menus, painéis e ferramentas de todo o app.',
@@ -212,6 +216,270 @@ class _SettingsPageViewState extends State<SettingsPageView> {
           onChanged: (val) => widget.onUpdateSettings(widget.settings.copyWith(showTelemetryHud: val)),
         ),
       ],
+    );
+  }
+
+  Widget _buildWorkspaceDirectoryTile(BuildContext context) {
+    final currentPath = widget.settings.workspaceDirectoryPath ?? WorkspaceStorageService.instance.workspacePath;
+    final isLight = MoscaroTokens.isLight;
+    final textPrimary = MoscaroTokens.textPrimary;
+    final textSecondary = MoscaroTokens.textSecondary;
+    final accentCyan = MoscaroTokens.auroraBlue;
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: isLight ? Colors.white.withValues(alpha: 0.6) : const Color(0xFF0C1422).withValues(alpha: 0.45),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: isLight ? Colors.black.withValues(alpha: 0.08) : Colors.white.withValues(alpha: 0.08),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              SvgIcon(
+                name: 'folder',
+                size: 20,
+                color: accentCyan,
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Diretório dos Cadernos & Workspace',
+                      style: TextStyle(
+                        color: textPrimary,
+                        fontSize: 13.5,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      'Pasta padrão onde seus cadernos, disciplinas e notas .cncanvas são salvos automaticamente.',
+                      style: TextStyle(
+                        color: textSecondary,
+                        fontSize: 11.5,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 12),
+              ElevatedButton.icon(
+                onPressed: () => _handlePickWorkspaceFolder(context),
+                icon: const SvgIcon(name: 'folder', size: 14, color: Colors.white),
+                label: const Text('Alterar Pasta', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: accentCyan.withValues(alpha: 0.25),
+                  foregroundColor: Colors.white,
+                  side: BorderSide(color: accentCyan.withValues(alpha: 0.6), width: 1.2),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                  elevation: 0,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            decoration: BoxDecoration(
+              color: isLight ? Colors.black.withValues(alpha: 0.04) : Colors.black.withValues(alpha: 0.35),
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(
+                color: accentCyan.withValues(alpha: 0.2),
+              ),
+            ),
+            child: Text(
+              currentPath.isNotEmpty ? currentPath : 'Padrão: Documentos/conNotes',
+              style: TextStyle(
+                color: accentCyan,
+                fontSize: 12,
+                fontFamily: 'monospace',
+              ),
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _handlePickWorkspaceFolder(BuildContext context) async {
+    final selected = await WindowsFileDialogService.pickDirectory(
+      dialogTitle: 'Selecionar Nova Pasta de Cadernos do conNotes',
+    );
+    if (selected == null || !context.mounted) return;
+
+    final current = WorkspaceStorageService.instance.workspacePath;
+    if (selected == current) return;
+
+    final bool hasExistingNotes = WorkspaceStorageService.instance.notebooks.isNotEmpty ||
+        WorkspaceStorageService.instance.rootNotes.isNotEmpty;
+
+    if (hasExistingNotes) {
+      final migrate = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => _buildMigrationDialog(ctx, selected),
+      );
+      if (migrate == null) return;
+
+      await WorkspaceStorageService.instance.changeWorkspaceDirectory(
+        selected,
+        migrateExistingFiles: migrate,
+      );
+    } else {
+      await WorkspaceStorageService.instance.changeWorkspaceDirectory(
+        selected,
+        migrateExistingFiles: false,
+      );
+    }
+
+    widget.onUpdateSettings(widget.settings.copyWith(
+      workspaceDirectoryPath: selected,
+    ));
+  }
+
+  Widget _buildMigrationDialog(BuildContext context, String newPath) {
+    return Dialog(
+      backgroundColor: Colors.transparent,
+      insetPadding: const EdgeInsets.all(24),
+      child: Container(
+        constraints: const BoxConstraints(maxWidth: 520),
+        padding: const EdgeInsets.all(24),
+        decoration: BoxDecoration(
+          color: const Color(0xFF0E121A).withValues(alpha: 0.95),
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: MoscaroTokens.auroraBlue.withValues(alpha: 0.4), width: 1.2),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.6),
+              blurRadius: 30,
+            ),
+            BoxShadow(
+              color: MoscaroTokens.auroraBlue.withValues(alpha: 0.15),
+              blurRadius: 20,
+            ),
+          ],
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
+              children: [
+                const SvgIcon(name: 'folder', size: 24, color: Color(0xFF00E1FF)),
+                const SizedBox(width: 12),
+                const Expanded(
+                  child: Text(
+                    'Migração de Cadernos & Notas',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            const Text(
+              'Você alterou o diretório padrão de salvamento dos seus cadernos. Como deseja proceder com suas notas e cadernos atuais?',
+              style: TextStyle(
+                color: Colors.white70,
+                fontSize: 13,
+                height: 1.4,
+              ),
+            ),
+            const SizedBox(height: 20),
+            // Opção 1: Mover Tudo
+            InkWell(
+              onTap: () => Navigator.of(context).pop(true),
+              borderRadius: BorderRadius.circular(14),
+              child: Container(
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color: MoscaroTokens.auroraBlue.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: MoscaroTokens.auroraBlue.withValues(alpha: 0.5)),
+                ),
+                child: const Row(
+                  children: [
+                    SvgIcon(name: 'layers', size: 20, color: Color(0xFF00E1FF)),
+                    SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Mover Cadernos para a Nova Pasta (Recomendado)',
+                            style: TextStyle(color: Color(0xFF00E1FF), fontWeight: FontWeight.bold, fontSize: 12.5),
+                          ),
+                          SizedBox(height: 2),
+                          Text(
+                            'Copia todos os cadernos, disciplinas e notas existentes para o novo local.',
+                            style: TextStyle(color: Colors.white60, fontSize: 11),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 10),
+            // Opção 2: Manter Antigos
+            InkWell(
+              onTap: () => Navigator.of(context).pop(false),
+              borderRadius: BorderRadius.circular(14),
+              child: Container(
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: 0.05),
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
+                ),
+                child: const Row(
+                  children: [
+                    SvgIcon(name: 'save', size: 20, color: Colors.white70),
+                    SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Manter Antigos & Iniciar Nova Pasta',
+                            style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12.5),
+                          ),
+                          SizedBox(height: 2),
+                          Text(
+                            'Deixa as notas antigas onde estão e salva apenas as novas notas no novo diretório.',
+                            style: TextStyle(color: Colors.white60, fontSize: 11),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
+            Align(
+              alignment: Alignment.centerRight,
+              child: TextButton(
+                onPressed: () => Navigator.of(context).pop(null),
+                child: const Text('Cancelar', style: TextStyle(color: Colors.white54)),
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 

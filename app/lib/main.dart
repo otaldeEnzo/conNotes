@@ -37,12 +37,15 @@ import 'widgets/settings_tab_bar.dart';
 import 'widgets/settings_page_view.dart';
 import 'theme/moscaro_theme_controller.dart';
 import 'services/settings_service.dart';
+import 'services/workspace_storage_service.dart';
+import 'services/windows_mime_association_service.dart';
 import 'widgets/undo_commands.dart';
 import 'ffi/native_bridge.dart';
 import 'dev_hub/dev_hub_server.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
+  WindowsMimeAssociationService.registerMimeAssociation();
   final isRustReady = ConnotesNativeBridge.instance.isAvailable;
   debugPrint('[ConNotes] Motor Rust Core inicializado: $isRustReady');
   runApp(const ConNotesApp());
@@ -80,7 +83,6 @@ class CanvasHomeScreen extends StatefulWidget {
 class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProviderStateMixin {
   // Estado de Documentos e Notas
   final List<NoteDocument> _notes = [];
-  final List<NoteDocument> _trashNotes = [];
   final List<String> _activeNoteIds = [];
   String? _selectedNoteId;
   bool _isSidebarOpen = false;
@@ -203,6 +205,36 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
       imageOpacity: loaded.customImageOpacity,
       customThemes: loaded.customThemes,
     );
+
+    await WorkspaceStorageService.instance.initialize(
+      customPath: loaded.workspaceDirectoryPath,
+    );
+
+    final allNotes = <NoteDocument>[
+      ...WorkspaceStorageService.instance.rootNotes,
+    ];
+    for (final nb in WorkspaceStorageService.instance.notebooks) {
+      allNotes.addAll(nb.notes);
+    }
+
+    if (allNotes.isNotEmpty) {
+      _notes.clear();
+      _notes.addAll(allNotes);
+      final first = allNotes.first;
+      _activeNoteIds.clear();
+      _activeNoteIds.add(first.id);
+      _selectedNoteId = first.id;
+      _panNotifier.value = Offset(first.panX, first.panY);
+      _zoomNotifier.value = first.zoomScale;
+    } else {
+      final defaultNote = await WorkspaceStorageService.instance.createNote(title: 'Anotações STEM');
+      _notes.clear();
+      _notes.add(defaultNote);
+      _activeNoteIds.clear();
+      _activeNoteIds.add(defaultNote.id);
+      _selectedNoteId = defaultNote.id;
+    }
+
     if (mounted) {
       setState(() {
         _settings = loaded;
@@ -288,9 +320,26 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
   void initState() {
     super.initState();
     _loadSavedSettings();
+    WorkspaceStorageService.instance.initialize().then((_) {
+      if (mounted) {
+        setState(() {
+          final allNotes = WorkspaceStorageService.instance.allNotes;
+          for (final n in allNotes) {
+            if (!_notes.any((existing) => existing.id == n.id)) {
+              _notes.add(n);
+            }
+          }
+          if (_selectedNoteId == null && _notes.isNotEmpty) {
+            _selectedNoteId = _notes.first.id;
+            if (!_activeNoteIds.contains(_selectedNoteId!)) {
+              _activeNoteIds.add(_selectedNoteId!);
+            }
+          }
+        });
+      }
+    });
     _laserEngine.init(this);
     _activeSlotId = _penSlots.first.id;
-    _addNewNote("Anotações STEM");
     HardwareKeyboard.instance.addHandler(_handleKeyEvent);
 
     _bounceController = AnimationController(
@@ -522,6 +571,13 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
         return true;
       }
 
+      final primaryFocus = FocusManager.instance.primaryFocus;
+      if (primaryFocus != null && primaryFocus.context?.widget is EditableText) {
+        if (event.logicalKey != LogicalKeyboardKey.escape) {
+          return false;
+        }
+      }
+
       if (event.logicalKey == LogicalKeyboardKey.escape) {
         if (_isSettingsOpen) {
           setState(() {
@@ -557,24 +613,37 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
     return _penSlots.firstWhere((s) => s.id == _activeSlotId, orElse: () => _penSlots.first);
   }
 
-  void _addNewNote(String title) {
-    final newId = DateTime.now().millisecondsSinceEpoch.toString();
-    final nativeDocId = ConnotesNativeBridge.instance.createDocument() ?? newId;
-    final newNote = NoteDocument(
-      id: newId,
-      title: title,
-      nativeDocId: nativeDocId,
-    );
+  Future<void> _addNewNote(String title) async {
+    final doc = await WorkspaceStorageService.instance.createNote(title: title);
     setState(() {
-      _notes.add(newNote);
-      _activeNoteIds.add(newId);
-      _selectedNoteId = newId;
+      if (!_notes.any((n) => n.id == doc.id)) {
+        _notes.add(doc);
+      }
+      if (!_activeNoteIds.contains(doc.id)) {
+        _activeNoteIds.add(doc.id);
+      }
+      _selectedNoteId = doc.id;
+      _panNotifier.value = Offset(doc.panX, doc.panY);
+      _zoomNotifier.value = doc.zoomScale;
+      _strokesVersion++;
+      _committedStrokesNotifier.value++;
     });
   }
 
   NoteDocument? get _currentNote {
     if (_selectedNoteId == null) return null;
-    return _findNoteById(_notes, _selectedNoteId!);
+    final local = _findNoteById(_notes, _selectedNoteId!);
+    if (local != null) return local;
+
+    final allStorage = WorkspaceStorageService.instance.allNotes;
+    final fromStorage = _findNoteById(allStorage, _selectedNoteId!);
+    if (fromStorage != null) {
+      if (!_notes.any((n) => n.id == fromStorage.id)) {
+        _notes.add(fromStorage);
+      }
+      return fromStorage;
+    }
+    return null;
   }
 
   NoteDocument? _findNoteById(List<NoteDocument> list, String id) {
@@ -959,8 +1028,11 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
         const SingleActivator(LogicalKeyboardKey.keyC, control: true): _copySelectedStrokes,
         const SingleActivator(LogicalKeyboardKey.keyV, control: true): _pasteStrokes,
         const SingleActivator(LogicalKeyboardKey.keyD, control: true): _duplicateSelectedStrokes,
-        const SingleActivator(LogicalKeyboardKey.delete): _deleteSelectedStrokes,
-        const SingleActivator(LogicalKeyboardKey.backspace): _deleteSelectedStrokes,
+        const SingleActivator(LogicalKeyboardKey.delete): () {
+          final primaryFocus = FocusManager.instance.primaryFocus;
+          if (primaryFocus != null && primaryFocus.context?.widget is EditableText) return;
+          _deleteSelectedStrokes();
+        },
         const SingleActivator(LogicalKeyboardKey.comma, control: true): () {
           setState(() {
             _isSettingsOpen = !_isSettingsOpen;
@@ -1614,6 +1686,7 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
                             _activeStroke = null;
                             _isDrawing = false;
                           });
+                          WorkspaceStorageService.instance.queueAutosave(note);
                           _activeStrokeUpdateNotifier.value++;
                         } else {
                           setState(() {
@@ -2572,63 +2645,33 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
                 ),
               ),
 
-              // 8. Sidebar Esquerda de Notas
+              // 8. Sidebar Esquerda de Notas & Cadernos
               NoteSidebar(
                 isOpen: _isSidebarOpen,
-                rootNotes: _notes,
-                trashNotes: _trashNotes,
+                selectedNoteId: _selectedNoteId,
                 onSelectNote: (selectedNote) {
                   setState(() {
+                    if (!_notes.any((n) => n.id == selectedNote.id)) {
+                      _notes.add(selectedNote);
+                    }
                     if (!_activeNoteIds.contains(selectedNote.id)) {
                       _activeNoteIds.add(selectedNote.id);
                     }
                     _selectedNoteId = selectedNote.id;
+                    _panNotifier.value = Offset(selectedNote.panX, selectedNote.panY);
+                    _zoomNotifier.value = selectedNote.zoomScale;
+                    _strokesVersion++;
+                    _committedStrokesNotifier.value++;
                   });
                 },
-                onAddNote: () {
-                  _addNewNote("Nova Nota ${_notes.length + 1}");
-                },
-                onReorderNote: (dragged, target) {
+                onAddNote: () async {
+                  final note = await WorkspaceStorageService.instance.createNote(
+                    title: "Nova Nota ${_notes.length + 1}",
+                  );
                   setState(() {
-                    _moveNoteToSubnote(_notes, dragged, target);
-                  });
-                },
-                onMoveToTrash: (noteIds) {
-                  setState(() {
-                    for (final id in noteIds) {
-                      final targetNote = _findNoteById(_notes, id);
-                      if (targetNote != null) {
-                        _removeNoteFromTree(_notes, id);
-                        _trashNotes.add(targetNote);
-                        _activeNoteIds.remove(id);
-                      }
-                    }
-                    if (_selectedNoteId != null && !_activeNoteIds.contains(_selectedNoteId)) {
-                      _selectedNoteId = _activeNoteIds.isNotEmpty ? _activeNoteIds.last : null;
-                    }
-                  });
-                },
-                onRestoreNote: (noteId) {
-                  setState(() {
-                    final restoredIndex = _trashNotes.indexWhere((n) => n.id == noteId);
-                    if (restoredIndex != -1) {
-                      final restoredNote = _trashNotes.removeAt(restoredIndex);
-                      _notes.add(restoredNote);
-                      if (!_activeNoteIds.contains(noteId)) {
-                        _activeNoteIds.add(noteId);
-                      }
-                      _selectedNoteId = noteId;
-                    }
-                  });
-                },
-                onDeletePermanently: (noteId) {
-                  setState(() {
-                    _trashNotes.removeWhere((n) => n.id == noteId);
-                  });
-                },
-                onEmptyTrash: () {
-                  setState(() {
-                    _trashNotes.clear();
+                    _notes.add(note);
+                    _activeNoteIds.add(note.id);
+                    _selectedNoteId = note.id;
                   });
                 },
               ),

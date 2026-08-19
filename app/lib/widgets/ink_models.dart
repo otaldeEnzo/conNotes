@@ -51,6 +51,23 @@ class StrokePoint {
     this.pressure = 1.0,
     this.tilt = 0.0,
   });
+
+  Map<String, dynamic> toJson() {
+    return {
+      'x': point.dx,
+      'y': point.dy,
+      'p': pressure,
+      'tilt': tilt,
+    };
+  }
+
+  factory StrokePoint.fromJson(Map<String, dynamic> json) {
+    return StrokePoint(
+      point: Offset((json['x'] as num).toDouble(), (json['y'] as num).toDouble()),
+      pressure: (json['p'] as num?)?.toDouble() ?? 1.0,
+      tilt: (json['tilt'] as num?)?.toDouble() ?? 0.0,
+    );
+  }
 }
 
 /// Modelo de Dados do Traço desenhado
@@ -78,6 +95,57 @@ class InkStroke {
     this.cachedPath,
     this.cachedRawPoints,
   });
+
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'color': '#${color.toARGB32().toRadixString(16).padLeft(8, '0')}',
+      'strokeWidth': strokeWidth,
+      'toolType': toolType.name,
+      'enablePressure': enablePressure,
+      'transform': {'x': transform.dx, 'y': transform.dy},
+      'points': points.map((p) => p.toJson()).toList(),
+    };
+  }
+
+  factory InkStroke.fromJson(Map<String, dynamic> json) {
+    Color parseHex(String? hex) {
+      if (hex == null) return Colors.white;
+      try {
+        final clean = hex.replaceAll('#', '').replaceAll('0x', '');
+        if (clean.length == 6) return Color(int.parse('FF$clean', radix: 16));
+        if (clean.length == 8) return Color(int.parse(clean, radix: 16));
+      } catch (_) {}
+      return Colors.white;
+    }
+
+    final rawPoints = json['points'] as List<dynamic>? ?? [];
+    final List<StrokePoint> pts = rawPoints
+        .map((p) => StrokePoint.fromJson(p as Map<String, dynamic>))
+        .toList();
+
+    Offset trans = Offset.zero;
+    if (json['transform'] != null) {
+      final t = json['transform'] as Map<String, dynamic>;
+      trans = Offset((t['x'] as num?)?.toDouble() ?? 0.0, (t['y'] as num?)?.toDouble() ?? 0.0);
+    }
+
+    final toolName = json['toolType'] as String? ?? 'technical';
+    final tool = InkToolType.values.firstWhere(
+      (e) => e.name == toolName,
+      orElse: () => InkToolType.technical,
+    );
+
+    return InkStroke(
+      id: json['id'] as String? ?? 'stroke_${DateTime.now().microsecondsSinceEpoch}',
+      points: pts,
+      color: parseHex(json['color'] as String?),
+      strokeWidth: (json['strokeWidth'] as num?)?.toDouble() ?? 3.0,
+      toolType: tool,
+      enablePressure: json['enablePressure'] as bool? ?? false,
+      transform: trans,
+    );
+  }
 
   /// Retorna uma representação compacta e reutilizável dos pontos para Skia.
   Float32List get rawPoints {

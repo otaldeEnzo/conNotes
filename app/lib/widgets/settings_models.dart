@@ -63,6 +63,7 @@ class AppSettingsState {
   final List<ThemeDefinition> customThemes;
 
   // 1. Geral & Visual Moscaro v2
+  final String? workspaceDirectoryPath;
   final double blurSigma;
   final bool enableAuroraBorders;
   final bool showTelemetryHud;
@@ -95,6 +96,7 @@ class AppSettingsState {
     this.customImagePath,
     this.customImageOpacity = 0.5,
     this.customThemes = const [],
+    this.workspaceDirectoryPath,
     this.blurSigma = 35.0,
     this.enableAuroraBorders = true,
     this.showTelemetryHud = true,
@@ -122,6 +124,7 @@ class AppSettingsState {
     String? customImagePath,
     double? customImageOpacity,
     List<ThemeDefinition>? customThemes,
+    String? workspaceDirectoryPath,
     double? blurSigma,
     bool? enableAuroraBorders,
     bool? showTelemetryHud,
@@ -146,6 +149,7 @@ class AppSettingsState {
       customImagePath: customImagePath ?? this.customImagePath,
       customImageOpacity: customImageOpacity ?? this.customImageOpacity,
       customThemes: customThemes ?? this.customThemes,
+      workspaceDirectoryPath: workspaceDirectoryPath ?? this.workspaceDirectoryPath,
       blurSigma: (blurSigma ?? this.blurSigma).clamp(10.0, 50.0),
       enableAuroraBorders: enableAuroraBorders ?? this.enableAuroraBorders,
       showTelemetryHud: showTelemetryHud ?? this.showTelemetryHud,
@@ -173,6 +177,7 @@ class AppSettingsState {
       'customImagePath': customImagePath,
       'customImageOpacity': customImageOpacity,
       'customThemes': customThemes.map((t) => t.toJson()).toList(),
+      'workspaceDirectoryPath': workspaceDirectoryPath,
       'blurSigma': blurSigma,
       'enableAuroraBorders': enableAuroraBorders,
       'showTelemetryHud': showTelemetryHud,
@@ -208,6 +213,7 @@ class AppSettingsState {
       customImagePath: json['customImagePath'] as String?,
       customImageOpacity: (json['customImageOpacity'] as num?)?.toDouble() ?? 0.5,
       customThemes: parsedThemes,
+      workspaceDirectoryPath: json['workspaceDirectoryPath'] as String?,
       blurSigma: (json['blurSigma'] as num?)?.toDouble() ?? 35.0,
       enableAuroraBorders: json['enableAuroraBorders'] as bool? ?? true,
       showTelemetryHud: json['showTelemetryHud'] as bool? ?? true,

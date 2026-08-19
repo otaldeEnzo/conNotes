@@ -1,7 +1,7 @@
 import 'dart:io';
 import 'package:file_picker/file_picker.dart';
 
-/// Serviço Especializado em Diálogos Nativos de Arquivos para Windows.
+/// Serviço Especializado em Diálogos Nativos de Arquivos e Pastas para Windows.
 class WindowsFileDialogService {
   WindowsFileDialogService._();
 
@@ -24,7 +24,6 @@ class WindowsFileDialogService {
           return path;
         }
       }
-      // Se o usuário cancelou normalmente ou fechou o diálogo, retorna sem disparar fallback
       if (files == null || files.isEmpty) {
         return null;
       }
@@ -39,6 +38,41 @@ class WindowsFileDialogService {
           ]);
           final path = (result.stdout as String).trim();
           if (path.isNotEmpty && File(path).existsSync()) {
+            return path;
+          }
+        } catch (_) {}
+      }
+    } finally {
+      _isPicking = false;
+    }
+
+    return null;
+  }
+
+  /// Abre a janela nativa para selecionar uma pasta no Windows
+  static Future<String?> pickDirectory({String dialogTitle = 'Selecionar Pasta de Cadernos do conNotes'}) async {
+    if (_isPicking) return null;
+    _isPicking = true;
+    try {
+      final String? selectedPath = await FilePickerPlatform.instance.getDirectoryPath(
+        dialogTitle: dialogTitle,
+      );
+      if (selectedPath != null && selectedPath.isNotEmpty && Directory(selectedPath).existsSync()) {
+        return selectedPath;
+      }
+      if (selectedPath == null || selectedPath.isEmpty) {
+        return null;
+      }
+    } catch (e) {
+      if (Platform.isWindows) {
+        try {
+          final result = await Process.run('powershell', [
+            '-NoProfile',
+            '-Command',
+            "Add-Type -AssemblyName System.Windows.Forms; \$d = New-Object System.Windows.Forms.FolderBrowserDialog; \$d.Description = '$dialogTitle'; \$d.ShowNewFolderButton = \$true; \$res = \$d.ShowDialog(); if (\$res -eq [System.Windows.Forms.DialogResult]::OK) { Write-Output \$d.SelectedPath }",
+          ]);
+          final path = (result.stdout as String).trim();
+          if (path.isNotEmpty && Directory(path).existsSync()) {
             return path;
           }
         } catch (_) {}
