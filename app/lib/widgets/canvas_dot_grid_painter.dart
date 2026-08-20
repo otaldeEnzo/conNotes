@@ -326,7 +326,7 @@ class CanvasDotGridPainter extends CustomPainter {
     final double startY = math.max(0.0, (top / lineSpacing).floor() * lineSpacing);
 
     final linePaint = Paint()
-      ..color = theme.accentPrimary.withValues(alpha: 0.12)
+      ..color = theme.gridColor.withValues(alpha: theme.gridColor.a > 0.05 ? theme.gridColor.a : 0.25)
       ..strokeWidth = 1.0 / zoomScale;
 
     // Linhas horizontais pautadas
@@ -349,7 +349,7 @@ class CanvasDotGridPainter extends CustomPainter {
     final double triangleWidth = isoSpacing * cos30 * 2;
 
     final linePaint = Paint()
-      ..color = theme.accentPrimary.withValues(alpha: 0.08)
+      ..color = theme.gridColor.withValues(alpha: theme.gridColor.a > 0.05 ? theme.gridColor.a * 0.8 : 0.20)
       ..strokeWidth = 0.8 / zoomScale;
 
     final double startY = (top / triangleHeight).floor() * triangleHeight;

@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 import '../widgets/note_models.dart';
 import '../widgets/ink_models.dart';
+import '../models/canvas_card_model.dart';
 
 /// Motor Especializado no Formato Autônomo e Híbrido .cncanvas (conNotes Infinite Canvas)
 class CncanvasFileService {
@@ -68,6 +69,7 @@ class CncanvasFileService {
   static String _generateStandaloneHtmlContent(NoteDocument doc, String embeddedJson) {
     final titleEscaped = const HtmlEscape().convert(doc.title);
     final strokesSvg = _generateSvgPaths(doc.strokes);
+    final cardsSvg = _generateCardsSvg(doc.cards);
 
     return '''<!DOCTYPE html>
 <html lang="pt-BR">
@@ -194,6 +196,7 @@ class CncanvasFileService {
     <svg id="svg-stage" xmlns="http://www.w3.org/2000/svg">
       <g id="viewport-group" transform="matrix(1 0 0 1 0 0)">
         $strokesSvg
+        $cardsSvg
       </g>
     </svg>
   </div>
@@ -311,6 +314,41 @@ $embeddedJson
       buffer.writeln('<path d="$d" stroke="$colorHex" stroke-width="$width" stroke-opacity="$opacity" fill="none" stroke-linecap="round" stroke-linejoin="round"/>');
     }
 
+    return buffer.toString();
+  }
+
+  static String _generateCardsSvg(List<CanvasCardModel> cards) {
+    final buffer = StringBuffer();
+    for (final card in cards) {
+      final textEscaped = const HtmlEscape().convert(card.content);
+      final titleEscaped = const HtmlEscape().convert(card.title.toUpperCase());
+      buffer.writeln('''
+      <foreignObject x="${card.x}" y="${card.y}" width="${card.width}" height="${card.height}">
+        <div xmlns="http://www.w3.org/1999/xhtml" style="
+          width: 100%;
+          min-height: 100%;
+          background: rgba(14, 20, 32, 0.88);
+          backdrop-filter: blur(16px);
+          -webkit-backdrop-filter: blur(16px);
+          border: 1px solid rgba(0, 225, 255, 0.4);
+          border-radius: 14px;
+          padding: 14px;
+          color: #f1f5f9;
+          font-family: '${card.fontFamily}', -apple-system, sans-serif;
+          font-size: ${card.fontSize}px;
+          box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+          overflow: auto;
+          white-space: pre-wrap;
+          word-break: break-word;
+        ">
+          <div style="font-size: 11px; font-weight: bold; color: #00e1ff; margin-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 4px;">
+            $titleEscaped
+          </div>
+          <div>$textEscaped</div>
+        </div>
+      </foreignObject>
+      ''');
+    }
     return buffer.toString();
   }
 }

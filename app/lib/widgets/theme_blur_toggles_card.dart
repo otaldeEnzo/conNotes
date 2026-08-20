@@ -7,12 +7,14 @@ class ThemeBlurTogglesCard extends StatelessWidget {
   final bool enableSubBarsBlur;
   final bool enableModalsBlur;
   final bool enableInstrumentsBlur;
+  final bool enableCardsBlur;
   final Color accentColor;
   final ValueChanged<bool> onSidebarChanged;
   final ValueChanged<bool> onToolbarChanged;
   final ValueChanged<bool> onSubBarsChanged;
   final ValueChanged<bool> onModalsChanged;
   final ValueChanged<bool> onInstrumentsChanged;
+  final ValueChanged<bool> onCardsChanged;
 
   const ThemeBlurTogglesCard({
     super.key,
@@ -21,12 +23,14 @@ class ThemeBlurTogglesCard extends StatelessWidget {
     required this.enableSubBarsBlur,
     required this.enableModalsBlur,
     required this.enableInstrumentsBlur,
+    required this.enableCardsBlur,
     required this.accentColor,
     required this.onSidebarChanged,
     required this.onToolbarChanged,
     required this.onSubBarsChanged,
     required this.onModalsChanged,
     required this.onInstrumentsChanged,
+    required this.onCardsChanged,
   });
 
   @override
@@ -76,6 +80,13 @@ class ThemeBlurTogglesCard extends StatelessWidget {
             subtitle: 'Pílula superior de canetas e ações',
             value: enableToolbarBlur,
             onChanged: onToolbarChanged,
+          ),
+          const Divider(height: 12, color: Colors.white10),
+          _buildToggleItem(
+            label: 'Cards STEM & Notas do Canvas',
+            subtitle: 'Superfície de vidro translúcido dos cards no canvas',
+            value: enableCardsBlur,
+            onChanged: onCardsChanged,
           ),
           const Divider(height: 12, color: Colors.white10),
           _buildToggleItem(

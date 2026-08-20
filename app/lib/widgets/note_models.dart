@@ -4,6 +4,7 @@ import 'ink_models.dart';
 import 'spatial_index.dart';
 import 'selection_models.dart';
 import 'canvas_layers.dart';
+import '../models/canvas_card_model.dart';
 
 /// Tipos de Documento Suportados no Ecossistema conNotes
 enum NoteType {
@@ -84,6 +85,7 @@ class NoteDocument {
   double panY;
   double zoomScale;
   String? nativeDocId;
+  final List<CanvasCardModel> cards;
 
   NoteDocument({
     required this.id,
@@ -95,6 +97,7 @@ class NoteDocument {
     this.themeId,
     List<NoteDocument>? children,
     List<InkStroke>? strokes,
+    List<CanvasCardModel>? cards,
     this.panX = 0.0,
     this.panY = 0.0,
     this.zoomScale = 1.0,
@@ -104,6 +107,7 @@ class NoteDocument {
   })  : tags = tags ?? [],
         children = children ?? [],
         _strokesList = strokes ?? [],
+        cards = cards ?? [],
         createdAt = createdAt ?? DateTime.now(),
         updatedAt = updatedAt ?? DateTime.now() {
     // Inicializar mapa e índice se houver traços prévios
@@ -265,6 +269,7 @@ class NoteDocument {
         'panY': panY,
         'zoomScale': zoomScale,
         'strokes': _strokesList.map((s) => s.toJson()).toList(),
+        'cards': cards.map((c) => c.toMap()).toList(),
       },
       'childrenSubnotes': children.map((c) => c.toCnCanvasMap()).toList(),
     };
@@ -294,6 +299,11 @@ class NoteDocument {
         .map((s) => InkStroke.fromJson(s as Map<String, dynamic>))
         .toList();
 
+    final rawCards = (canvasData['cards'] as List<dynamic>?) ?? (map['cards'] as List<dynamic>?) ?? [];
+    final List<CanvasCardModel> parsedCards = rawCards
+        .map((c) => CanvasCardModel.fromMap(c as Map<String, dynamic>))
+        .toList();
+
     final rawChildren = (map['childrenSubnotes'] as List<dynamic>?) ?? (map['children'] as List<dynamic>?) ?? [];
     final List<NoteDocument> children = rawChildren
         .map((c) => NoteDocument.fromCnCanvasMap(c as Map<String, dynamic>))
@@ -320,6 +330,7 @@ class NoteDocument {
       panY: panY,
       zoomScale: zoomScale,
       strokes: strokes,
+      cards: parsedCards,
       children: children,
       createdAt: parseDate(header['createdAt']),
       updatedAt: parseDate(header['updatedAt']),

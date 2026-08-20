@@ -42,6 +42,10 @@ import 'services/windows_mime_association_service.dart';
 import 'widgets/undo_commands.dart';
 import 'ffi/native_bridge.dart';
 import 'dev_hub/dev_hub_server.dart';
+import 'models/canvas_card_model.dart';
+import 'widgets/cards_sub_bar.dart';
+import 'widgets/canvas_cards_layer.dart';
+import 'widgets/canvas_card_widget.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -164,6 +168,10 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
   StemProtractorState? _protractorInitialState;
 
   bool _isGridMenuOpen = false;
+  // Estado dos Cards do Canvas (Fase 11)
+  bool _isCardsSubBarVisible = false;
+  CardTypePreset? _activeCardPreset;
+  String? _selectedCardId;
   double _smoothedPressure = 0.6;
   int _lastPointerTimestampMs = 0;
   Offset? _lastPointerCanvasPoint;
@@ -571,8 +579,19 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
         return true;
       }
 
+      // Se estiver editando texto de bloco ou título de card, não intercepta teclas de edição (Backspace, etc.)
+      if (globalIsEditingText) {
+        if (event.logicalKey != LogicalKeyboardKey.escape) {
+          return false;
+        }
+      }
+
       final primaryFocus = FocusManager.instance.primaryFocus;
-      if (primaryFocus != null && primaryFocus.context?.widget is EditableText) {
+      if (primaryFocus != null &&
+          (primaryFocus.context?.widget is EditableText ||
+              (primaryFocus.hasFocus &&
+                  (primaryFocus.debugLabel?.contains('EditableText') == true ||
+                      primaryFocus.debugLabel?.contains('TextField') == true)))) {
         if (event.logicalKey != LogicalKeyboardKey.escape) {
           return false;
         }
@@ -587,9 +606,48 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
         }
       }
 
+      // Apenas a tecla DELETE remove cards selecionados (NUNCA Backspace).
+      if (event.logicalKey == LogicalKeyboardKey.delete) {
+        final note = _currentNote;
+        if (_selectedCardId != null && note != null) {
+          final target = note.cards.cast<CanvasCardModel?>().firstWhere((c) => c?.id == _selectedCardId, orElse: () => null);
+          if (target != null) {
+            _undoManager.pushCommand(RemoveCardCommand(target), execute: true, note: note);
+            setState(() {
+              _selectedCardId = null;
+            });
+            WorkspaceStorageService.instance.scheduleAutoSave(note);
+            return true;
+          }
+        } else if (_selectionState.hasSelection) {
+          _deleteSelectedStrokes();
+          return true;
+        }
+      } else if (event.logicalKey == LogicalKeyboardKey.backspace) {
+        // Backspace APENAS deleta traços selecionados pelo laço quando não estiver editando texto, NUNCA cards!
+        if (_selectionState.hasSelection) {
+          _deleteSelectedStrokes();
+          return true;
+        }
+      }
+
       final isCtrl = HardwareKeyboard.instance.isControlPressed;
       if (isCtrl) {
-        if (event.logicalKey == LogicalKeyboardKey.comma) {
+        if (event.logicalKey == LogicalKeyboardKey.keyA) {
+          _selectAll();
+          return true;
+        } else if (event.logicalKey == LogicalKeyboardKey.keyZ) {
+          final isShift = HardwareKeyboard.instance.isShiftPressed;
+          if (isShift) {
+            _redo();
+          } else {
+            _undo();
+          }
+          return true;
+        } else if (event.logicalKey == LogicalKeyboardKey.keyY) {
+          _redo();
+          return true;
+        } else if (event.logicalKey == LogicalKeyboardKey.comma) {
           setState(() {
             _isSettingsOpen = !_isSettingsOpen;
           });
@@ -667,6 +725,7 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
       _committedStrokesNotifier.value++;
       _selectionState = SelectionState.empty();
     });
+    WorkspaceStorageService.instance.scheduleAutoSave(note);
   }
 
   void _redo() {
@@ -681,6 +740,7 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
       _committedStrokesNotifier.value++;
       _selectionState = SelectionState.empty();
     });
+    WorkspaceStorageService.instance.scheduleAutoSave(note);
   }
 
   void _copySelectedStrokes() {
@@ -970,30 +1030,82 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
   }
 
   void _deselect() {
-    if (_selectionState.hasSelection || _selectionState.isSelectingArea) {
+    if (_selectionState.hasSelection || _selectionState.isSelectingArea || _selectedCardId != null) {
       setState(() {
         _selectionState = SelectionState.empty();
+        _selectedCardId = null;
       });
     }
   }
 
+  CanvasCardModel? _findCardAtPoint(List<CanvasCardModel> cards, Offset canvasPoint, String? selectedCardId) {
+    for (final card in cards.reversed) {
+      final bool isSelected = card.id == selectedCardId;
+      final bool isCollapsed = card.isCollapsed;
+      final bool isCompact = card.width < 540.0;
+      final double measuredH = CanvasCardWidget.actualHeights[card.id] ?? 0.0;
+      final int linesCount = card.content.split('\n').length;
+      final double estimatedH = math.max(card.height, linesCount * 32.0 + 80.0);
+      final double cardH = isCollapsed ? 42.0 : math.max(measuredH, estimatedH);
+      final double handleMargin = isSelected ? 18.0 : 0.0;
+
+      // 1. Área do Card Principal (inclui margem de 18px para alças de redimensionamento quando selecionado)
+      final cardRect = Rect.fromLTRB(
+        card.x - handleMargin,
+        card.y - handleMargin,
+        card.x + card.width + handleMargin,
+        card.y + cardH + handleMargin,
+      );
+      if (cardRect.contains(canvasPoint)) {
+        return card;
+      }
+
+      // 2. Área da Pílula Flutuante Superior (quando selecionado)
+      if (isSelected) {
+        final double pillHeight = isCompact ? 85.0 : 48.0;
+        final pillRect = Rect.fromLTWH(
+          card.x - 20.0,
+          card.y - pillHeight - 10.0,
+          card.width + 40.0,
+          pillHeight + 14.0,
+        );
+        if (pillRect.contains(canvasPoint)) {
+          return card;
+        }
+      }
+    }
+    return null;
+  }
+
   void _selectAll() {
     final note = _currentNote;
-    if (note == null || note.strokes.isEmpty) return;
-
-    final allIds = note.strokes.map((s) => s.id).toSet();
-    final combinedBounds = SelectionGeometry.computeCombinedBounds(note.strokes);
+    if (note == null) return;
+    if (note.strokes.isEmpty && note.cards.isEmpty) return;
 
     setState(() {
-      _activeTool = 'select';
-      _isPenSubBarVisible = false;
-      _selectionState = SelectionState(
-        type: _selectionType,
-        selectedStrokeIds: allIds,
-        bounds: combinedBounds,
-      );
+      if (note.strokes.isNotEmpty) {
+        final allIds = note.strokes.map((s) => s.id).toSet();
+        final combinedBounds = SelectionGeometry.computeCombinedBounds(note.strokes);
+
+        _activeTool = 'select';
+        _isPenSubBarVisible = false;
+        _selectionState = SelectionState(
+          type: _selectionType,
+          selectedStrokeIds: allIds,
+          bounds: combinedBounds,
+        );
+      }
+
+      if (note.cards.isNotEmpty) {
+        if (_selectedCardId == null || !note.cards.any((c) => c.id == _selectedCardId)) {
+          _selectedCardId = note.cards.last.id;
+        }
+      }
     });
-    _selectionUpdateNotifier.value++;
+
+    if (note.strokes.isNotEmpty) {
+      _selectionUpdateNotifier.value++;
+    }
   }
 
   void _handleZoomDelta(double delta, Offset focalPoint) {
@@ -1028,11 +1140,7 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
         const SingleActivator(LogicalKeyboardKey.keyC, control: true): _copySelectedStrokes,
         const SingleActivator(LogicalKeyboardKey.keyV, control: true): _pasteStrokes,
         const SingleActivator(LogicalKeyboardKey.keyD, control: true): _duplicateSelectedStrokes,
-        const SingleActivator(LogicalKeyboardKey.delete): () {
-          final primaryFocus = FocusManager.instance.primaryFocus;
-          if (primaryFocus != null && primaryFocus.context?.widget is EditableText) return;
-          _deleteSelectedStrokes();
-        },
+
         const SingleActivator(LogicalKeyboardKey.comma, control: true): () {
           setState(() {
             _isSettingsOpen = !_isSettingsOpen;
@@ -1050,6 +1158,48 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
       },
       child: Focus(
         autofocus: true,
+        onKeyEvent: (node, event) {
+          if (event is KeyDownEvent || event is KeyRepeatEvent) {
+            // Se o foco estiver em um campo de texto, ignore o atalho para que o campo de texto processe a digitação/remoção de caracteres.
+            if (globalIsEditingText) {
+              return KeyEventResult.ignored;
+            }
+
+            final primaryFocus = FocusManager.instance.primaryFocus;
+            if (primaryFocus != null &&
+                (primaryFocus.context?.widget is EditableText ||
+                    (primaryFocus.hasFocus &&
+                        (primaryFocus.debugLabel?.contains('EditableText') == true ||
+                            primaryFocus.debugLabel?.contains('TextField') == true)))) {
+              return KeyEventResult.ignored;
+            }
+            
+            final note = _currentNote;
+            // Apenas a tecla DELETE remove o card selecionado (NUNCA Backspace).
+            if (event.logicalKey == LogicalKeyboardKey.delete) {
+              if (_selectedCardId != null && note != null) {
+                final target = note.cards.cast<CanvasCardModel?>().firstWhere((c) => c?.id == _selectedCardId, orElse: () => null);
+                if (target != null) {
+                  _undoManager.pushCommand(RemoveCardCommand(target), execute: true, note: note);
+                  setState(() {
+                    _selectedCardId = null;
+                  });
+                  WorkspaceStorageService.instance.scheduleAutoSave(note);
+                }
+                return KeyEventResult.handled;
+              } else if (_selectionState.hasSelection) {
+                _deleteSelectedStrokes();
+                return KeyEventResult.handled;
+              }
+            } else if (event.logicalKey == LogicalKeyboardKey.backspace) {
+              if (_selectionState.hasSelection) {
+                _deleteSelectedStrokes();
+                return KeyEventResult.handled;
+              }
+            }
+          }
+          return KeyEventResult.ignored;
+        },
         child: Scaffold(
           body: Stack(
             children: [
@@ -1080,6 +1230,15 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
                   child: Listener(
                     onPointerSignal: (event) {
                       if (event is PointerScrollEvent) {
+                        if (note != null) {
+                          final canvasPoint = (event.localPosition - _panOffset) / _zoomScale;
+                          final hitCard = _findCardAtPoint(note.cards, canvasPoint, _selectedCardId);
+                          if (hitCard != null) {
+                            // Ponteiro sobre o card ou sua barra flutuante: deixa o card consumir o scroll!
+                            return;
+                          }
+                        }
+
                         final isCtrlPressed = HardwareKeyboard.instance.isControlPressed;
                         final isShiftPressed = HardwareKeyboard.instance.isShiftPressed;
                         if (isCtrlPressed) {
@@ -1109,6 +1268,62 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
                           _setInteracting();
                           _laserEngine.onPointerDown(canvasPoint);
                           return;
+                        }
+
+                        // Inserção de Novo Card no Canvas (Fase 11)
+                        if (_activeCardPreset != null) {
+                          final preset = _activeCardPreset!;
+                          String templateContent = '';
+                          if (preset == CardTypePreset.generalMarkdownLatex) {
+                            templateContent = '# Título do Card\n\nTexto formatado com fórmulas inline \$E = mc^2\$ e equações em bloco:\n\n\$\$ \\int_0^\\infty e^{-x^2} dx = \\frac{\\sqrt{\\pi}}{2} \$\$\n\n- [ ] Tarefa 1\n- [x] Tarefa Concluída\n';
+                          } else if (preset == CardTypePreset.mathFormula) {
+                            templateContent = '\$\$ \\vec{\\nabla} \\times \\vec{E} = -\\frac{\\partial \\vec{B}}{\\partial t} \$\$\n';
+                          } else if (preset == CardTypePreset.stickyNote) {
+                            templateContent = 'Lembrete / Nota Rápida\n';
+                          }
+
+                          final newCard = CanvasCardModel(
+                            id: 'card_${DateTime.now().millisecondsSinceEpoch}',
+                            x: canvasPoint.dx,
+                            y: canvasPoint.dy,
+                            content: templateContent,
+                          );
+
+                          _undoManager.pushCommand(
+                            AddCardCommand(newCard),
+                            execute: true,
+                            note: note,
+                          );
+
+                          setState(() {
+                            _selectedCardId = newCard.id;
+                            _activeCardPreset = null;
+                            _isCardsSubBarVisible = false;
+                            _activeTool = 'pen';
+                            _selectionState = SelectionState.empty();
+                          });
+                          WorkspaceStorageService.instance.scheduleAutoSave(note);
+                          return;
+                        }
+
+                        // Interação e Seleção de Cards do Canvas (Fase 11)
+                        final clickedCard = _findCardAtPoint(note.cards, canvasPoint, _selectedCardId);
+                        if (clickedCard != null) {
+                          if (_selectedCardId != clickedCard.id) {
+                            setState(() {
+                              _selectedCardId = clickedCard.id;
+                              _selectionState = SelectionState.empty();
+                            });
+                          }
+                          // O ponteiro atingiu o card, seu cabeçalho, a pílula ou alças de redimensionamento:
+                          // Retorna imediatamente para NÃO iniciar traços de desenho com a caneta no canvas!
+                          return;
+                        } else if (_selectedCardId != null) {
+                          // Toque no vazio do canvas: retira a seleção do card ativo e desativa foco
+                          FocusManager.instance.primaryFocus?.unfocus();
+                          setState(() {
+                            _selectedCardId = null;
+                          });
                         }
 
                         _lastPointerTimestampMs = event.timeStamp.inMilliseconds;
@@ -1873,6 +2088,16 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
 
                         // 1. Clique simples (Tap-to-Select)
                         if (totalMove < 4.0) {
+                          final hitCard = _findCardAtPoint(note.cards, canvasPoint, _selectedCardId);
+                          if (hitCard != null) {
+                            setState(() {
+                              _selectedCardId = hitCard.id;
+                              _selectionState = SelectionState.empty();
+                              _selectionStartCanvasPoint = null;
+                            });
+                            return;
+                          }
+
                           InkStroke? hitStroke;
                           final tolerance = 12.0 / _zoomScale;
                           final candidateIds = note.spatialIndex.queryPoint(canvasPoint, tolerance);
@@ -1895,8 +2120,10 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
                                 selectedStrokeIds: {hitStroke.id},
                                 bounds: bounds,
                               );
+                              _selectedCardId = null;
                             } else {
                               _selectionState = SelectionState.empty();
+                              _selectedCardId = null;
                             }
                             _selectionStartCanvasPoint = null;
                           });
@@ -1915,6 +2142,21 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
                               selectedIds.add(s.id);
                             }
                           }
+
+                          // Se não selecionou traços, verifica se englobou algum Card
+                          if (selectedIds.isEmpty) {
+                            for (final c in note.cards.reversed) {
+                              final cRect = Rect.fromLTWH(c.x, c.y, c.width, c.height);
+                              if (rect.overlaps(cRect) || rect.contains(Offset(c.x, c.y))) {
+                                setState(() {
+                                  _selectedCardId = c.id;
+                                  _selectionState = SelectionState.empty();
+                                  _selectionStartCanvasPoint = null;
+                                });
+                                return;
+                              }
+                            }
+                          }
                         } else if (_selectionType == SelectionType.lasso && _selectionState.lassoPoints.length > 2) {
                           double minX = double.infinity, minY = double.infinity, maxX = double.negativeInfinity, maxY = double.negativeInfinity;
                           for (final p in _selectionState.lassoPoints) {
@@ -1930,6 +2172,20 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
                               selectedIds.add(s.id);
                             }
                           }
+
+                          if (selectedIds.isEmpty) {
+                            for (final c in note.cards.reversed) {
+                              final cRect = Rect.fromLTWH(c.x, c.y, c.width, c.height);
+                              if (rect.overlaps(cRect) || rect.contains(Offset(c.x, c.y))) {
+                                setState(() {
+                                  _selectedCardId = c.id;
+                                  _selectionState = SelectionState.empty();
+                                  _selectionStartCanvasPoint = null;
+                                });
+                                return;
+                              }
+                            }
+                          }
                         }
 
                         setState(() {
@@ -1941,8 +2197,10 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
                               selectedStrokeIds: selectedIds,
                               bounds: combinedBounds,
                             );
+                            _selectedCardId = null;
                           } else {
                             _selectionState = SelectionState.empty();
+                            _selectedCardId = null;
                           }
                           _selectionStartCanvasPoint = null;
                         });
@@ -2193,6 +2451,63 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
                               );
                             },
                           ),
+                        // Camada 4.8: Cards Interativos no Canvas (Fase 11)
+                        if (!_isSettingsOpen && note != null)
+                          CanvasCardsLayer(
+                            cards: note.cards,
+                            selectedCardId: _selectedCardId,
+                            panNotifier: _panNotifier,
+                            zoomNotifier: _zoomNotifier,
+                            onUpdateCard: (updated) {
+                              final idx = note.cards.indexWhere((c) => c.id == updated.id);
+                              if (idx != -1) {
+                                final prev = note.cards[idx];
+                                _undoManager.pushCommand(
+                                  UpdateCardCommand(cardId: updated.id, previousCard: prev, newCard: updated),
+                                  execute: true,
+                                  note: note,
+                                );
+                                setState(() {});
+                                WorkspaceStorageService.instance.scheduleAutoSave(note);
+                              }
+                            },
+                            onSelectCard: (cardId) {
+                              setState(() {
+                                _selectedCardId = cardId;
+                                _selectionState = SelectionState.empty();
+                              });
+                            },
+                            onDeleteCard: (cardId) {
+                              final target = note.cards.cast<CanvasCardModel?>().firstWhere((c) => c?.id == cardId, orElse: () => null);
+                              if (target != null) {
+                                _undoManager.pushCommand(
+                                  RemoveCardCommand(target),
+                                  execute: true,
+                                  note: note,
+                                );
+                                setState(() {
+                                  if (_selectedCardId == cardId) _selectedCardId = null;
+                                });
+                                WorkspaceStorageService.instance.scheduleAutoSave(note);
+                              }
+                            },
+                            onDuplicateCard: (card) {
+                              final dup = card.copyWith(
+                                id: 'card_${DateTime.now().millisecondsSinceEpoch}',
+                                x: card.x + 30,
+                                y: card.y + 30,
+                              );
+                              _undoManager.pushCommand(
+                                AddCardCommand(dup),
+                                execute: true,
+                                note: note,
+                              );
+                              setState(() {
+                                _selectedCardId = dup.id;
+                              });
+                              WorkspaceStorageService.instance.scheduleAutoSave(note);
+                            },
+                          ),
                       ],
                     ),
                   ),
@@ -2345,6 +2660,7 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
                       _isMeasurementSubBarVisible ||
                       _rulerState.isVisible ||
                       _protractorState.isVisible ||
+                      _isCardsSubBarVisible ||
                       _isGridMenuOpen))
                 Positioned(
                   bottom: 96,
@@ -2489,6 +2805,20 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
                               },
                             ),
 
+                          // 5.1 Sub-Barra de Criação de Cards no Canvas (Fase 11)
+                          if (_isCardsSubBarVisible)
+                            CardsSubBar(
+                              isVisible: true,
+                              activePreset: _activeCardPreset,
+                              onSelectPreset: (preset) {
+                                setState(() {
+                                  _activeCardPreset = preset;
+                                  _activeTool = 'card_insert';
+                                  _selectionState = SelectionState.empty();
+                                });
+                              },
+                            ),
+
                           // Espaçador dinâmico entre a Sub-Barra ativa e o Menu do Grid
                           if (((_activeTool == 'pen' && _isPenSubBarVisible) ||
                                   _activeTool == 'select' ||
@@ -2496,7 +2826,8 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
                                   _activeTool == 'shapes' ||
                                   _isMeasurementSubBarVisible ||
                                   _rulerState.isVisible ||
-                                  _protractorState.isVisible) &&
+                                  _protractorState.isVisible ||
+                                  _isCardsSubBarVisible) &&
                               _isGridMenuOpen)
                             const SizedBox(width: 14),
 
@@ -2551,6 +2882,16 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
                     isSelectActive: _activeTool == 'select',
                     isLaserActive: _activeTool == 'laser',
                     isRulerActive: _isMeasurementSubBarVisible || _rulerState.isVisible || _protractorState.isVisible,
+                    isCardsActive: _isCardsSubBarVisible || _activeCardPreset != null,
+                    onToggleCards: () {
+                      setState(() {
+                        _isCardsSubBarVisible = !_isCardsSubBarVisible;
+                        if (!_isCardsSubBarVisible) _activeCardPreset = null;
+                        _isPenSubBarVisible = false;
+                        _isGridMenuOpen = false;
+                        _isMeasurementSubBarVisible = false;
+                      });
+                    },
                     selectionType: _selectionType,
                     activePenPreset: _activePenPreset,
                     canUndo: canUndo,
@@ -2575,6 +2916,7 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
                           // Se está fechado, abre a subbarra e exibe a ferramenta ativa atual
                           _isMeasurementSubBarVisible = true;
                           _isPenSubBarVisible = false;
+                          _isCardsSubBarVisible = false;
                           _isGridMenuOpen = false;
                           final viewportCenter = (-_panOffset + Offset(MediaQuery.of(context).size.width / 2, MediaQuery.of(context).size.height / 2)) / _zoomScale;
                           if (_activeMeasurementTool == MeasurementToolType.ruler) {

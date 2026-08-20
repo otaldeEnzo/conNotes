@@ -43,6 +43,11 @@ app/settings.json
 *.sqlite
 *.sqlite3
 
+# Local test canvases / notes created during dev
+Cadernos/
+**/Cadernos/
+*.cncanvas
+
 # 4. Logs & Diagnostic Dumps
 *.log
 *.crash
@@ -82,6 +87,10 @@ ehthumbs.db
 Thumbs.db
 desktop.ini
 
-# 8. Internal Analysis Tools & Knowledge Graphs
+# 8. Internal Analysis Tools, Brain & Knowledge Graphs
 /graphify-out/
 graphify-out/
+.gemini/
+brain/
+*.tmp
+skill.txt

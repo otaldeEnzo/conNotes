@@ -5,7 +5,7 @@
 - **SVG Icons Only**: Use vector SVG elements (`svg { ... }` or icon components from `src/icons.rs` / Flutter `SvgIcon`) for all iconography, status indicators, tabs, buttons, and note type identifiers.
 
 ## Visual Design & Aesthetics Rule (Moscaro Modern Standard)
-- **Moscaro Aesthetic**: All generated UI, layouts, modals, popovers, expandable menus, sidebars, note views, and custom scrollbars must adhere to the **Moscaro** modern aesthetic.
+- **Moscaro Aesthetic**: All generated UI, layouts, modals, popovers, expandable menus, sidebars, note views, and custom scrollbars must adhere to the **Moscaro** modern aesthetic and active theme.
 - **Design Specifications**:
   - Dark liquid glass backdrop (`rgba(14, 16, 24, 0.92)` or `rgba(18, 20, 28, 0.95)`) with backdrop blur (`backdrop-filter: blur(20px)` or `blurSigma: 35.0`).
   - Subtle cyan glowing borders (`rgba(0, 225, 255, 0.3)` or `#00e1ff`) and glowing drop-shadows.

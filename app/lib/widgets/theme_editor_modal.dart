@@ -52,12 +52,21 @@ class _ThemeEditorModalState extends State<ThemeEditorModal> {
   late Color _borderGlowColor;
   late List<Color> _stemPalette;
 
-  // 3. Blur Individual por Componente
+  // 3. Blur Individual por Componente e Intensidade
+  late double _blurSigma;
   late bool _enableSidebarBlur;
   late bool _enableToolbarBlur;
   late bool _enableSubBarsBlur;
   late bool _enableModalsBlur;
   late bool _enableInstrumentsBlur;
+  late bool _enableCardsBlur;
+
+  // 4. Cores Específicas de Cards STEM (Callouts & Progresso)
+  late Color _calloutTipColor;
+  late Color _calloutTheoremColor;
+  late Color _calloutWarningColor;
+  late Color _calloutConceptColor;
+  late Color _cardProgressColor;
 
   @override
   void initState() {
@@ -85,11 +94,19 @@ class _ThemeEditorModalState extends State<ThemeEditorModal> {
     _borderGlowColor = init.borderGlowColor;
     _stemPalette = List<Color>.from(init.stemPalette);
 
+    _blurSigma = init.blurSigma;
     _enableSidebarBlur = init.enableSidebarBlur;
     _enableToolbarBlur = init.enableToolbarBlur;
     _enableSubBarsBlur = init.enableSubBarsBlur;
     _enableModalsBlur = init.enableModalsBlur;
     _enableInstrumentsBlur = init.enableInstrumentsBlur;
+    _enableCardsBlur = init.enableCardsBlur;
+
+    _calloutTipColor = init.calloutTipColor;
+    _calloutTheoremColor = init.calloutTheoremColor;
+    _calloutWarningColor = init.calloutWarningColor;
+    _calloutConceptColor = init.calloutConceptColor;
+    _cardProgressColor = init.cardProgressColor;
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _triggerLivePreview();
@@ -132,12 +149,35 @@ class _ThemeEditorModalState extends State<ThemeEditorModal> {
       glassColor: _glassColor,
       borderGlowColor: _borderGlowColor,
       stemPalette: _stemPalette,
+      blurSigma: _blurSigma,
       enableSidebarBlur: _enableSidebarBlur,
       enableToolbarBlur: _enableToolbarBlur,
       enableSubBarsBlur: _enableSubBarsBlur,
       enableModalsBlur: _enableModalsBlur,
       enableInstrumentsBlur: _enableInstrumentsBlur,
+      enableCardsBlur: _enableCardsBlur,
+      calloutTipColor: _calloutTipColor,
+      calloutTheoremColor: _calloutTheoremColor,
+      calloutWarningColor: _calloutWarningColor,
+      calloutConceptColor: _calloutConceptColor,
+      cardProgressColor: _cardProgressColor,
     );
+  }
+
+  void _harmonizeCardColors() {
+    final hsl = HSLColor.fromColor(_accentPrimary);
+    final isLight = _backgroundSurface.computeLuminance() > 0.45;
+    final sat = isLight ? 0.75 : 0.85;
+    final light = isLight ? 0.45 : 0.60;
+
+    setState(() {
+      _calloutTipColor = _accentPrimary;
+      _calloutTheoremColor = HSLColor.fromAHSL(1.0, (hsl.hue + 60) % 360, sat, light).toColor();
+      _calloutWarningColor = HSLColor.fromAHSL(1.0, (hsl.hue + 180) % 360, sat, light).toColor();
+      _calloutConceptColor = HSLColor.fromAHSL(1.0, (hsl.hue + 120) % 360, sat, light).toColor();
+      _cardProgressColor = _accentPrimary;
+    });
+    _triggerLivePreview();
   }
 
   void _applyHarmonyFromBase() {
@@ -156,6 +196,11 @@ class _ThemeEditorModalState extends State<ThemeEditorModal> {
       _glassColor = generated.glassColor;
       _borderGlowColor = generated.borderGlowColor;
       _stemPalette = List<Color>.from(generated.stemPalette);
+      _calloutTipColor = generated.calloutTipColor;
+      _calloutTheoremColor = generated.calloutTheoremColor;
+      _calloutWarningColor = generated.calloutWarningColor;
+      _calloutConceptColor = generated.calloutConceptColor;
+      _cardProgressColor = generated.cardProgressColor;
     });
     _triggerLivePreview();
   }
@@ -390,7 +435,7 @@ class _ThemeEditorModalState extends State<ThemeEditorModal> {
 
                 const SizedBox(height: 10),
 
-                // 3. Abas de Configuração (Cores, Fundo & Textura, Blur)
+                // 3. Abas de Configuração (Cores, Fundo & Textura, Blur, Cards STEM)
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 20),
                   child: Row(
@@ -400,6 +445,8 @@ class _ThemeEditorModalState extends State<ThemeEditorModal> {
                       _buildTabButton(index: 1, label: 'Fundo & Textura', icon: Icons.wallpaper_outlined),
                       const SizedBox(width: 8),
                       _buildTabButton(index: 2, label: 'Desfoque (Blur)', icon: Icons.blur_on_rounded),
+                      const SizedBox(width: 8),
+                      _buildTabButton(index: 3, label: 'Cards STEM', icon: Icons.style_outlined),
                     ],
                   ),
                 ),
@@ -508,7 +555,7 @@ class _ThemeEditorModalState extends State<ThemeEditorModal> {
                               },
                             ),
                             ThemeColorFieldTile(
-                              label: 'Pontos do Grid (Dot)',
+                              label: 'Cor da Grade (Geral)',
                               color: _dotGridColor,
                               allowAlpha: true,
                               propertyType: ThemePropertyType.dotGrid,
@@ -626,12 +673,66 @@ class _ThemeEditorModalState extends State<ThemeEditorModal> {
                           },
                         ),
                       ] else if (_activeTabIndex == 2) ...[
+                        Container(
+                          margin: const EdgeInsets.only(bottom: 12),
+                          padding: const EdgeInsets.all(14),
+                          decoration: BoxDecoration(
+                            color: Colors.white.withValues(alpha: 0.04),
+                            borderRadius: BorderRadius.circular(14),
+                            border: Border.all(color: Colors.white10),
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              Row(
+                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                children: [
+                                  const Text(
+                                    'Intensidade do Blur (Vidro Líquido)',
+                                    style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13),
+                                  ),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                    decoration: BoxDecoration(
+                                      color: _accentPrimary.withValues(alpha: 0.2),
+                                      borderRadius: BorderRadius.circular(8),
+                                      border: Border.all(color: _accentPrimary.withValues(alpha: 0.5)),
+                                    ),
+                                    child: Text(
+                                      '${_blurSigma.round()} px',
+                                      style: TextStyle(color: _accentPrimary, fontWeight: FontWeight.bold, fontSize: 11.5),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 6),
+                              const Text(
+                                'Define o desfoque de fundo dos menus, painéis e ferramentas para este tema.',
+                                style: TextStyle(color: Colors.white54, fontSize: 11),
+                              ),
+                              const SizedBox(height: 8),
+                              Slider(
+                                value: _blurSigma,
+                                min: 0.0,
+                                max: 50.0,
+                                divisions: 50,
+                                activeColor: _accentPrimary,
+                                inactiveColor: Colors.white12,
+                                onChanged: (val) {
+                                  setState(() => _blurSigma = val);
+                                  _triggerLivePreview();
+                                },
+                              ),
+                            ],
+                          ),
+                        ),
                         ThemeBlurTogglesCard(
                           enableSidebarBlur: _enableSidebarBlur,
                           enableToolbarBlur: _enableToolbarBlur,
                           enableSubBarsBlur: _enableSubBarsBlur,
                           enableModalsBlur: _enableModalsBlur,
                           enableInstrumentsBlur: _enableInstrumentsBlur,
+                          enableCardsBlur: _enableCardsBlur,
                           accentColor: _accentPrimary,
                           onSidebarChanged: (v) {
                             setState(() => _enableSidebarBlur = v);
@@ -639,6 +740,10 @@ class _ThemeEditorModalState extends State<ThemeEditorModal> {
                           },
                           onToolbarChanged: (v) {
                             setState(() => _enableToolbarBlur = v);
+                            _triggerLivePreview();
+                          },
+                          onCardsChanged: (v) {
+                            setState(() => _enableCardsBlur = v);
                             _triggerLivePreview();
                           },
                           onSubBarsChanged: (v) {
@@ -653,6 +758,103 @@ class _ThemeEditorModalState extends State<ThemeEditorModal> {
                             setState(() => _enableInstrumentsBlur = v);
                             _triggerLivePreview();
                           },
+                        ),
+                      ] else if (_activeTabIndex == 3) ...[
+                        // 1. Cabeçalho da Aba de Cards + Botão Harmonizar Cores com o Tema
+                        Container(
+                          margin: const EdgeInsets.only(bottom: 14),
+                          padding: const EdgeInsets.all(14),
+                          decoration: BoxDecoration(
+                            color: Colors.white.withValues(alpha: 0.04),
+                            borderRadius: BorderRadius.circular(14),
+                            border: Border.all(color: Colors.white10),
+                          ),
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  const Text(
+                                    'Cores Semânticas dos Cards STEM',
+                                    style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13),
+                                  ),
+                                  const SizedBox(height: 3),
+                                  Text(
+                                    'Personalize as cores de callouts (dicas, teoremas, avisos) e checklists.',
+                                    style: TextStyle(color: Colors.white.withValues(alpha: 0.5), fontSize: 11),
+                                  ),
+                                ],
+                              ),
+                              ElevatedButton.icon(
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: _accentPrimary.withValues(alpha: 0.18),
+                                  foregroundColor: _accentPrimary,
+                                  side: BorderSide(color: _accentPrimary.withValues(alpha: 0.5)),
+                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                                ),
+                                icon: const Icon(Icons.auto_awesome, size: 15),
+                                label: const Text(
+                                  'Harmonizar com o Tema',
+                                  style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold),
+                                ),
+                                onPressed: _harmonizeCardColors,
+                              ),
+                            ],
+                          ),
+                        ),
+
+                        // 2. Grade de Seletores de Cores dos Cards STEM
+                        GridView.count(
+                          crossAxisCount: 2,
+                          shrinkWrap: true,
+                          physics: const NeverScrollableScrollPhysics(),
+                          crossAxisSpacing: 10,
+                          mainAxisSpacing: 10,
+                          childAspectRatio: 3.4,
+                          children: [
+                            ThemeColorFieldTile(
+                              label: 'Callout Dica / Insight',
+                              color: _calloutTipColor,
+                              onColorChanged: (c) {
+                                setState(() => _calloutTipColor = c);
+                                _triggerLivePreview();
+                              },
+                            ),
+                            ThemeColorFieldTile(
+                              label: 'Callout Teorema / Fórmula',
+                              color: _calloutTheoremColor,
+                              onColorChanged: (c) {
+                                setState(() => _calloutTheoremColor = c);
+                                _triggerLivePreview();
+                              },
+                            ),
+                            ThemeColorFieldTile(
+                              label: 'Callout Atenção / Aviso',
+                              color: _calloutWarningColor,
+                              onColorChanged: (c) {
+                                setState(() => _calloutWarningColor = c);
+                                _triggerLivePreview();
+                              },
+                            ),
+                            ThemeColorFieldTile(
+                              label: 'Callout Conceito STEM',
+                              color: _calloutConceptColor,
+                              onColorChanged: (c) {
+                                setState(() => _calloutConceptColor = c);
+                                _triggerLivePreview();
+                              },
+                            ),
+                            ThemeColorFieldTile(
+                              label: 'Progresso de Checklists',
+                              color: _cardProgressColor,
+                              onColorChanged: (c) {
+                                setState(() => _cardProgressColor = c);
+                                _triggerLivePreview();
+                              },
+                            ),
+                          ],
                         ),
                       ],
                     ],

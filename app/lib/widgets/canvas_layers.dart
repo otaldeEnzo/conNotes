@@ -992,6 +992,7 @@ class ActiveStrokePainter extends CustomPainter {
       if (hasTransform) {
         canvas.restore();
       }
+      canvas.restore();
     }
   }
 

@@ -10,6 +10,7 @@ import 'settings_theme_view.dart';
 import '../theme/moscaro_theme_controller.dart';
 import '../services/workspace_storage_service.dart';
 import '../services/windows_file_dialog_service.dart';
+import '../services/custom_font_manager.dart';
 import 'svg_icon.dart';
 
 /// Visualizador Principal da Página de Configurações no Canvas (Moscaro v2 Pro Max).
@@ -193,6 +194,7 @@ class _SettingsPageViewState extends State<SettingsPageView> {
       key: const ValueKey('visual_settings'),
       children: [
         _buildWorkspaceDirectoryTile(context),
+        _buildCustomFontsTile(context),
         SettingsSliderTile(
           title: 'Intensidade do Blur (Vidro Líquido)',
           description: 'Define o desfoque de fundo dos menus, painéis e ferramentas de todo o app.',
@@ -306,6 +308,139 @@ class _SettingsPageViewState extends State<SettingsPageView> {
               overflow: TextOverflow.ellipsis,
             ),
           ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildCustomFontsTile(BuildContext context) {
+    final isLight = MoscaroTokens.isLight;
+    final textPrimary = MoscaroTokens.textPrimary;
+    final textSecondary = MoscaroTokens.textSecondary;
+    final accentCyan = MoscaroTokens.auroraBlue;
+    final fontManager = CustomFontManager.instance;
+    final textCtrl = TextEditingController();
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: isLight ? Colors.white.withValues(alpha: 0.6) : const Color(0xFF0C1422).withValues(alpha: 0.45),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: isLight ? Colors.black.withValues(alpha: 0.08) : Colors.white.withValues(alpha: 0.08),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.font_download_rounded, size: 20, color: accentCyan),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Tipografias & Fontes do Sistema',
+                      style: TextStyle(
+                        color: textPrimary,
+                        fontSize: 13.5,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      'Cadastre manualmente qualquer família tipográfica instalada em seu computador para usar nos cards.',
+                      style: TextStyle(
+                        color: textSecondary,
+                        fontSize: 11.5,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+
+          // Campo de Adição Rápida
+          Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  controller: textCtrl,
+                  style: TextStyle(color: textPrimary, fontSize: 12.5),
+                  decoration: InputDecoration(
+                    hintText: 'Digite o nome exato da fonte (ex: Helvetica, Comic Sans, Cascadia Code)...',
+                    hintStyle: TextStyle(color: textSecondary.withValues(alpha: 0.5), fontSize: 11.5),
+                    filled: true,
+                    fillColor: isLight ? Colors.black.withValues(alpha: 0.03) : Colors.white.withValues(alpha: 0.04),
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(10),
+                      borderSide: BorderSide(color: isLight ? Colors.black12 : Colors.white12),
+                    ),
+                    focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(10),
+                      borderSide: BorderSide(color: accentCyan, width: 1.2),
+                    ),
+                  ),
+                  onSubmitted: (val) {
+                    if (val.trim().isNotEmpty) {
+                      fontManager.addFont(val.trim());
+                      textCtrl.clear();
+                      setState(() {});
+                    }
+                  },
+                ),
+              ),
+              const SizedBox(width: 8),
+              ElevatedButton.icon(
+                onPressed: () {
+                  if (textCtrl.text.trim().isNotEmpty) {
+                    fontManager.addFont(textCtrl.text.trim());
+                    textCtrl.clear();
+                    setState(() {});
+                  }
+                },
+                icon: const Icon(Icons.add, size: 16),
+                label: const Text('Adicionar Fonte', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: accentCyan.withValues(alpha: 0.25),
+                  foregroundColor: Colors.white,
+                  side: BorderSide(color: accentCyan.withValues(alpha: 0.6), width: 1.2),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                  elevation: 0,
+                ),
+              ),
+            ],
+          ),
+
+          if (fontManager.userFonts.isNotEmpty) ...[
+            const SizedBox(height: 10),
+            Wrap(
+              spacing: 6,
+              runSpacing: 6,
+              children: fontManager.userFonts.map((f) {
+                return Chip(
+                  backgroundColor: isLight ? Colors.black.withValues(alpha: 0.05) : Colors.white.withValues(alpha: 0.08),
+                  label: Text(f, style: TextStyle(color: textPrimary, fontSize: 11.5, fontFamily: f)),
+                  deleteIcon: Icon(Icons.close, size: 14, color: textSecondary),
+                  onDeleted: () {
+                    fontManager.removeFont(f);
+                    setState(() {});
+                  },
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8),
+                    side: BorderSide(color: isLight ? Colors.black12 : Colors.white12),
+                  ),
+                );
+              }).toList(),
+            ),
+          ],
         ],
       ),
     );

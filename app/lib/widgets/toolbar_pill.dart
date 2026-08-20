@@ -30,6 +30,8 @@ class ToolbarPill extends StatefulWidget {
   final VoidCallback onSelectLaser;
   final bool isRulerActive;
   final VoidCallback onToggleRuler;
+  final bool isCardsActive;
+  final VoidCallback onToggleCards;
   final bool isGridMenuOpen;
   final VoidCallback onToggleGridMenu;
 
@@ -47,6 +49,8 @@ class ToolbarPill extends StatefulWidget {
     required this.onSelectLaser,
     this.isRulerActive = false,
     required this.onToggleRuler,
+    this.isCardsActive = false,
+    required this.onToggleCards,
     required this.selectionType,
     required this.onToggleAI,
     required this.isAIOpen,
@@ -190,6 +194,17 @@ class _ToolbarPillState extends State<ToolbarPill> {
           onPressed: widget.onToggleRuler,
           iconSize: iconSize,
           customActiveColor: widget.isRulerActive ? MoscaroTokens.auroraBlue : null,
+        ),
+        const SizedBox(width: 4),
+
+        // 5.1 Inserir Cards no Canvas (Card STEM)
+        _buildHoverIconButton(
+          index: 5,
+          assetName: 'card',
+          tooltip: 'Inserir Cards (Texto, Markdown, LaTeX, Mermaid)',
+          onPressed: widget.onToggleCards,
+          iconSize: iconSize,
+          customActiveColor: widget.isCardsActive ? MoscaroTokens.auroraBlue : null,
         ),
         const SizedBox(width: 8),
         Container(width: 1, height: 20, color: dividerColor),

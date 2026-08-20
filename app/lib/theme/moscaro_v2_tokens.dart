@@ -56,6 +56,7 @@ class MoscaroTokens {
   static bool enableSubBarsBlur = true;
   static bool enableModalsBlur = true;
   static bool enableInstrumentsBlur = true;
+  static bool enableCardsBlur = true;
 
   // Raios dos Cantos
   static const double radiusPanel = 24.0;
@@ -67,8 +68,12 @@ class MoscaroTokens {
   static const double borderWidthSubtle = 1.2;
   static const double borderWidthAurora = 1.8;
 
-  // Parâmetros do Canvas & Glow
-  static const double mouseGlowRadius = 120.0;
+  // 5. Cores Específicas de Cards STEM (Callouts & Progresso)
+  static Color calloutTipColor = const Color(0xFF00E1FF);
+  static Color calloutTheoremColor = const Color(0xFFA855F7);
+  static Color calloutWarningColor = const Color(0xFFF59E0B);
+  static Color calloutConceptColor = const Color(0xFF10B981);
+  static Color cardProgressColor = const Color(0xFF00E1FF);
 
   /// Atualiza todos os tokens centrais de cor com a definição do tema ativo
   static void applyTheme(ThemeDefinition theme) {
@@ -79,6 +84,7 @@ class MoscaroTokens {
     borderGlowActive = theme.borderGlowColor;
     glassTint = theme.glassColor;
     stemPalette = List<Color>.from(theme.stemPalette);
+    blurSigma = theme.blurSigma;
     canvasTextColor = theme.canvasTextColor;
     canvasSubtextColor = theme.canvasSubtextColor;
     enableSidebarBlur = theme.enableSidebarBlur;
@@ -86,5 +92,11 @@ class MoscaroTokens {
     enableSubBarsBlur = theme.enableSubBarsBlur;
     enableModalsBlur = theme.enableModalsBlur;
     enableInstrumentsBlur = theme.enableInstrumentsBlur;
+    enableCardsBlur = theme.enableCardsBlur;
+    calloutTipColor = theme.calloutTipColor;
+    calloutTheoremColor = theme.calloutTheoremColor;
+    calloutWarningColor = theme.calloutWarningColor;
+    calloutConceptColor = theme.calloutConceptColor;
+    cardProgressColor = theme.cardProgressColor;
   }
 }

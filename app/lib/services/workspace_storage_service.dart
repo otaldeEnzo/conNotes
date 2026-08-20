@@ -221,6 +221,9 @@ class WorkspaceStorageService extends ChangeNotifier {
     });
   }
 
+  /// Alias para queueAutosave
+  void scheduleAutoSave(NoteDocument doc) => queueAutosave(doc);
+
   /// Salva imediatamente a nota no disco em formato .cncanvas
   Future<void> saveNoteNow(NoteDocument doc, {String? targetFolderName}) async {
     if (_workspacePath.isEmpty) return;

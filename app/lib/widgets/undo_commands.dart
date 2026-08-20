@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'ink_models.dart';
 import 'note_models.dart';
+import '../models/canvas_card_model.dart';
 
 /// Interface para todos os comandos de Undo/Redo no formato Command Pattern
 abstract class UndoCommand {
@@ -119,6 +120,73 @@ class MoveStrokesCommand implements UndoCommand {
   @override
   void undo(NoteDocument note) {
     note.updateAllStrokes(originalStrokes);
+  }
+}
+
+/// Comando para adicionar um novo card
+class AddCardCommand implements UndoCommand {
+  final CanvasCardModel card;
+
+  AddCardCommand(this.card);
+
+  @override
+  void execute(NoteDocument note) {
+    if (!note.cards.any((c) => c.id == card.id)) {
+      note.cards.add(card);
+    }
+  }
+
+  @override
+  void undo(NoteDocument note) {
+    note.cards.removeWhere((c) => c.id == card.id);
+  }
+}
+
+/// Comando para remover um card
+class RemoveCardCommand implements UndoCommand {
+  final CanvasCardModel card;
+
+  RemoveCardCommand(this.card);
+
+  @override
+  void execute(NoteDocument note) {
+    note.cards.removeWhere((c) => c.id == card.id);
+  }
+
+  @override
+  void undo(NoteDocument note) {
+    if (!note.cards.any((c) => c.id == card.id)) {
+      note.cards.add(card);
+    }
+  }
+}
+
+/// Comando para atualizar/modificar um card (título, conteúdo, tamanho, posição, formatação)
+class UpdateCardCommand implements UndoCommand {
+  final String cardId;
+  final CanvasCardModel previousCard;
+  final CanvasCardModel newCard;
+
+  UpdateCardCommand({
+    required this.cardId,
+    required this.previousCard,
+    required this.newCard,
+  });
+
+  @override
+  void execute(NoteDocument note) {
+    final idx = note.cards.indexWhere((c) => c.id == cardId);
+    if (idx != -1) {
+      note.cards[idx] = newCard;
+    }
+  }
+
+  @override
+  void undo(NoteDocument note) {
+    final idx = note.cards.indexWhere((c) => c.id == cardId);
+    if (idx != -1) {
+      note.cards[idx] = previousCard;
+    }
   }
 }
 

@@ -804,7 +804,9 @@ class _NoteSidebarState extends State<NoteSidebar> {
     final isLight = MoscaroTokens.isLight;
     final themeAccent = MoscaroTokens.auroraBlue;
     final glassTint = MoscaroTokens.glassTint;
-    final blur = MoscaroTokens.blurSigma;
+    final blur = (MoscaroTokens.enableSidebarBlur && MoscaroTokens.blurSigma > 0)
+        ? MoscaroTokens.blurSigma
+        : 0.0;
 
     // Posicionar à direita da sidebar (Sidebar 340px + 24px margem + 8px gap = 372px)
     final double left = 372.0;
@@ -812,6 +814,55 @@ class _NoteSidebarState extends State<NoteSidebar> {
 
     _activeMenuOverlay = OverlayEntry(
       builder: (ctx) {
+        Widget content = Padding(
+          padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 6),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              // 1. Abrir no Navegador
+              _buildMenuItem(
+                icon: 'globe',
+                iconColor: themeAccent,
+                label: 'Abrir no Navegador',
+                onTap: () {
+                  _closeActiveMenu();
+                  storage.openInBrowser(note);
+                },
+              ),
+              const SizedBox(height: 2),
+              // 2. Renomear
+              _buildMenuItem(
+                icon: 'edit',
+                iconColor: themeAccent,
+                label: 'Renomear',
+                onTap: () {
+                  _closeActiveMenu();
+                  _startInlineRename(note);
+                },
+              ),
+              const SizedBox(height: 2),
+              Divider(
+                height: 8,
+                thickness: 0.8,
+                color: isLight ? Colors.black12 : Colors.white12,
+              ),
+              const SizedBox(height: 2),
+              // 3. Mover para Lixeira
+              _buildMenuItem(
+                icon: 'trash',
+                iconColor: const Color(0xFFFF007A),
+                label: 'Mover para Lixeira',
+                labelColor: const Color(0xFFFF007A),
+                onTap: () {
+                  _closeActiveMenu();
+                  storage.moveToTrash(note);
+                },
+              ),
+            ],
+          ),
+        );
+
         return Stack(
           children: [
             // Barreira Invisível para fechar ao clicar em qualquer lugar fora (Sem piscar em branco)
@@ -849,60 +900,15 @@ class _NoteSidebarState extends State<NoteSidebar> {
                   ),
                   child: ClipRRect(
                     borderRadius: BorderRadius.circular(14),
-                    child: BackdropFilter(
-                      filter: ImageFilter.blur(
-                        sigmaX: blur > 0 ? blur : 20.0,
-                        sigmaY: blur > 0 ? blur : 20.0,
-                      ),
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 6),
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [
-                            // 1. Abrir no Navegador
-                            _buildMenuItem(
-                              icon: 'globe',
-                              iconColor: themeAccent,
-                              label: 'Abrir no Navegador',
-                              onTap: () {
-                                _closeActiveMenu();
-                                storage.openInBrowser(note);
-                              },
+                    child: blur > 0
+                        ? BackdropFilter(
+                            filter: ImageFilter.blur(
+                              sigmaX: blur,
+                              sigmaY: blur,
                             ),
-                            const SizedBox(height: 2),
-                            // 2. Renomear
-                            _buildMenuItem(
-                              icon: 'edit',
-                              iconColor: themeAccent,
-                              label: 'Renomear',
-                              onTap: () {
-                                _closeActiveMenu();
-                                _startInlineRename(note);
-                              },
-                            ),
-                            const SizedBox(height: 2),
-                            Divider(
-                              height: 8,
-                              thickness: 0.8,
-                              color: isLight ? Colors.black12 : Colors.white12,
-                            ),
-                            const SizedBox(height: 2),
-                            // 3. Mover para Lixeira
-                            _buildMenuItem(
-                              icon: 'trash',
-                              iconColor: const Color(0xFFFF007A),
-                              label: 'Mover para Lixeira',
-                              labelColor: const Color(0xFFFF007A),
-                              onTap: () {
-                                _closeActiveMenu();
-                                storage.moveToTrash(note);
-                              },
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
+                            child: content,
+                          )
+                        : content,
                   ),
                 ),
               ),

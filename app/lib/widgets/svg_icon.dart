@@ -12,6 +12,12 @@ class SvgIcon extends StatelessWidget {
   String get iconKey => name ?? assetName ?? 'file';
 
   static const Map<String, String> _builtinSvgStrings = {
+    'card': '''<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+  <rect width="18" height="18" x="3" y="3" rx="3"/>
+  <path d="M7 8h10"/>
+  <path d="M7 12h6"/>
+  <path d="M7 16h8"/>
+</svg>''',
     'laser': '''<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
   <circle cx="12" cy="12" r="3"/>
   <path d="M12 3v3"/>
@@ -152,6 +158,14 @@ class SvgIcon extends StatelessWidget {
   <circle cx="12" cy="12" r="10"/>
   <path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/>
   <path d="M2 12h20"/>
+</svg>''',
+    'pin': '''<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+  <line x1="12" y1="17" x2="12" y2="22"/>
+  <path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24Z"/>
+</svg>''',
+    'lock': '''<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+  <rect width="18" height="11" x="3" y="11" rx="2" ry="2"/>
+  <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
 </svg>''',
   };
 

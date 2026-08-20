@@ -237,12 +237,21 @@ class ThemeDefinition {
   // 3. Paleta de Canetas STEM
   final List<Color> stemPalette;
 
-  // 4. Presença Individual de Blur (BackdropFilter) por Componente
+  // 4. Presença Individual de Blur e Intensidade (BackdropFilter) por Tema
+  final double blurSigma;
   final bool enableSidebarBlur;
   final bool enableToolbarBlur;
   final bool enableSubBarsBlur;
   final bool enableModalsBlur;
   final bool enableInstrumentsBlur;
+  final bool enableCardsBlur;
+
+  // 5. Cores Específicas de Cards STEM (Callouts & Progresso)
+  final Color calloutTipColor;
+  final Color calloutTheoremColor;
+  final Color calloutWarningColor;
+  final Color calloutConceptColor;
+  final Color cardProgressColor;
 
   const ThemeDefinition({
     required this.preset,
@@ -264,14 +273,24 @@ class ThemeDefinition {
     required this.glassColor,
     required this.borderGlowColor,
     required this.stemPalette,
+    this.blurSigma = 20.0,
     this.enableSidebarBlur = true,
     this.enableToolbarBlur = true,
     this.enableSubBarsBlur = true,
     this.enableModalsBlur = true,
     this.enableInstrumentsBlur = true,
+    this.enableCardsBlur = true,
+    this.calloutTipColor = const Color(0xFF00E1FF),
+    this.calloutTheoremColor = const Color(0xFFA855F7),
+    this.calloutWarningColor = const Color(0xFFF59E0B),
+    this.calloutConceptColor = const Color(0xFF10B981),
+    this.cardProgressColor = const Color(0xFF00E1FF),
   });
 
   String get id => customId ?? preset.id;
+
+  /// Cor geral da grade no Canvas (Dot Grid, Pautado, Isométrico, Milimetrado)
+  Color get gridColor => dotGridColor;
 
   /// Retorna as cores efetivas do gradiente (seja de 2 ou N paradas)
   List<Color> get effectiveGradientColors {
@@ -550,11 +569,18 @@ class ThemeDefinition {
     Color? glassColor,
     Color? borderGlowColor,
     List<Color>? stemPalette,
+    double? blurSigma,
     bool? enableSidebarBlur,
     bool? enableToolbarBlur,
     bool? enableSubBarsBlur,
     bool? enableModalsBlur,
     bool? enableInstrumentsBlur,
+    bool? enableCardsBlur,
+    Color? calloutTipColor,
+    Color? calloutTheoremColor,
+    Color? calloutWarningColor,
+    Color? calloutConceptColor,
+    Color? cardProgressColor,
   }) {
     return ThemeDefinition(
       preset: preset ?? this.preset,
@@ -576,11 +602,18 @@ class ThemeDefinition {
       glassColor: glassColor ?? this.glassColor,
       borderGlowColor: borderGlowColor ?? this.borderGlowColor,
       stemPalette: stemPalette ?? this.stemPalette,
+      blurSigma: blurSigma ?? this.blurSigma,
       enableSidebarBlur: enableSidebarBlur ?? this.enableSidebarBlur,
       enableToolbarBlur: enableToolbarBlur ?? this.enableToolbarBlur,
       enableSubBarsBlur: enableSubBarsBlur ?? this.enableSubBarsBlur,
       enableModalsBlur: enableModalsBlur ?? this.enableModalsBlur,
       enableInstrumentsBlur: enableInstrumentsBlur ?? this.enableInstrumentsBlur,
+      enableCardsBlur: enableCardsBlur ?? this.enableCardsBlur,
+      calloutTipColor: calloutTipColor ?? this.calloutTipColor,
+      calloutTheoremColor: calloutTheoremColor ?? this.calloutTheoremColor,
+      calloutWarningColor: calloutWarningColor ?? this.calloutWarningColor,
+      calloutConceptColor: calloutConceptColor ?? this.calloutConceptColor,
+      cardProgressColor: cardProgressColor ?? this.cardProgressColor,
     );
   }
 
@@ -604,11 +637,18 @@ class ThemeDefinition {
       'glassColor': '#${glassColor.toARGB32().toRadixString(16).padLeft(8, '0')}',
       'borderGlowColor': '#${borderGlowColor.toARGB32().toRadixString(16).padLeft(8, '0')}',
       'stemPalette': stemPalette.map((c) => '#${c.toARGB32().toRadixString(16).padLeft(8, '0')}').toList(),
+      'blurSigma': blurSigma,
       'enableSidebarBlur': enableSidebarBlur,
       'enableToolbarBlur': enableToolbarBlur,
       'enableSubBarsBlur': enableSubBarsBlur,
       'enableModalsBlur': enableModalsBlur,
       'enableInstrumentsBlur': enableInstrumentsBlur,
+      'enableCardsBlur': enableCardsBlur,
+      'calloutTipColor': '#${calloutTipColor.toARGB32().toRadixString(16).padLeft(8, '0')}',
+      'calloutTheoremColor': '#${calloutTheoremColor.toARGB32().toRadixString(16).padLeft(8, '0')}',
+      'calloutWarningColor': '#${calloutWarningColor.toARGB32().toRadixString(16).padLeft(8, '0')}',
+      'calloutConceptColor': '#${calloutConceptColor.toARGB32().toRadixString(16).padLeft(8, '0')}',
+      'cardProgressColor': '#${cardProgressColor.toARGB32().toRadixString(16).padLeft(8, '0')}',
     };
   }
 
@@ -656,11 +696,18 @@ class ThemeDefinition {
       glassColor: parseHex(json['glassColor'] as String?, moscaroCyan.glassColor),
       borderGlowColor: parseHex(json['borderGlowColor'] as String?, moscaroCyan.borderGlowColor),
       stemPalette: palette,
+      blurSigma: (json['blurSigma'] as num?)?.toDouble() ?? 20.0,
       enableSidebarBlur: json['enableSidebarBlur'] as bool? ?? true,
       enableToolbarBlur: json['enableToolbarBlur'] as bool? ?? true,
       enableSubBarsBlur: json['enableSubBarsBlur'] as bool? ?? true,
       enableModalsBlur: json['enableModalsBlur'] as bool? ?? true,
       enableInstrumentsBlur: json['enableInstrumentsBlur'] as bool? ?? true,
+      enableCardsBlur: json['enableCardsBlur'] as bool? ?? true,
+      calloutTipColor: parseHex(json['calloutTipColor'] as String?, const Color(0xFF00E1FF)),
+      calloutTheoremColor: parseHex(json['calloutTheoremColor'] as String?, const Color(0xFFA855F7)),
+      calloutWarningColor: parseHex(json['calloutWarningColor'] as String?, const Color(0xFFF59E0B)),
+      calloutConceptColor: parseHex(json['calloutConceptColor'] as String?, const Color(0xFF10B981)),
+      cardProgressColor: parseHex(json['cardProgressColor'] as String?, const Color(0xFF00E1FF)),
     );
   }
 }
