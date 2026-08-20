@@ -94,3 +94,21 @@ graphify-out/
 brain/
 *.tmp
 skill.txt
+
+# 9. Non-Essential Project Files (Plans, Txts, Concept Images, Scratch Files)
+*_plan.md
+*implementation_plan*.md
+*.txt
+*.png
+*.jpg
+*.jpeg
+*.webp
+*.gif
+*.bmp
+*.ico
+# Except essential app icons/assets inside app directory
+!app/**/Assets.xcassets/**/*.png
+!app/**/icons/*.png
+!app/**/resources/*.ico
+!app/web/**/*.png
+

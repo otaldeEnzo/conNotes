@@ -1,9 +1,0 @@
-quero criar um programa de notetaking com infinite canvas e assistencia por IA voltado para estudantes da area de exatas/stem.
-
-o programa é criado com o intuito de sanar o seguinte problema:
-imagine que eu tenho um celuar, um tablet, um notebook e um p
-
-levo todos, menos o pc para a faculdade, se eu quiser fazer uma anotacao no celular e acessar ela pelo tablet ou pelo pc, eu preciso enviar o arquivo da nota para um sistema em nuvem e baixar no dispositivo que quero, dando muito trabalho. minha ideia é um programa que tem capacidade de funcionar ao mesmo tempo em varios dispositivos e conseguir continuar meu fluxo de trabalho a hora que eu quiser e de onde pare no dispositivo que eu quiser.
-
-quero que o programa seja focado em funcionalidades, eficiencia, fluidez, rapidez e segurança. conforme formos conversando, te mostrarei como quero o visual, mas já adianto que quero o mais proximo possivel do visual do google stitch (na tela de producao de ideias)
-
