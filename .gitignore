@@ -111,4 +111,6 @@ skill.txt
 !app/**/icons/*.png
 !app/**/resources/*.ico
 !app/web/**/*.png
-
+# Ignorar todos os arquivos markdown (.md)
+*.md
+**/*.md
