@@ -85,11 +85,11 @@ class MarkdownLatexBlockViewState extends State<MarkdownLatexBlockView> {
     final text = _blockController.text;
     final sel = _blockController.selection;
 
-    // Preserva a seleção de texto apenas quando houver seleção real (start != end)
-    if (sel.isValid && sel.start >= 0 && sel.end > sel.start) {
-      _lastSelection = sel;
-    } else {
-      _lastSelection = const TextSelection.collapsed(offset: -1);
+    // Preserva a seleção de texto sempre que for válida
+    if (sel.isValid && sel.start >= 0) {
+      if (sel.end > sel.start) {
+        _lastSelection = sel;
+      }
     }
 
     // Notifica estilos ativos para iluminar botões na barra flutuante
@@ -1378,49 +1378,86 @@ class MarkdownLatexBlockViewState extends State<MarkdownLatexBlockView> {
       // 4. Underline (<u>...</u>)
       else if (match.group(10) != null) {
         final innerText = match.group(11)!;
-        spans.add(TextSpan(
-          text: innerText,
-          style: TextStyle(
-            color: textPrimary,
-            fontFamily: fontFamily,
-            fontSize: fontSize,
-            fontWeight: isBold ? FontWeight.bold : FontWeight.normal,
-            fontStyle: isItalic ? FontStyle.italic : FontStyle.normal,
-            decoration: TextDecoration.underline,
-            decorationColor: themeAccent,
-            decorationThickness: 1.5,
-          ),
-        ));
+        spans.addAll(_parseRichInlineSpan(
+          innerText,
+          textPrimary: textPrimary,
+          fontFamily: fontFamily,
+          fontSize: fontSize,
+          themeAccent: themeAccent,
+          isLight: isLight,
+          isBold: isBold,
+          isItalic: isItalic,
+          strikethrough: strikethrough,
+        ).map((s) {
+          if (s is TextSpan) {
+            return TextSpan(
+              text: s.text,
+              children: s.children,
+              style: (s.style ?? TextStyle(color: textPrimary, fontSize: fontSize)).copyWith(
+                decoration: TextDecoration.underline,
+                decorationColor: themeAccent,
+                decorationThickness: 1.5,
+              ),
+            );
+          }
+          return s;
+        }));
       }
       // 5. Styled Mark (<mark style="background: #HEX">...</mark>)
       else if (match.group(12) != null) {
         final bgHex = match.group(13) ?? '#FACC15';
         final innerText = match.group(14) ?? '';
         final bgColor = _parseHexColor(bgHex, const Color(0xFFFACC15)).withValues(alpha: 0.38);
-        spans.add(TextSpan(
-          text: innerText,
-          style: TextStyle(
-            color: isLight ? Colors.black : Colors.white,
-            fontFamily: fontFamily,
-            fontSize: fontSize,
-            fontWeight: FontWeight.w600,
-            backgroundColor: bgColor,
-          ),
-        ));
+        spans.addAll(_parseRichInlineSpan(
+          innerText,
+          textPrimary: isLight ? Colors.black : Colors.white,
+          fontFamily: fontFamily,
+          fontSize: fontSize,
+          themeAccent: themeAccent,
+          isLight: isLight,
+          isBold: isBold,
+          isItalic: isItalic,
+          strikethrough: strikethrough,
+        ).map((s) {
+          if (s is TextSpan) {
+            return TextSpan(
+              text: s.text,
+              children: s.children,
+              style: (s.style ?? TextStyle(fontSize: fontSize)).copyWith(
+                backgroundColor: bgColor,
+                fontWeight: isBold ? FontWeight.bold : FontWeight.w600,
+              ),
+            );
+          }
+          return s;
+        }));
       }
       // 6 & 7. Highlight (==...== ou plain <mark>...</mark>)
       else if (match.group(15) != null || match.group(17) != null) {
         final innerText = match.group(16) ?? match.group(18) ?? '';
-        spans.add(TextSpan(
-          text: innerText,
-          style: TextStyle(
-            color: isLight ? Colors.black : Colors.white,
-            fontFamily: fontFamily,
-            fontSize: fontSize,
-            fontWeight: FontWeight.w600,
-            backgroundColor: const Color(0xFFFACC15).withValues(alpha: 0.38),
-          ),
-        ));
+        spans.addAll(_parseRichInlineSpan(
+          innerText,
+          textPrimary: isLight ? Colors.black : Colors.white,
+          fontFamily: fontFamily,
+          fontSize: fontSize,
+          themeAccent: themeAccent,
+          isLight: isLight,
+          isBold: isBold,
+          isItalic: isItalic,
+          strikethrough: strikethrough,
+        ).map((s) {
+          if (s is TextSpan) {
+            return TextSpan(
+              text: s.text,
+              children: s.children,
+              style: (s.style ?? TextStyle(fontSize: fontSize)).copyWith(
+                backgroundColor: const Color(0xFFFACC15).withValues(alpha: 0.38),
+                fontWeight: isBold ? FontWeight.bold : FontWeight.w600,
+              ),
+            );
+          }
+          return s;
+        }));
       }
       // 8. Subscript (<sub>...</sub>)
       else if (match.group(19) != null) {
@@ -1429,13 +1466,19 @@ class MarkdownLatexBlockViewState extends State<MarkdownLatexBlockView> {
           alignment: PlaceholderAlignment.middle,
           child: Transform.translate(
             offset: const Offset(0, 3),
-            child: Text(
-              innerText,
-              style: TextStyle(
-                color: textPrimary,
-                fontFamily: fontFamily,
-                fontSize: fontSize * 0.8,
-                fontWeight: isBold ? FontWeight.bold : FontWeight.normal,
+            child: Text.rich(
+              TextSpan(
+                children: _parseRichInlineSpan(
+                  innerText,
+                  textPrimary: textPrimary,
+                  fontFamily: fontFamily,
+                  fontSize: fontSize * 0.8,
+                  themeAccent: themeAccent,
+                  isLight: isLight,
+                  isBold: isBold,
+                  isItalic: isItalic,
+                  strikethrough: strikethrough,
+                ),
               ),
             ),
           ),
@@ -1448,13 +1491,19 @@ class MarkdownLatexBlockViewState extends State<MarkdownLatexBlockView> {
           alignment: PlaceholderAlignment.middle,
           child: Transform.translate(
             offset: const Offset(0, -4),
-            child: Text(
-              innerText,
-              style: TextStyle(
-                color: textPrimary,
-                fontFamily: fontFamily,
-                fontSize: fontSize * 0.8,
-                fontWeight: isBold ? FontWeight.bold : FontWeight.normal,
+            child: Text.rich(
+              TextSpan(
+                children: _parseRichInlineSpan(
+                  innerText,
+                  textPrimary: textPrimary,
+                  fontFamily: fontFamily,
+                  fontSize: fontSize * 0.8,
+                  themeAccent: themeAccent,
+                  isLight: isLight,
+                  isBold: isBold,
+                  isItalic: isItalic,
+                  strikethrough: strikethrough,
+                ),
               ),
             ),
           ),

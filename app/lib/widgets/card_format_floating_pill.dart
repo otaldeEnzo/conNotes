@@ -184,129 +184,132 @@ class _CardFormatFloatingPillState extends State<CardFormatFloatingPill> {
 
   @override
   Widget build(BuildContext context) {
-    return FocusScope(
-      canRequestFocus: false,
-      child: ListenableBuilder(
-        listenable: Listenable.merge([
-          MoscaroThemeController.instance,
-          CustomFontManager.instance,
-        ]),
-        builder: (context, _) {
-          final isLight = MoscaroTokens.isLight;
-          final themeAccent = MoscaroTokens.auroraBlue;
-          final textPrimary = MoscaroTokens.textPrimary;
-          final textSecondary = MoscaroTokens.textSecondary;
-          final glassTint = MoscaroTokens.glassTint;
-          final blur = (MoscaroTokens.enableToolbarBlur && MoscaroTokens.blurSigma > 0) ? MoscaroTokens.blurSigma : 0.0;
-          final popoverBlur = (MoscaroTokens.enableSubBarsBlur && MoscaroTokens.blurSigma > 0) ? MoscaroTokens.blurSigma : 0.0;
-          final fonts = CustomFontManager.instance.availableFonts;
+    return TapRegion(
+      groupId: 'card_block_editor_${widget.card.id}',
+      child: FocusScope(
+        canRequestFocus: false,
+        child: ListenableBuilder(
+          listenable: Listenable.merge([
+            MoscaroThemeController.instance,
+            CustomFontManager.instance,
+          ]),
+          builder: (context, _) {
+            final isLight = MoscaroTokens.isLight;
+            final themeAccent = MoscaroTokens.auroraBlue;
+            final textPrimary = MoscaroTokens.textPrimary;
+            final textSecondary = MoscaroTokens.textSecondary;
+            final glassTint = MoscaroTokens.glassTint;
+            final blur = (MoscaroTokens.enableToolbarBlur && MoscaroTokens.blurSigma > 0) ? MoscaroTokens.blurSigma : 0.0;
+            final popoverBlur = (MoscaroTokens.enableSubBarsBlur && MoscaroTokens.blurSigma > 0) ? MoscaroTokens.blurSigma : 0.0;
+            final fonts = CustomFontManager.instance.availableFonts;
 
-          return Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.center,
-            children: [
-              // 1. Popover do Menu de Fontes Moscaro
-              if (_isFontMenuOpen) ...[
-                _buildMoscaroFontPopover(fonts, isLight, glassTint, themeAccent, textPrimary, textSecondary, popoverBlur),
-                const SizedBox(height: 6),
-              ],
+            return Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                // 1. Popover do Menu de Fontes Moscaro
+                if (_isFontMenuOpen) ...[
+                  _buildMoscaroFontPopover(fonts, isLight, glassTint, themeAccent, textPrimary, textSecondary, popoverBlur),
+                  const SizedBox(height: 6),
+                ],
 
-              // 2. Popover da Paleta de Cores de Texto
-              if (_isColorPaletteOpen) ...[
-                _buildTextColorPalettePopover(isLight, glassTint, themeAccent, textPrimary, popoverBlur),
-                const SizedBox(height: 6),
-              ],
+                // 2. Popover da Paleta de Cores de Texto
+                if (_isColorPaletteOpen) ...[
+                  _buildTextColorPalettePopover(isLight, glassTint, themeAccent, textPrimary, popoverBlur),
+                  const SizedBox(height: 6),
+                ],
 
-              // 2.1 Popover da Paleta de Marca-Texto
-              if (_isHighlightMenuOpen) ...[
-                _buildHighlightPalettePopover(isLight, glassTint, themeAccent, textPrimary, popoverBlur),
-                const SizedBox(height: 6),
-              ],
+                // 2.1 Popover da Paleta de Marca-Texto
+                if (_isHighlightMenuOpen) ...[
+                  _buildHighlightPalettePopover(isLight, glassTint, themeAccent, textPrimary, popoverBlur),
+                  const SizedBox(height: 6),
+                ],
 
-              // 3. Menu Suspenso de Símbolos LaTeX
-              if (_isLatexPaletteOpen) ...[
-                LatexStemSymbolsPalette(
-                  onSelectSymbol: (snippet) {
-                    final formatted = snippet.startsWith(r'$') ? snippet : '\$$snippet\$';
-                    widget.onInsertSnippet(formatted);
-                    setState(() => _isLatexPaletteOpen = false);
-                  },
-                  onClose: () => setState(() => _isLatexPaletteOpen = false),
-                ),
-                const SizedBox(height: 6),
-              ],
+                // 3. Menu Suspenso de Símbolos LaTeX
+                if (_isLatexPaletteOpen) ...[
+                  LatexStemSymbolsPalette(
+                    onSelectSymbol: (snippet) {
+                      final formatted = snippet.startsWith(r'$') ? snippet : '\$$snippet\$';
+                      widget.onInsertSnippet(formatted);
+                      setState(() => _isLatexPaletteOpen = false);
+                    },
+                    onClose: () => setState(() => _isLatexPaletteOpen = false),
+                  ),
+                  const SizedBox(height: 6),
+                ],
 
-              // 4. Menu Suspenso de Templates Mermaid
-              if (_isMermaidMenuOpen) ...[
-                _buildMermaidMenu(isLight, glassTint, themeAccent, textPrimary, popoverBlur),
-                const SizedBox(height: 6),
-              ],
+                // 4. Menu Suspenso de Templates Mermaid
+                if (_isMermaidMenuOpen) ...[
+                  _buildMermaidMenu(isLight, glassTint, themeAccent, textPrimary, popoverBlur),
+                  const SizedBox(height: 6),
+                ],
 
-              // 5. Menu Suspenso de Callouts STEM
-              if (_isCalloutMenuOpen) ...[
-                _buildCalloutMenu(isLight, glassTint, themeAccent, textPrimary, popoverBlur),
-                const SizedBox(height: 6),
-              ],
+                // 5. Menu Suspenso de Callouts STEM
+                if (_isCalloutMenuOpen) ...[
+                  _buildCalloutMenu(isLight, glassTint, themeAccent, textPrimary, popoverBlur),
+                  const SizedBox(height: 6),
+                ],
 
-              // Pílula Única e Confortável de Ações e Formatação do Card
-              _buildPillContainer(
-                isLight: isLight,
-                glassTint: glassTint,
-                blur: blur,
-                child: Listener(
-                  onPointerSignal: (pointerSignal) {
-                    if (pointerSignal is PointerScrollEvent && _pillScrollController.hasClients) {
-                      final target = (_pillScrollController.offset + pointerSignal.scrollDelta.dy * 1.3).clamp(
-                        0.0,
-                        _pillScrollController.position.maxScrollExtent,
-                      );
-                      _pillScrollController.animateTo(
-                        target,
-                        duration: const Duration(milliseconds: 140),
-                        curve: Curves.easeOutCubic,
-                      );
-                    }
-                  },
-                  child: SingleChildScrollView(
-                    controller: _pillScrollController,
-                    scrollDirection: Axis.horizontal,
-                    physics: const BouncingScrollPhysics(),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        _buildMoscaroFontSelectorButton(isLight, textPrimary, textSecondary, themeAccent),
-                        const SizedBox(width: 5),
-                        _buildDivider(isLight),
-                        const SizedBox(width: 5),
-                        _buildFontSizeControls(textPrimary, themeAccent, isLight),
-                        const SizedBox(width: 5),
-                        _buildDivider(isLight),
-                        const SizedBox(width: 5),
-                        _buildRichFormattingControls(),
-                        const SizedBox(width: 5),
-                        _buildDivider(isLight),
-                        const SizedBox(width: 5),
-                        _buildAlignmentControls(),
-                        const SizedBox(width: 5),
-                        _buildDivider(isLight),
-                        const SizedBox(width: 5),
-                        _buildListControls(),
-                        const SizedBox(width: 5),
-                        _buildDivider(isLight),
-                        const SizedBox(width: 5),
-                        _buildLatexMermaidButtons(),
-                        const SizedBox(width: 5),
-                        _buildDivider(isLight),
-                        const SizedBox(width: 5),
-                        _buildActionControls(),
-                      ],
+                // Pílula Única e Confortável de Ações e Formatação do Card
+                _buildPillContainer(
+                  isLight: isLight,
+                  glassTint: glassTint,
+                  blur: blur,
+                  child: Listener(
+                    onPointerSignal: (pointerSignal) {
+                      if (pointerSignal is PointerScrollEvent && _pillScrollController.hasClients) {
+                        final target = (_pillScrollController.offset + pointerSignal.scrollDelta.dy * 1.3).clamp(
+                          0.0,
+                          _pillScrollController.position.maxScrollExtent,
+                        );
+                        _pillScrollController.animateTo(
+                          target,
+                          duration: const Duration(milliseconds: 140),
+                          curve: Curves.easeOutCubic,
+                        );
+                      }
+                    },
+                    child: SingleChildScrollView(
+                      controller: _pillScrollController,
+                      scrollDirection: Axis.horizontal,
+                      physics: const BouncingScrollPhysics(),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          _buildMoscaroFontSelectorButton(isLight, textPrimary, textSecondary, themeAccent),
+                          const SizedBox(width: 5),
+                          _buildDivider(isLight),
+                          const SizedBox(width: 5),
+                          _buildFontSizeControls(textPrimary, themeAccent, isLight),
+                          const SizedBox(width: 5),
+                          _buildDivider(isLight),
+                          const SizedBox(width: 5),
+                          _buildRichFormattingControls(),
+                          const SizedBox(width: 5),
+                          _buildDivider(isLight),
+                          const SizedBox(width: 5),
+                          _buildAlignmentControls(),
+                          const SizedBox(width: 5),
+                          _buildDivider(isLight),
+                          const SizedBox(width: 5),
+                          _buildListControls(),
+                          const SizedBox(width: 5),
+                          _buildDivider(isLight),
+                          const SizedBox(width: 5),
+                          _buildLatexMermaidButtons(),
+                          const SizedBox(width: 5),
+                          _buildDivider(isLight),
+                          const SizedBox(width: 5),
+                          _buildActionControls(),
+                        ],
+                      ),
                     ),
                   ),
                 ),
-              ),
-            ],
-          );
-        },
+              ],
+            );
+          },
+        ),
       ),
     );
   }

@@ -262,7 +262,7 @@ class MoscaroRichTextController extends TextEditingController {
       ..addAll(merged);
   }
 
-  /// Carrega o texto puro e extrai as tags Markdown/HTML para spans em memória
+  /// Carrega o texto puro e extrai recursivamente as tags Markdown/HTML para spans em memória (WYSIWYG 100% limpo)
   void loadFromFormattedText(String raw) {
     styleSpans.clear();
     hasActiveTypingStyle = false;
@@ -270,107 +270,94 @@ class MoscaroRichTextController extends TextEditingController {
 
     final cleanBuffer = StringBuffer();
 
-    final pattern = RegExp(
-      r'(\*\*([\s\S]*?)\*\*)|' // 1,2: Bold
-      r'(\*([^\*\n]+)\*)|' // 3,4: Italic
-      r'(<u>([\s\S]*?)<\/u>)|' // 5,6: Underline
-      r'(~~([\s\S]*?)~~)|' // 7,8: Strikethrough
-      r'(`([^`\n]+)`)|' // 9,10: Inline Code
-      r'(\$([^\$\n]+)\$)|' // 11,12: Inline LaTeX
-      r'(<sub>([\s\S]*?)<\/sub>)|' // 13,14: Subscript
-      r'(<sup>([\s\S]*?)<\/sup>)|' // 15,16: Superscript
-      r'(<mark style="background:\s*([^"]+)">([\s\S]*?)<\/mark>)|' // 17,18,19: Styled Mark
-      r'(<mark>([\s\S]*?)<\/mark>)|' // 20,21: Plain Mark
-      r'(==([\s\S]*?)==)|' // 22,23: ==Mark==
-      r'(<span style="color:\s*([^"]+)">([\s\S]*?)<\/span>)|' // 24,25,26: Color Span
-      r'(<font color="([^"]+)">([\s\S]*?)<\/font>)|' // 27,28,29: Font Color
-      r'(<span style="font-size:\s*([0-9.]+)px">([\s\S]*?)<\/span>)', // 30,31,32: Font Size Span
-    );
+    void parseRecursive(String input, RichStyleSpan currentStyle) {
+      final pattern = RegExp(
+        r'(\*\*([\s\S]*?)\*\*)|' // 1,2: Bold
+        r'(\*([^\*\n]+)\*)|' // 3,4: Italic
+        r'(<u>([\s\S]*?)<\/u>)|' // 5,6: Underline
+        r'(~~([\s\S]*?)~~)|' // 7,8: Strikethrough
+        r'(`([^`\n]+)`)|' // 9,10: Inline Code
+        r'(\$([^\$\n]+)\$)|' // 11,12: Inline LaTeX
+        r'(<sub>([\s\S]*?)<\/sub>)|' // 13,14: Subscript
+        r'(<sup>([\s\S]*?)<\/sup>)|' // 15,16: Superscript
+        r'(<mark style="background:\s*([^"]+)">([\s\S]*?)<\/mark>)|' // 17,18,19: Styled Mark
+        r'(<mark>([\s\S]*?)<\/mark>)|' // 20,21: Plain Mark
+        r'(==([\s\S]*?)==)|' // 22,23: ==Mark==
+        r'(<span style="color:\s*([^"]+)">([\s\S]*?)<\/span>)|' // 24,25,26: Color Span
+        r'(<font color="([^"]+)">([\s\S]*?)<\/font>)|' // 27,28,29: Font Color
+        r'(<span style="font-size:\s*([0-9.]+)px">([\s\S]*?)<\/span>)', // 30,31,32: Font Size Span
+      );
 
-    int lastEnd = 0;
-    for (final match in pattern.allMatches(raw)) {
-      if (match.start > lastEnd) {
-        cleanBuffer.write(raw.substring(lastEnd, match.start));
+      int lastEnd = 0;
+      for (final match in pattern.allMatches(input)) {
+        if (match.start > lastEnd) {
+          final plain = input.substring(lastEnd, match.start);
+          final startPos = cleanBuffer.length;
+          cleanBuffer.write(plain);
+          if (!currentStyle.isEmptyStyle) {
+            styleSpans.add(currentStyle.copyWith(start: startPos, end: startPos + plain.length));
+          }
+        }
+
+        String inner = '';
+        RichStyleSpan nextStyle = currentStyle.copyWith();
+
+        if (match.group(1) != null) {
+          inner = match.group(2)!;
+          nextStyle.isBold = true;
+        } else if (match.group(3) != null) {
+          inner = match.group(4)!;
+          nextStyle.isItalic = true;
+        } else if (match.group(5) != null) {
+          inner = match.group(6)!;
+          nextStyle.isUnderline = true;
+        } else if (match.group(7) != null) {
+          inner = match.group(8)!;
+          nextStyle.isStrikethrough = true;
+        } else if (match.group(9) != null) {
+          inner = match.group(10)!;
+          nextStyle.isCode = true;
+        } else if (match.group(11) != null) {
+          inner = match.group(12)!;
+          nextStyle.isLatex = true;
+        } else if (match.group(13) != null) {
+          inner = match.group(14)!;
+          nextStyle.isSubscript = true;
+        } else if (match.group(15) != null) {
+          inner = match.group(16)!;
+          nextStyle.isSuperscript = true;
+        } else if (match.group(17) != null) {
+          final hex = match.group(18) ?? '#FACC15';
+          inner = match.group(19)!;
+          nextStyle.highlightColor = _parseHexColor(hex, defaultHighlightColor);
+        } else if (match.group(20) != null || match.group(22) != null) {
+          inner = match.group(21) ?? match.group(23) ?? '';
+          nextStyle.highlightColor = defaultHighlightColor;
+        } else if (match.group(24) != null || match.group(27) != null) {
+          final hex = match.group(25) ?? match.group(28) ?? '';
+          inner = match.group(26) ?? match.group(29) ?? '';
+          nextStyle.textColor = _parseHexColor(hex, defaultTextColor);
+        } else if (match.group(30) != null) {
+          final sizeStr = match.group(31) ?? '';
+          inner = match.group(32) ?? '';
+          nextStyle.fontSize = double.tryParse(sizeStr);
+        }
+
+        parseRecursive(inner, nextStyle);
+        lastEnd = match.end;
       }
 
-      final startPos = cleanBuffer.length;
-
-      if (match.group(1) != null) {
-        final inner = match.group(2)!;
-        cleanBuffer.write(inner);
-        styleSpans.add(RichStyleSpan(start: startPos, end: startPos + inner.length, isBold: true));
-      } else if (match.group(3) != null) {
-        final inner = match.group(4)!;
-        cleanBuffer.write(inner);
-        styleSpans.add(RichStyleSpan(start: startPos, end: startPos + inner.length, isItalic: true));
-      } else if (match.group(5) != null) {
-        final inner = match.group(6)!;
-        cleanBuffer.write(inner);
-        styleSpans.add(RichStyleSpan(start: startPos, end: startPos + inner.length, isUnderline: true));
-      } else if (match.group(7) != null) {
-        final inner = match.group(8)!;
-        cleanBuffer.write(inner);
-        styleSpans.add(RichStyleSpan(start: startPos, end: startPos + inner.length, isStrikethrough: true));
-      } else if (match.group(9) != null) {
-        final inner = match.group(10)!;
-        cleanBuffer.write(inner);
-        styleSpans.add(RichStyleSpan(start: startPos, end: startPos + inner.length, isCode: true));
-      } else if (match.group(11) != null) {
-        final inner = match.group(12)!;
-        cleanBuffer.write(inner);
-        styleSpans.add(RichStyleSpan(start: startPos, end: startPos + inner.length, isLatex: true));
-      } else if (match.group(13) != null) {
-        final inner = match.group(14)!;
-        cleanBuffer.write(inner);
-        styleSpans.add(RichStyleSpan(start: startPos, end: startPos + inner.length, isSubscript: true));
-      } else if (match.group(15) != null) {
-        final inner = match.group(16)!;
-        cleanBuffer.write(inner);
-        styleSpans.add(RichStyleSpan(start: startPos, end: startPos + inner.length, isSuperscript: true));
-      } else if (match.group(17) != null) {
-        final hex = match.group(18) ?? '#FACC15';
-        final inner = match.group(19)!;
-        cleanBuffer.write(inner);
-        styleSpans.add(RichStyleSpan(
-          start: startPos,
-          end: startPos + inner.length,
-          highlightColor: _parseHexColor(hex, defaultHighlightColor),
-        ));
-      } else if (match.group(20) != null || match.group(22) != null) {
-        final inner = match.group(21) ?? match.group(23) ?? '';
-        cleanBuffer.write(inner);
-        styleSpans.add(RichStyleSpan(
-          start: startPos,
-          end: startPos + inner.length,
-          highlightColor: defaultHighlightColor,
-        ));
-      } else if (match.group(24) != null || match.group(27) != null) {
-        final hex = match.group(25) ?? match.group(28) ?? '';
-        final inner = match.group(26) ?? match.group(29) ?? '';
-        cleanBuffer.write(inner);
-        styleSpans.add(RichStyleSpan(
-          start: startPos,
-          end: startPos + inner.length,
-          textColor: _parseHexColor(hex, defaultTextColor),
-        ));
-      } else if (match.group(30) != null) {
-        final sizeStr = match.group(31) ?? '';
-        final inner = match.group(32) ?? '';
-        cleanBuffer.write(inner);
-        styleSpans.add(RichStyleSpan(
-          start: startPos,
-          end: startPos + inner.length,
-          fontSize: double.tryParse(sizeStr),
-        ));
+      if (lastEnd < input.length) {
+        final plain = input.substring(lastEnd);
+        final startPos = cleanBuffer.length;
+        cleanBuffer.write(plain);
+        if (!currentStyle.isEmptyStyle) {
+          styleSpans.add(currentStyle.copyWith(start: startPos, end: startPos + plain.length));
+        }
       }
-
-      lastEnd = match.end;
     }
 
-    if (lastEnd < raw.length) {
-      cleanBuffer.write(raw.substring(lastEnd));
-    }
-
+    parseRecursive(raw, RichStyleSpan(start: 0, end: 0));
     text = cleanBuffer.toString();
     _normalizeSpans();
   }
@@ -458,8 +445,14 @@ class MoscaroRichTextController extends TextEditingController {
       if (toggleItalic == true) typingStyle.isItalic = !typingStyle.isItalic;
       if (toggleUnderline == true) typingStyle.isUnderline = !typingStyle.isUnderline;
       if (toggleStrikethrough == true) typingStyle.isStrikethrough = !typingStyle.isStrikethrough;
-      if (toggleSubscript == true) typingStyle.isSubscript = !typingStyle.isSubscript;
-      if (toggleSuperscript == true) typingStyle.isSuperscript = !typingStyle.isSuperscript;
+      if (toggleSubscript == true) {
+        typingStyle.isSubscript = !typingStyle.isSubscript;
+        if (typingStyle.isSubscript) typingStyle.isSuperscript = false;
+      }
+      if (toggleSuperscript == true) {
+        typingStyle.isSuperscript = !typingStyle.isSuperscript;
+        if (typingStyle.isSuperscript) typingStyle.isSubscript = false;
+      }
       if (toggleCode == true) typingStyle.isCode = !typingStyle.isCode;
       if (toggleLatex == true) typingStyle.isLatex = !typingStyle.isLatex;
       if (setTextColor != null) typingStyle.textColor = setTextColor;
@@ -488,6 +481,8 @@ class MoscaroRichTextController extends TextEditingController {
     final allSuperscript = spansInRange.isNotEmpty && spansInRange.every((s) => s.isSuperscript);
     final allCode = spansInRange.isNotEmpty && spansInRange.every((s) => s.isCode);
     final allLatex = spansInRange.isNotEmpty && spansInRange.every((s) => s.isLatex);
+    final allSameHighlight = setHighlightColor != null && spansInRange.isNotEmpty && spansInRange.every((s) => s.highlightColor == setHighlightColor);
+    final allSameTextColor = setTextColor != null && spansInRange.isNotEmpty && spansInRange.every((s) => s.textColor == setTextColor);
 
     _fillGapsInRange(start, end);
 
@@ -497,12 +492,22 @@ class MoscaroRichTextController extends TextEditingController {
       if (toggleItalic == true) s.isItalic = !allItalic;
       if (toggleUnderline == true) s.isUnderline = !allUnderline;
       if (toggleStrikethrough == true) s.isStrikethrough = !allStrikethrough;
-      if (toggleSubscript == true) s.isSubscript = !allSubscript;
-      if (toggleSuperscript == true) s.isSuperscript = !allSuperscript;
+      if (toggleSubscript == true) {
+        s.isSubscript = !allSubscript;
+        if (s.isSubscript) s.isSuperscript = false;
+      }
+      if (toggleSuperscript == true) {
+        s.isSuperscript = !allSuperscript;
+        if (s.isSuperscript) s.isSubscript = false;
+      }
       if (toggleCode == true) s.isCode = !allCode;
       if (toggleLatex == true) s.isLatex = !allLatex;
-      if (setTextColor != null) s.textColor = setTextColor;
-      if (setHighlightColor != null) s.highlightColor = setHighlightColor;
+      if (setHighlightColor != null) {
+        s.highlightColor = allSameHighlight ? null : setHighlightColor;
+      }
+      if (setTextColor != null) {
+        s.textColor = allSameTextColor ? null : setTextColor;
+      }
       if (setFontSize != null) s.fontSize = setFontSize;
     }
 
