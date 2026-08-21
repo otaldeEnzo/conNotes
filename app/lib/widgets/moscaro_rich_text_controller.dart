@@ -93,6 +93,18 @@ class RichStyleSpan {
   }
 }
 
+class _RichEditorHistoryState {
+  final String text;
+  final TextSelection selection;
+  final List<RichStyleSpan> styleSpans;
+
+  _RichEditorHistoryState({
+    required this.text,
+    required this.selection,
+    required List<RichStyleSpan> spans,
+  }) : styleSpans = spans.map((s) => s.copyWith()).toList();
+}
+
 /// Controlador de Edição de Texto Rico 100% WYSIWYG (Zero Tags Visíveis).
 /// Renderiza estilos (Negrito, Itálico, Sublinhado, LaTeX, Cores, Marca-Texto, Sub/Sobrescrito)
 /// diretamente com partições disjuntas e suporte completo a estilo de digitação pré-ativo.
@@ -105,6 +117,11 @@ class MoscaroRichTextController extends TextEditingController {
   Color defaultHighlightColor;
   Color themeAccent;
 
+  // Histórico de Undo / Redo com limite de 60 estados
+  final List<_RichEditorHistoryState> _undoStack = [];
+  final List<_RichEditorHistoryState> _redoStack = [];
+  bool _isPerformingUndoRedo = false;
+
   MoscaroRichTextController({
     super.text,
     this.defaultTextColor = Colors.white,
@@ -114,6 +131,63 @@ class MoscaroRichTextController extends TextEditingController {
     if (text.isNotEmpty) {
       loadFromFormattedText(text);
     }
+    _saveSnapshot();
+  }
+
+  void _saveSnapshot() {
+    if (_isPerformingUndoRedo) return;
+    final snap = _RichEditorHistoryState(
+      text: text,
+      selection: selection,
+      spans: styleSpans,
+    );
+
+    if (_undoStack.isNotEmpty) {
+      final last = _undoStack.last;
+      if (last.text == snap.text && last.styleSpans.length == snap.styleSpans.length) {
+        return;
+      }
+    }
+
+    _undoStack.add(snap);
+    if (_undoStack.length > 60) {
+      _undoStack.removeAt(0);
+    }
+    _redoStack.clear();
+  }
+
+  bool get canUndo => _undoStack.length > 1;
+  bool get canRedo => _redoStack.isNotEmpty;
+
+  void undo() {
+    if (!canUndo) return;
+    _isPerformingUndoRedo = true;
+    final current = _undoStack.removeLast();
+    _redoStack.add(current);
+
+    final previous = _undoStack.last;
+    text = previous.text;
+    styleSpans
+      ..clear()
+      ..addAll(previous.styleSpans.map((s) => s.copyWith()));
+    selection = previous.selection;
+    _isPerformingUndoRedo = false;
+    notifyListeners();
+  }
+
+  void redo() {
+    if (!canRedo) return;
+    _isPerformingUndoRedo = true;
+    final next = _redoStack.removeLast();
+    _undoStack.add(next);
+
+    text = next.text;
+    styleSpans
+      ..clear()
+      ..addAll(next.styleSpans.map((s) => s.copyWith()));
+    selection = next.selection;
+    _isPerformingUndoRedo = false;
+    notifyListeners();
   }
 
   @override
@@ -124,6 +198,9 @@ class MoscaroRichTextController extends TextEditingController {
     // Delta tracking automático de inserção/deleção
     if (oldText != newText) {
       _applyTextDelta(oldText, newText);
+      if (!_isPerformingUndoRedo) {
+        _saveSnapshot();
+      }
     }
 
     super.value = newValue;
@@ -358,8 +435,13 @@ class MoscaroRichTextController extends TextEditingController {
     }
 
     parseRecursive(raw, RichStyleSpan(start: 0, end: 0));
+    _isPerformingUndoRedo = true;
     text = cleanBuffer.toString();
     _normalizeSpans();
+    _undoStack.clear();
+    _redoStack.clear();
+    _isPerformingUndoRedo = false;
+    _saveSnapshot();
   }
 
   /// Converte o texto puro e spans em Markdown formatado para persistência

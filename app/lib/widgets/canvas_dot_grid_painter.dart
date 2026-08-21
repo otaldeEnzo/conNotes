@@ -1,5 +1,5 @@
 import 'dart:math' as math;
-import 'dart:ui';
+import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import '../models/theme_models.dart';
 import '../theme/moscaro_v2_tokens.dart';
@@ -206,17 +206,31 @@ class CanvasDotGridPainter extends CustomPainter {
     }
   }
 
+  static String? _cachedWpKey;
+  static Size? _cachedWpSize;
+  static ui.Picture? _cachedWpPicture;
+
   void _paintStemWallpaperBackground(Canvas canvas, Rect rect) {
     final wpId = theme.name;
-    final bgPaint = Paint();
+    final key = '${wpId}_${theme.backgroundDeep.toARGB32()}_${theme.backgroundSurface.toARGB32()}';
+    final size = rect.size;
 
-    // 1. Base Gradient Cósmico / Técnico
+    if (_cachedWpPicture != null && _cachedWpKey == key && _cachedWpSize == size) {
+      canvas.drawPicture(_cachedWpPicture!);
+      return;
+    }
+
+    _cachedWpPicture?.dispose();
+    final recorder = ui.PictureRecorder();
+    final recCanvas = Canvas(recorder);
+
+    final bgPaint = Paint();
     bgPaint.shader = LinearGradient(
       begin: Alignment.topLeft,
       end: Alignment.bottomRight,
       colors: [theme.backgroundDeep, theme.backgroundSurface],
     ).createShader(rect);
-    canvas.drawRect(rect, bgPaint);
+    recCanvas.drawRect(rect, bgPaint);
 
     final overlayPaint = Paint()
       ..style = PaintingStyle.stroke
@@ -230,15 +244,15 @@ class CanvasDotGridPainter extends CustomPainter {
           final pseudo = math.sin(i * 91.34 + j * 47.19) * 1000;
           final ox = (pseudo - pseudo.floor()) * 60;
           final oy = ((pseudo * 2.1) - (pseudo * 2.1).floor()) * 60;
-          canvas.drawCircle(Offset(i + ox, j + oy), 0.9, starPaint);
+          recCanvas.drawCircle(Offset(i + ox, j + oy), 0.9, starPaint);
         }
       }
     } else if (wpId.contains('Circuito') || wpId.contains('quantum_circuits')) {
       overlayPaint.color = MoscaroTokens.auroraBlue.withValues(alpha: 0.08);
       for (double y = 40; y < rect.height; y += 120) {
-        canvas.drawLine(Offset(0, y), Offset(rect.width, y), overlayPaint);
-        canvas.drawCircle(Offset(120, y), 3, overlayPaint..style = PaintingStyle.fill);
-        canvas.drawCircle(Offset(340, y), 3, overlayPaint);
+        recCanvas.drawLine(Offset(0, y), Offset(rect.width, y), overlayPaint);
+        recCanvas.drawCircle(Offset(120, y), 3, overlayPaint..style = PaintingStyle.fill);
+        recCanvas.drawCircle(Offset(340, y), 3, overlayPaint);
       }
     } else if (wpId.contains('Feynman') || wpId.contains('feynman')) {
       overlayPaint.color = MoscaroTokens.auroraPurple.withValues(alpha: 0.12);
@@ -248,13 +262,13 @@ class CanvasDotGridPainter extends CustomPainter {
           path.quadraticBezierTo(x + 10, y - 12, x + 20, y);
           path.quadraticBezierTo(x + 30, y + 12, x + 40, y);
         }
-        canvas.drawPath(path, overlayPaint..style = PaintingStyle.stroke);
+        recCanvas.drawPath(path, overlayPaint..style = PaintingStyle.stroke);
       }
     } else if (wpId.contains('Gravitacional') || wpId.contains('gravity')) {
       overlayPaint.color = MoscaroTokens.auroraBlue.withValues(alpha: 0.07);
       final center = Offset(rect.width / 2, rect.height / 2);
       for (double r = 40; r < rect.width; r += 50) {
-        canvas.drawOval(Rect.fromCenter(center: center, width: r * 1.6, height: r * 0.8), overlayPaint);
+        recCanvas.drawOval(Rect.fromCenter(center: center, width: r * 1.6, height: r * 0.8), overlayPaint);
       }
     } else if (wpId.contains('Grafeno') || wpId.contains('graphene')) {
       overlayPaint.color = Colors.white.withValues(alpha: 0.04);
@@ -262,10 +276,15 @@ class CanvasDotGridPainter extends CustomPainter {
       final h = side * math.sqrt(3);
       for (double y = 0; y < rect.height; y += h) {
         for (double x = 0; x < rect.width; x += side * 3) {
-          canvas.drawCircle(Offset(x, y), 1.2, overlayPaint..style = PaintingStyle.fill);
+          recCanvas.drawCircle(Offset(x, y), 1.2, overlayPaint..style = PaintingStyle.fill);
         }
       }
     }
+
+    _cachedWpPicture = recorder.endRecording();
+    _cachedWpKey = key;
+    _cachedWpSize = size;
+    canvas.drawPicture(_cachedWpPicture!);
   }
 
   /// Renderiza o Dot Grid com LOD dinâmico em coordenadas de mundo e Glow Reativo
@@ -308,7 +327,7 @@ class CanvasDotGridPainter extends CustomPainter {
     }
 
     if (points.isNotEmpty) {
-      canvas.drawPoints(PointMode.points, points, dotPaint);
+      canvas.drawPoints(ui.PointMode.points, points, dotPaint);
     }
 
     if (glowPoints.isNotEmpty) {
@@ -316,7 +335,7 @@ class CanvasDotGridPainter extends CustomPainter {
         ..color = theme.mouseGlowColor.withValues(alpha: 0.8)
         ..strokeWidth = dotRadius * 2.8
         ..strokeCap = StrokeCap.round;
-      canvas.drawPoints(PointMode.points, glowPoints, glowPaint);
+      canvas.drawPoints(ui.PointMode.points, glowPoints, glowPaint);
     }
   }
 

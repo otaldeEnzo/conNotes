@@ -199,22 +199,48 @@ class MarkdownLatexBlockViewState extends State<MarkdownLatexBlockView> {
       ];
     }
 
+    // Divide o conteúdo considerando separadores de bloco explícitos (\n---\n)
+    // ou quebras naturais entre blocos especiais (> [!, ```, $$, etc)
     final rawChunks = content.split('\n---\n');
-    return rawChunks.asMap().entries.map((entry) {
-      final raw = entry.value.trim();
-      if (raw.startsWith('```mermaid')) {
-        return ParsedContentBlock(index: entry.key, type: BlockType.mermaidBlock, rawText: raw, language: 'mermaid');
-      } else if (raw.startsWith('```')) {
-        return ParsedContentBlock(index: entry.key, type: BlockType.codeBlock, rawText: raw);
-      } else if (raw.startsWith(r'$$')) {
-        return ParsedContentBlock(index: entry.key, type: BlockType.latexBlock, rawText: raw);
-      } else if (raw.startsWith('> [!')) {
-        return ParsedContentBlock(index: entry.key, type: BlockType.calloutBlock, rawText: raw);
-      } else if (raw.startsWith('# ') || raw.startsWith('## ') || raw.startsWith('### ')) {
-        return ParsedContentBlock(index: entry.key, type: BlockType.heading, rawText: raw);
+    final List<ParsedContentBlock> resultBlocks = [];
+
+    for (int i = 0; i < rawChunks.length; i++) {
+      final chunk = rawChunks[i];
+      final trimmed = chunk.trim();
+
+      if (trimmed.isEmpty && rawChunks.length > 1) continue;
+
+      if (trimmed.startsWith('```mermaid')) {
+        resultBlocks.add(ParsedContentBlock(index: resultBlocks.length, type: BlockType.mermaidBlock, rawText: trimmed, language: 'mermaid'));
+      } else if (trimmed.startsWith('```')) {
+        resultBlocks.add(ParsedContentBlock(index: resultBlocks.length, type: BlockType.codeBlock, rawText: trimmed));
+      } else if (trimmed.startsWith(r'$$')) {
+        resultBlocks.add(ParsedContentBlock(index: resultBlocks.length, type: BlockType.latexBlock, rawText: trimmed));
+      } else if (trimmed.startsWith('> [!')) {
+        final type = _detectCalloutType(trimmed);
+        resultBlocks.add(ParsedContentBlock(index: resultBlocks.length, type: BlockType.calloutBlock, rawText: chunk, calloutType: type));
+      } else if (trimmed.startsWith('# ') || trimmed.startsWith('## ') || trimmed.startsWith('### ')) {
+        resultBlocks.add(ParsedContentBlock(index: resultBlocks.length, type: BlockType.heading, rawText: trimmed));
+      } else {
+        // Se dentro de um texto simples houver um callout isolado, mantemos como markdownText
+        resultBlocks.add(ParsedContentBlock(index: resultBlocks.length, type: BlockType.markdownText, rawText: chunk));
       }
-      return ParsedContentBlock(index: entry.key, type: BlockType.markdownText, rawText: entry.value);
-    }).toList();
+    }
+
+    if (resultBlocks.isEmpty) {
+      return [const ParsedContentBlock(index: 0, type: BlockType.markdownText, rawText: '')];
+    }
+
+    return resultBlocks;
+  }
+
+  static StemCalloutType _detectCalloutType(String text) {
+    final upper = text.toUpperCase();
+    if (upper.contains('> [!TIP]')) return StemCalloutType.tip;
+    if (upper.contains('> [!THEOREM]') || upper.contains('> [!FORMULA]')) return StemCalloutType.theorem;
+    if (upper.contains('> [!WARNING]') || upper.contains('> [!CAUTION]') || upper.contains('> [!ALERT]')) return StemCalloutType.warning;
+    if (upper.contains('> [!CONCEPT]') || upper.contains('> [!NOTE]') || upper.contains('> [!INFO]')) return StemCalloutType.concept;
+    return StemCalloutType.tip;
   }
 
   void _startEditingBlock(ParsedContentBlock block) {
@@ -533,6 +559,26 @@ class MarkdownLatexBlockViewState extends State<MarkdownLatexBlockView> {
       },
       child: CallbackShortcuts(
         bindings: {
+        const SingleActivator(LogicalKeyboardKey.keyZ, control: true): () {
+          _blockController.undo();
+          _syncBlockContent();
+        },
+        const SingleActivator(LogicalKeyboardKey.keyZ, meta: true): () {
+          _blockController.undo();
+          _syncBlockContent();
+        },
+        const SingleActivator(LogicalKeyboardKey.keyY, control: true): () {
+          _blockController.redo();
+          _syncBlockContent();
+        },
+        const SingleActivator(LogicalKeyboardKey.keyZ, control: true, shift: true): () {
+          _blockController.redo();
+          _syncBlockContent();
+        },
+        const SingleActivator(LogicalKeyboardKey.keyZ, meta: true, shift: true): () {
+          _blockController.redo();
+          _syncBlockContent();
+        },
         const SingleActivator(LogicalKeyboardKey.keyA, control: true): () {
           _blockController.selection = TextSelection(
             baseOffset: 0,
@@ -564,54 +610,62 @@ class MarkdownLatexBlockViewState extends State<MarkdownLatexBlockView> {
       child: Stack(
         clipBehavior: Clip.none,
         children: [
-          Container(
-            width: double.infinity,
-            constraints: BoxConstraints(minHeight: minHeight),
-            margin: const EdgeInsets.only(bottom: 6),
-            padding: const EdgeInsets.only(left: 10, right: 80, top: 8, bottom: 8),
-            decoration: BoxDecoration(
-              color: themeAccent.withValues(alpha: isLight ? 0.08 : 0.12),
-              borderRadius: BorderRadius.circular(10),
-              border: Border.all(color: themeAccent, width: 1.5),
-              boxShadow: [
-                BoxShadow(
-                  color: themeAccent.withValues(alpha: 0.25),
-                  blurRadius: 10,
-                  offset: const Offset(0, 2),
-                ),
-              ],
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                TextField(
-                  controller: _blockController,
-                  focusNode: _blockFocusNode,
-                  maxLines: null,
-                  minLines: minHeight > 100 ? 3 : 1,
-                  style: TextStyle(
-                    color: textPrimary,
-                    fontFamily: fontFamily,
-                    fontSize: fontSize,
-                    height: 1.45,
+          GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: () {
+              // Posiciona o cursor no final do texto e foca
+              _blockController.selection = TextSelection.collapsed(offset: _blockController.text.length);
+              _blockFocusNode.requestFocus();
+            },
+            child: Container(
+              width: double.infinity,
+              constraints: BoxConstraints(minHeight: minHeight),
+              margin: const EdgeInsets.only(bottom: 6),
+              padding: const EdgeInsets.only(left: 10, right: 80, top: 8, bottom: 8),
+              decoration: BoxDecoration(
+                color: themeAccent.withValues(alpha: isLight ? 0.08 : 0.12),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: themeAccent, width: 1.5),
+                boxShadow: [
+                  BoxShadow(
+                    color: themeAccent.withValues(alpha: 0.25),
+                    blurRadius: 10,
+                    offset: const Offset(0, 2),
                   ),
-                  decoration: const InputDecoration(
-                    isDense: true,
-                    border: InputBorder.none,
-                    contentPadding: EdgeInsets.zero,
+                ],
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  TextField(
+                    controller: _blockController,
+                    focusNode: _blockFocusNode,
+                    maxLines: null,
+                    minLines: minHeight > 100 ? 3 : 1,
+                    style: TextStyle(
+                      color: textPrimary,
+                      fontFamily: fontFamily,
+                      fontSize: fontSize,
+                      height: 1.45,
+                    ),
+                    decoration: const InputDecoration(
+                      isDense: true,
+                      border: InputBorder.none,
+                      contentPadding: EdgeInsets.zero,
+                    ),
+                    onChanged: (val) => _syncBlockContent(),
                   ),
-                  onChanged: (val) => _syncBlockContent(),
-                ),
-                const SizedBox(height: 6),
-                Text(
-                  'Ctrl+Enter: Novo Bloco • "/" Comandos • Ctrl+A: Selecionar tudo',
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    color: textPrimary.withValues(alpha: 0.45),
-                    fontSize: 9.5,
+                  const SizedBox(height: 6),
+                  Text(
+                    'Ctrl+Enter: Novo Bloco • "/" Comandos • Ctrl+Z/Y: Desfazer/Refazer',
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: textPrimary.withValues(alpha: 0.45),
+                      fontSize: 9.5,
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
 
@@ -694,14 +748,47 @@ class MarkdownLatexBlockViewState extends State<MarkdownLatexBlockView> {
                 onSelectCommand: (cmd) {
                   final text = _blockController.text;
                   final lastSlash = text.lastIndexOf('/');
-                  if (lastSlash >= 0) {
-                    _blockController.text = text.substring(0, lastSlash) + cmd.snippet;
+                  final beforeSlash = lastSlash >= 0 ? text.substring(0, lastSlash).trimRight() : '';
+
+                  final currentBlocks = _parseContentIntoBlocks(widget.card.content);
+                  final updatedBlocks = <String>[];
+
+                  // Se o bloco atual só continha o slash (ou estava vazio), ele é substituído pelo comando
+                  if (beforeSlash.isEmpty) {
+                    for (int i = 0; i < currentBlocks.length; i++) {
+                      if (i == _editingBlockIndex) {
+                        updatedBlocks.add(cmd.snippet);
+                      } else {
+                        updatedBlocks.add(currentBlocks[i].rawText);
+                      }
+                    }
+                    final finalStr = updatedBlocks.join('\n---\n');
+                    widget.onContentChanged(finalStr);
+                    setState(() {
+                      _blockController.loadFromFormattedText(cmd.snippet);
+                      _blockController.selection = TextSelection.collapsed(offset: cmd.snippet.length);
+                      _showSlashMenu = false;
+                    });
                   } else {
-                    _blockController.text = cmd.snippet;
+                    // Se já havia conteúdo antes do slash, preserva o bloco anterior e CRIA UM NOVO BLOCO ABAIXO
+                    for (int i = 0; i < currentBlocks.length; i++) {
+                      if (i == _editingBlockIndex) {
+                        updatedBlocks.add(beforeSlash);
+                        updatedBlocks.add(cmd.snippet);
+                      } else {
+                        updatedBlocks.add(currentBlocks[i].rawText);
+                      }
+                    }
+                    final finalStr = updatedBlocks.join('\n---\n');
+                    widget.onContentChanged(finalStr);
+                    final newIdx = (block.index) + 1;
+                    setState(() {
+                      _editingBlockIndex = newIdx;
+                      _blockController.loadFromFormattedText(cmd.snippet);
+                      _blockController.selection = TextSelection.collapsed(offset: cmd.snippet.length);
+                      _showSlashMenu = false;
+                    });
                   }
-                  _blockController.selection = TextSelection.collapsed(offset: _blockController.text.length);
-                  _syncBlockContent();
-                  setState(() => _showSlashMenu = false);
                   _blockFocusNode.requestFocus();
                 },
               ),
@@ -883,38 +970,51 @@ class MarkdownLatexBlockViewState extends State<MarkdownLatexBlockView> {
     double fontSize,
   ) {
     final lines = block.rawText.split('\n');
-    String title = '';
+    String customTitle = '';
     final contentLines = <String>[];
 
     for (final line in lines) {
       final trimmed = line.trim();
       if (trimmed.startsWith('> [!')) {
+        // Verifica se há título customizado após o colchete, ex: > [!TIP] Meu Titulo
+        final closeBracket = trimmed.indexOf(']');
+        if (closeBracket != -1 && closeBracket < trimmed.length - 1) {
+          customTitle = trimmed.substring(closeBracket + 1).trim();
+        }
         continue;
       }
       if (trimmed.startsWith('>')) {
         contentLines.add(trimmed.substring(1).trimLeft());
-      } else {
-        contentLines.add(line);
+      } else if (trimmed.isNotEmpty) {
+        contentLines.add(trimmed);
       }
+    }
+
+    // Se estiver vazio, exibe ao menos um placeholder informativo
+    if (contentLines.isEmpty) {
+      contentLines.add('Clique duas vezes para editar o conteúdo do callout...');
     }
 
     return StemCalloutBoxView(
       type: block.calloutType ?? StemCalloutType.tip,
-      title: title,
+      title: customTitle,
       isLight: isLight,
       fontSize: fontSize,
       content: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: contentLines.map((l) {
-          return Text.rich(
-            TextSpan(
-              children: _parseRichInlineSpan(
-                l,
-                textPrimary: textPrimary,
-                fontFamily: fontFamily,
-                fontSize: fontSize * 0.95,
-                themeAccent: themeAccent,
-                isLight: isLight,
+          return Padding(
+            padding: const EdgeInsets.symmetric(vertical: 2),
+            child: Text.rich(
+              TextSpan(
+                children: _parseRichInlineSpan(
+                  l,
+                  textPrimary: isLight ? const Color(0xFF0F172A) : const Color(0xFFF1F5F9),
+                  fontFamily: fontFamily,
+                  fontSize: fontSize * 0.95,
+                  themeAccent: themeAccent,
+                  isLight: isLight,
+                ),
               ),
             ),
           );
@@ -1220,7 +1320,55 @@ class MarkdownLatexBlockViewState extends State<MarkdownLatexBlockView> {
             );
           }
 
-          // 5. Bloco de Equação LaTeX ($$ ... $$ ou linhas iniciando com comandos matemáticos como \int, \frac, \sum, \sqrt, \begin, \vec, \matrix, \lim)
+          // 5. Linhas de Citação ou Callout em bloco de texto
+          if (trimmed.startsWith('> [!')) {
+            final type = _detectCalloutType(trimmed);
+            final closeBracket = trimmed.indexOf(']');
+            final customTitle = (closeBracket != -1 && closeBracket < trimmed.length - 1)
+                ? trimmed.substring(closeBracket + 1).trim()
+                : '';
+            return Padding(
+              padding: const EdgeInsets.symmetric(vertical: 4),
+              child: StemCalloutBoxView(
+                type: type,
+                title: customTitle,
+                isLight: isLight,
+                fontSize: fontSize,
+                content: const SizedBox.shrink(),
+              ),
+            );
+          } else if (trimmed.startsWith('>')) {
+            final quoteText = trimmed.substring(1).trim();
+            return Padding(
+              padding: const EdgeInsets.symmetric(vertical: 2),
+              child: Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                decoration: BoxDecoration(
+                  color: themeAccent.withValues(alpha: isLight ? 0.05 : 0.08),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border(
+                    left: BorderSide(color: themeAccent, width: 3.0),
+                  ),
+                ),
+                child: Text.rich(
+                  TextSpan(
+                    children: _parseRichInlineSpan(
+                      quoteText,
+                      textPrimary: isLight ? const Color(0xFF0F172A) : const Color(0xFFF1F5F9),
+                      fontFamily: fontFamily,
+                      fontSize: fontSize,
+                      themeAccent: themeAccent,
+                      isLight: isLight,
+                      isItalic: true,
+                    ),
+                  ),
+                ),
+              ),
+            );
+          }
+
+          // 6. Bloco de Equação LaTeX ($$ ... $$ ou linhas iniciando com comandos matemáticos como \int, \frac, \sum, \sqrt, \begin, \vec, \matrix, \lim)
           if ((trimmed.startsWith(r'$$') && trimmed.endsWith(r'$$') && trimmed.length > 2) ||
               (trimmed.startsWith(r'$') && trimmed.endsWith(r'$') && trimmed.length > 2)) {
             String mathSnippet = trimmed;

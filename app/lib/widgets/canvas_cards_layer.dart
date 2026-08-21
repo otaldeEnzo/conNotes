@@ -40,29 +40,28 @@ class CanvasCardsLayer extends StatelessWidget {
         final viewportRight = (size.width - pan.dx) / zoom + 200;
         final viewportBottom = (size.height - pan.dy) / zoom + 200;
 
-        return Stack(
-          clipBehavior: Clip.none,
-          children: cards.map((card) {
-            final isVisible = (card.x + card.width >= viewportLeft) &&
-                (card.x <= viewportRight) &&
-                (card.y + card.height >= viewportTop) &&
-                (card.y <= viewportBottom);
+        return Transform(
+          transform: Matrix4.identity()
+            ..translate(pan.dx, pan.dy)
+            ..scale(zoom),
+          child: Stack(
+            clipBehavior: Clip.none,
+            children: cards.map((card) {
+              final isVisible = (card.x + card.width >= viewportLeft) &&
+                  (card.x <= viewportRight) &&
+                  (card.y + card.height >= viewportTop) &&
+                  (card.y <= viewportBottom);
 
-            if (!isVisible) {
-              return const SizedBox.shrink();
-            }
+              if (!isVisible) {
+                return const SizedBox.shrink();
+              }
 
-            final isSelected = selectedCardId == card.id;
-            const double pillReserve = 48.0;
-            final screenX = card.x * zoom + pan.dx;
-            final screenY = (card.y - pillReserve) * zoom + pan.dy;
+              final isSelected = selectedCardId == card.id;
+              const double pillReserve = 48.0;
 
-            return Positioned(
-              left: screenX,
-              top: screenY,
-              child: Transform.scale(
-                scale: zoom,
-                alignment: Alignment.topLeft,
+              return Positioned(
+                left: card.x,
+                top: card.y - pillReserve,
                 child: RepaintBoundary(
                   key: ValueKey('card_${card.id}'),
                   child: CanvasCardWidget(
@@ -75,9 +74,9 @@ class CanvasCardsLayer extends StatelessWidget {
                     onDuplicateCard: () => onDuplicateCard(card),
                   ),
                 ),
-              ),
-            );
-          }).toList(),
+              );
+            }).toList(),
+          ),
         );
       },
     );

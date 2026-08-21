@@ -50,6 +50,7 @@ class _CanvasCardWidgetState extends State<CanvasCardWidget> {
   late TextEditingController _titleController;
   final GlobalKey<MarkdownLatexBlockViewState> _blockViewKey = GlobalKey<MarkdownLatexBlockViewState>();
   CardActiveTextStyles _activeStyles = const CardActiveTextStyles();
+  final ValueNotifier<Offset> _dragOffsetNotifier = ValueNotifier<Offset>(Offset.zero);
 
   @override
   void initState() {
@@ -69,6 +70,7 @@ class _CanvasCardWidgetState extends State<CanvasCardWidget> {
   void dispose() {
     CanvasCardWidget.actualHeights.remove(widget.card.id);
     _titleController.dispose();
+    _dragOffsetNotifier.dispose();
     super.dispose();
   }
 
@@ -83,26 +85,34 @@ class _CanvasCardWidgetState extends State<CanvasCardWidget> {
       }
     });
 
-    return ListenableBuilder(
-      listenable: MoscaroThemeController.instance,
-      builder: (context, _) {
-        final isLight = MoscaroTokens.isLight;
-        final themeAccent = MoscaroTokens.auroraBlue;
-        final textPrimary = MoscaroTokens.textPrimary;
-        final textSecondary = MoscaroTokens.textSecondary;
-        final glassTint = widget.card.customGlassColor ?? MoscaroTokens.glassTint;
-        final isBlurEnabled = MoscaroTokens.enableCardsBlur && MoscaroTokens.blurSigma > 0;
-        final blur = isBlurEnabled ? MoscaroTokens.blurSigma : 0.0;
+    return ValueListenableBuilder<Offset>(
+      valueListenable: _dragOffsetNotifier,
+      builder: (context, dragOffset, child) {
+        return Transform.translate(
+          offset: dragOffset,
+          child: child,
+        );
+      },
+      child: ListenableBuilder(
+        listenable: MoscaroThemeController.instance,
+        builder: (context, _) {
+          final isLight = MoscaroTokens.isLight;
+          final themeAccent = MoscaroTokens.auroraBlue;
+          final textPrimary = MoscaroTokens.textPrimary;
+          final textSecondary = MoscaroTokens.textSecondary;
+          final glassTint = widget.card.customGlassColor ?? MoscaroTokens.glassTint;
+          final isBlurEnabled = MoscaroTokens.enableCardsBlur && MoscaroTokens.blurSigma > 0;
+          final blur = isBlurEnabled ? MoscaroTokens.blurSigma : 0.0;
 
-        final isSelected = widget.isSelected;
-        final isCollapsed = widget.card.isCollapsed;
+          final isSelected = widget.isSelected;
+          final isCollapsed = widget.card.isCollapsed;
 
-        return SizedBox(
-          width: widget.card.width,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.center,
-            children: [
+          return SizedBox(
+            width: widget.card.width,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
               // 1. Pílula Flutuante Superior
               SizedBox(
                 height: 48.0,
@@ -199,56 +209,57 @@ class _CanvasCardWidgetState extends State<CanvasCardWidget> {
                     ),
                   ),
 
-                  // 3. Moldura de Seleção com as 3 Alças Padrão (Direita, Baixo, Canto Inferior Direito)
-                  if (isSelected && !widget.card.isPinned && !isCollapsed) ...[
-                    // 1. Alça Lateral Direita (Resize Horizontal - Perfeitamente Centralizada)
-                    Positioned(
-                      right: -8,
-                      top: 0,
-                      bottom: 0,
-                      child: Center(
+                    // 3. Moldura de Seleção com as 3 Alças Padrão (Direita, Baixo, Canto Inferior Direito)
+                    if (isSelected && !widget.card.isPinned && !isCollapsed) ...[
+                      // 1. Alça Lateral Direita (Resize Horizontal - Perfeitamente Centralizada)
+                      Positioned(
+                        right: -8,
+                        top: 0,
+                        bottom: 0,
+                        child: Center(
+                          child: _buildResizeHandle(
+                            handle: CardResizeHandle.right,
+                            cursor: SystemMouseCursors.resizeLeftRight,
+                            themeAccent: themeAccent,
+                            isLight: isLight,
+                          ),
+                        ),
+                      ),
+
+                      // 2. Alça Inferior (Resize Vertical - Perfeitamente Centralizada)
+                      Positioned(
+                        bottom: -8,
+                        left: 0,
+                        right: 0,
+                        child: Center(
+                          child: _buildResizeHandle(
+                            handle: CardResizeHandle.bottom,
+                            cursor: SystemMouseCursors.resizeUpDown,
+                            themeAccent: themeAccent,
+                            isLight: isLight,
+                          ),
+                        ),
+                      ),
+
+                      // 3. Alça do Vértice Inferior Direito (Resize em Escala Diagonal)
+                      Positioned(
+                        right: -8,
+                        bottom: -8,
                         child: _buildResizeHandle(
-                          handle: CardResizeHandle.right,
-                          cursor: SystemMouseCursors.resizeLeftRight,
+                          handle: CardResizeHandle.bottomRight,
+                          cursor: SystemMouseCursors.resizeUpLeftDownRight,
                           themeAccent: themeAccent,
                           isLight: isLight,
                         ),
                       ),
-                    ),
-
-                    // 2. Alça Inferior (Resize Vertical - Perfeitamente Centralizada)
-                    Positioned(
-                      bottom: -8,
-                      left: 0,
-                      right: 0,
-                      child: Center(
-                        child: _buildResizeHandle(
-                          handle: CardResizeHandle.bottom,
-                          cursor: SystemMouseCursors.resizeUpDown,
-                          themeAccent: themeAccent,
-                          isLight: isLight,
-                        ),
-                      ),
-                    ),
-
-                    // 3. Alça do Vértice Inferior Direito (Resize em Escala Diagonal)
-                    Positioned(
-                      right: -8,
-                      bottom: -8,
-                      child: _buildResizeHandle(
-                        handle: CardResizeHandle.bottomRight,
-                        cursor: SystemMouseCursors.resizeUpLeftDownRight,
-                        themeAccent: themeAccent,
-                        isLight: isLight,
-                      ),
-                    ),
+                    ],
                   ],
-                ],
-              ),
-            ],
-          ),
-        );
-      },
+                ),
+              ],
+            ),
+          );
+        },
+      ),
     );
   }
 
@@ -300,14 +311,28 @@ class _CanvasCardWidgetState extends State<CanvasCardWidget> {
               _dragStartPos = details.globalPosition;
               _initialCardX = widget.card.x;
               _initialCardY = widget.card.y;
+              _dragOffsetNotifier.value = Offset.zero;
             },
             onPanUpdate: (details) {
               if (widget.card.isPinned || _dragStartPos == null) return;
               final delta = (details.globalPosition - _dragStartPos!) / widget.zoomScale;
-              widget.onUpdateCard(widget.card.copyWith(
-                x: _initialCardX! + delta.dx,
-                y: _initialCardY! + delta.dy,
-              ));
+              _dragOffsetNotifier.value = delta;
+            },
+            onPanEnd: (details) {
+              if (widget.card.isPinned || _dragStartPos == null) return;
+              final finalDelta = _dragOffsetNotifier.value;
+              _dragOffsetNotifier.value = Offset.zero;
+              _dragStartPos = null;
+              if (finalDelta != Offset.zero && _initialCardX != null && _initialCardY != null) {
+                widget.onUpdateCard(widget.card.copyWith(
+                  x: _initialCardX! + finalDelta.dx,
+                  y: _initialCardY! + finalDelta.dy,
+                ));
+              }
+            },
+            onPanCancel: () {
+              _dragOffsetNotifier.value = Offset.zero;
+              _dragStartPos = null;
             },
             child: Container(
               height: 36,
