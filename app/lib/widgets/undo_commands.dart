@@ -78,6 +78,7 @@ class ChangeColorCommand implements UndoCommand {
           enablePressure: stroke.enablePressure,
           boundingBox: stroke.boundingBox,
           cachedPath: stroke.cachedPath,
+          transform: stroke.transform,
         );
         note.updateStroke(updatedStroke);
       }
@@ -228,5 +229,26 @@ class AppUndoManager {
     final command = _redoStacks[note.id]!.removeLast();
     command.execute(note);
     _undoStacks.putIfAbsent(note.id, () => []).add(command);
+  }
+}
+
+/// Comando em lote para executar múltiplos comandos como um único passo
+class BatchCommand implements UndoCommand {
+  final List<UndoCommand> commands;
+
+  BatchCommand(this.commands);
+
+  @override
+  void execute(NoteDocument note) {
+    for (final command in commands) {
+      command.execute(note);
+    }
+  }
+
+  @override
+  void undo(NoteDocument note) {
+    for (final command in commands.reversed) {
+      command.undo(note);
+    }
   }
 }

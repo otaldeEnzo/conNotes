@@ -32,6 +32,7 @@ class SelectionState {
   final Offset? currentPoint;
   final List<Offset> lassoPoints;
   final Set<String> selectedStrokeIds;
+  final Set<String> selectedCardIds;
   final Rect? bounds;
   final Offset dragOffset;         // Deslocamento temporário dos traços durante o arraste
   final double rotationAngle;      // Rotação acumulada em radianos
@@ -49,6 +50,7 @@ class SelectionState {
     this.currentPoint,
     this.lassoPoints = const [],
     this.selectedStrokeIds = const {},
+    this.selectedCardIds = const {},
     this.bounds,
     this.dragOffset = Offset.zero,
     this.rotationAngle = 0.0,
@@ -58,7 +60,7 @@ class SelectionState {
     this.transformBounds,
   });
 
-  bool get hasSelection => selectedStrokeIds.isNotEmpty && bounds != null;
+  bool get hasSelection => (selectedStrokeIds.isNotEmpty || selectedCardIds.isNotEmpty) && bounds != null;
   bool get isTransforming => activeHandle != SelectionHandleType.none;
 
   SelectionState copyWith({
@@ -70,6 +72,7 @@ class SelectionState {
     Offset? currentPoint,
     List<Offset>? lassoPoints,
     Set<String>? selectedStrokeIds,
+    Set<String>? selectedCardIds,
     Rect? bounds,
     Offset? dragOffset,
     double? rotationAngle,
@@ -90,6 +93,7 @@ class SelectionState {
       currentPoint: clearPoints ? null : (currentPoint ?? this.currentPoint),
       lassoPoints: lassoPoints ?? this.lassoPoints,
       selectedStrokeIds: selectedStrokeIds ?? this.selectedStrokeIds,
+      selectedCardIds: selectedCardIds ?? this.selectedCardIds,
       bounds: bounds ?? this.bounds,
       dragOffset: dragOffset ?? this.dragOffset,
       rotationAngle: rotationAngle ?? this.rotationAngle,

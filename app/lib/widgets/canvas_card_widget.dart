@@ -1,6 +1,6 @@
-import 'dart:ui';
 import 'package:flutter/material.dart';
 import '../theme/moscaro_v2_tokens.dart';
+import '../theme/moscaro_v2_extension.dart';
 import '../theme/moscaro_theme_controller.dart';
 import '../models/canvas_card_model.dart';
 import 'card_format_floating_pill.dart';
@@ -20,16 +20,18 @@ class CanvasCardWidget extends StatefulWidget {
   final CanvasCardModel card;
   final bool isSelected;
   final double zoomScale;
+  final ValueNotifier<double>? zoomNotifier;
   final ValueChanged<CanvasCardModel> onUpdateCard;
-  final VoidCallback onSelectCard;
-  final VoidCallback onDeleteCard;
-  final VoidCallback onDuplicateCard;
+  final ValueChanged<String> onSelectCard;
+  final ValueChanged<String> onDeleteCard;
+  final ValueChanged<CanvasCardModel> onDuplicateCard;
 
   const CanvasCardWidget({
     super.key,
     required this.card,
     required this.isSelected,
     this.zoomScale = 1.0,
+    this.zoomNotifier,
     required this.onUpdateCard,
     required this.onSelectCard,
     required this.onDeleteCard,
@@ -41,11 +43,17 @@ class CanvasCardWidget extends StatefulWidget {
 }
 
 class _CanvasCardWidgetState extends State<CanvasCardWidget> {
+  double get _currentZoom {
+    final z = widget.zoomNotifier?.value ?? widget.zoomScale;
+    return z > 0 ? z : 1.0;
+  }
+
   Offset? _dragStartPos;
   double? _initialWidth;
   double? _initialHeight;
   double? _initialCardX;
   double? _initialCardY;
+  final ValueNotifier<Size?> _dragSizeNotifier = ValueNotifier(null);
   bool _isEditingTitle = false;
   late TextEditingController _titleController;
   final GlobalKey<MarkdownLatexBlockViewState> _blockViewKey = GlobalKey<MarkdownLatexBlockViewState>();
@@ -71,19 +79,23 @@ class _CanvasCardWidgetState extends State<CanvasCardWidget> {
     CanvasCardWidget.actualHeights.remove(widget.card.id);
     _titleController.dispose();
     _dragOffsetNotifier.dispose();
+    _dragSizeNotifier.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) {
-        final box = context.findRenderObject() as RenderBox?;
-        if (box != null && box.hasSize && box.size.height > 20.0) {
-          CanvasCardWidget.actualHeights[widget.card.id] = box.size.height;
+    final isInteracting = _dragSizeNotifier.value != null || _dragOffsetNotifier.value != Offset.zero;
+    if (!isInteracting) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          final box = context.findRenderObject() as RenderBox?;
+          if (box != null && box.hasSize && box.size.height > 20.0) {
+            CanvasCardWidget.actualHeights[widget.card.id] = box.size.height;
+          }
         }
-      }
-    });
+      });
+    }
 
     return ValueListenableBuilder<Offset>(
       valueListenable: _dragOffsetNotifier,
@@ -101,14 +113,32 @@ class _CanvasCardWidgetState extends State<CanvasCardWidget> {
           final textPrimary = MoscaroTokens.textPrimary;
           final textSecondary = MoscaroTokens.textSecondary;
           final glassTint = widget.card.customGlassColor ?? MoscaroTokens.glassTint;
-          final isBlurEnabled = MoscaroTokens.enableCardsBlur && MoscaroTokens.blurSigma > 0;
-          final blur = isBlurEnabled ? MoscaroTokens.blurSigma : 0.0;
-
           final isSelected = widget.isSelected;
           final isCollapsed = widget.card.isCollapsed;
 
-          return SizedBox(
-            width: widget.card.width,
+          final cardBody = !isCollapsed
+              ? MarkdownLatexBlockView(
+                  key: _blockViewKey,
+                  card: widget.card,
+                  onActiveStylesChanged: (styles) {
+                    if (mounted) {
+                      setState(() => _activeStyles = styles);
+                    }
+                  },
+                  onContentChanged: (newContent) {
+                    widget.onUpdateCard(widget.card.copyWith(content: newContent));
+                  },
+                )
+              : const SizedBox.shrink();
+
+          return ValueListenableBuilder<Size?>(
+            valueListenable: _dragSizeNotifier,
+            builder: (context, dragSize, child) {
+              return SizedBox(
+                width: dragSize?.width ?? widget.card.width,
+                child: child,
+              );
+            },
             child: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.center,
@@ -164,8 +194,8 @@ class _CanvasCardWidgetState extends State<CanvasCardWidget> {
                                 widget.onUpdateCard(widget.card.copyWith(fontSize: size));
                               }
                             },
-                            onDeleteCard: widget.onDeleteCard,
-                            onDuplicateCard: widget.onDuplicateCard,
+                            onDeleteCard: () => widget.onDeleteCard(widget.card.id),
+                            onDuplicateCard: () => widget.onDuplicateCard(widget.card),
                           ),
                         ),
                       )
@@ -178,34 +208,26 @@ class _CanvasCardWidgetState extends State<CanvasCardWidget> {
                 children: [
                   GestureDetector(
                     behavior: HitTestBehavior.opaque,
-                    onTap: widget.onSelectCard,
+                    onTap: () => widget.onSelectCard(widget.card.id),
                     child: ClipRRect(
                       borderRadius: BorderRadius.circular(14),
-                      child: isBlurEnabled
-                          ? BackdropFilter(
-                              filter: ImageFilter.blur(
-                                sigmaX: blur,
-                                sigmaY: blur,
-                              ),
-                              child: _buildCardContainer(
-                                isSelected: isSelected,
-                                themeAccent: themeAccent,
-                                isLight: isLight,
-                                glassTint: glassTint,
-                                textPrimary: textPrimary,
-                                textSecondary: textSecondary,
-                                isCollapsed: isCollapsed,
-                              ),
-                            )
-                          : _buildCardContainer(
-                              isSelected: isSelected,
-                              themeAccent: themeAccent,
-                              isLight: isLight,
-                              glassTint: glassTint,
-                              textPrimary: textPrimary,
-                              textSecondary: textSecondary,
-                              isCollapsed: isCollapsed,
-                            ),
+                      child: ValueListenableBuilder<Size?>(
+                        valueListenable: _dragSizeNotifier,
+                        builder: (context, dragSize, child) {
+                          return _buildCardContainer(
+                            isSelected: isSelected,
+                            themeAccent: themeAccent,
+                            isLight: isLight,
+                            glassTint: glassTint,
+                            textPrimary: textPrimary,
+                            textSecondary: textSecondary,
+                            isCollapsed: isCollapsed,
+                            dragSize: dragSize,
+                            child: child!,
+                          );
+                        },
+                        child: cardBody,
+                      ),
                     ),
                   ),
 
@@ -271,32 +293,32 @@ class _CanvasCardWidgetState extends State<CanvasCardWidget> {
     required Color textPrimary,
     required Color textSecondary,
     required bool isCollapsed,
+    required Size? dragSize,
+    required Widget child,
   }) {
-    return Container(
-      width: widget.card.width,
-      constraints: BoxConstraints(
-        minHeight: widget.card.height != 200.0 ? widget.card.height : 0.0,
-        minWidth: 200,
+    final borderColor = isSelected
+        ? themeAccent
+        : (isLight ? MoscaroTokens.borderSubtle : MoscaroTokens.borderGlow);
+
+    final cardShadows = [
+      BoxShadow(
+        color: isSelected
+            ? themeAccent.withValues(alpha: 0.3)
+            : (isLight ? const Color(0x180F172A) : Colors.black.withValues(alpha: 0.45)),
+        blurRadius: isSelected ? 24 : 16,
+        spreadRadius: isSelected ? 1 : 0,
+        offset: const Offset(0, 8),
       ),
-      decoration: BoxDecoration(
-        color: glassTint,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(
-          color: isSelected
-              ? themeAccent
-              : (isLight ? MoscaroTokens.borderSubtle : MoscaroTokens.borderGlow),
-          width: isSelected ? 1.5 : 1.0,
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: isSelected
-                ? themeAccent.withValues(alpha: 0.25)
-                : (isLight ? const Color(0x180F172A) : Colors.black.withValues(alpha: 0.45)),
-            blurRadius: isSelected ? 24 : 16,
-            spreadRadius: isSelected ? 1 : 0,
-            offset: const Offset(0, 8),
-          ),
-        ],
+    ];
+
+    final currentWidth = dragSize?.width ?? widget.card.width;
+    final currentHeight = dragSize?.height ?? widget.card.height;
+
+    return Container(
+      width: currentWidth,
+      constraints: BoxConstraints(
+        minHeight: currentHeight != 200.0 ? currentHeight : 0.0,
+        minWidth: 200,
       ),
       child: Column(
         mainAxisSize: MainAxisSize.min,
@@ -306,7 +328,7 @@ class _CanvasCardWidgetState extends State<CanvasCardWidget> {
           GestureDetector(
             behavior: HitTestBehavior.opaque,
             onPanStart: (details) {
-              widget.onSelectCard();
+              widget.onSelectCard(widget.card.id);
               if (widget.card.isPinned) return;
               _dragStartPos = details.globalPosition;
               _initialCardX = widget.card.x;
@@ -315,7 +337,7 @@ class _CanvasCardWidgetState extends State<CanvasCardWidget> {
             },
             onPanUpdate: (details) {
               if (widget.card.isPinned || _dragStartPos == null) return;
-              final delta = (details.globalPosition - _dragStartPos!) / widget.zoomScale;
+              final delta = (details.globalPosition - _dragStartPos!) / _currentZoom;
               _dragOffsetNotifier.value = delta;
             },
             onPanEnd: (details) {
@@ -418,21 +440,17 @@ class _CanvasCardWidgetState extends State<CanvasCardWidget> {
             ),
           ),
 
-          // Corpo do Card (Blocos de Conteúdo)
-          if (!isCollapsed)
-            MarkdownLatexBlockView(
-              key: _blockViewKey,
-              card: widget.card,
-              onActiveStylesChanged: (styles) {
-                if (mounted) {
-                  setState(() => _activeStyles = styles);
-                }
-              },
-              onContentChanged: (newContent) {
-                widget.onUpdateCard(widget.card.copyWith(content: newContent));
-              },
-            ),
+          // Corpo do Card (Blocos de Conteúdo passado como child para evitar rebuild no resize)
+          if (!isCollapsed) child,
         ],
+      ).moscaroV2(
+        borderRadius: 14,
+        backgroundColor: glassTint,
+        borderColor: borderColor,
+        borderWidth: isSelected ? 1.5 : 1.0,
+        customShadows: cardShadows,
+        padding: EdgeInsets.zero,
+        enableBlur: false,
       ),
     );
   }
@@ -454,10 +472,10 @@ class _CanvasCardWidgetState extends State<CanvasCardWidget> {
         },
         onPanUpdate: (details) {
           if (_dragStartPos == null) return;
-          final delta = (details.globalPosition - _dragStartPos!) / widget.zoomScale;
+          final delta = (details.globalPosition - _dragStartPos!) / _currentZoom;
 
-          double newWidth = widget.card.width;
-          double newHeight = widget.card.height;
+          double newWidth = _dragSizeNotifier.value?.width ?? widget.card.width;
+          double newHeight = _dragSizeNotifier.value?.height ?? widget.card.height;
 
           if (handle == CardResizeHandle.right || handle == CardResizeHandle.bottomRight) {
             newWidth = (_initialWidth! + delta.dx).clamp(200.0, 1600.0);
@@ -466,10 +484,27 @@ class _CanvasCardWidgetState extends State<CanvasCardWidget> {
             newHeight = (_initialHeight! + delta.dy).clamp(widget.card.minHeight, 2400.0);
           }
 
-          widget.onUpdateCard(widget.card.copyWith(
-            width: newWidth,
-            height: newHeight,
-          ));
+          if (newWidth != _dragSizeNotifier.value?.width || newHeight != _dragSizeNotifier.value?.height) {
+            _dragSizeNotifier.value = Size(newWidth, newHeight);
+          }
+        },
+        onPanEnd: (details) {
+          if (_dragSizeNotifier.value != null) {
+            final finalWidth = _dragSizeNotifier.value!.width;
+            final finalHeight = _dragSizeNotifier.value!.height;
+            widget.onUpdateCard(widget.card.copyWith(
+              width: finalWidth,
+              height: finalHeight,
+            ));
+            _dragSizeNotifier.value = null;
+          }
+          _dragStartPos = null;
+        },
+        onPanCancel: () {
+          if (_dragSizeNotifier.value != null) {
+            _dragSizeNotifier.value = null;
+          }
+          _dragStartPos = null;
         },
         child: Container(
           width: 24,

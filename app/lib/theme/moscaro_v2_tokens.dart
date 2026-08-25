@@ -48,7 +48,7 @@ class MoscaroTokens {
   ];
 
   // Desfoque e Sombras
-  static double blurSigma = 35.0;
+  static double blurSigma = 16.0;
 
   // Presença Individual de Blur por Componente
   static bool enableSidebarBlur = true;

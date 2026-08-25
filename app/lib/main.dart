@@ -1,6 +1,8 @@
 import 'dart:math' as math;
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
+import 'dart:ui' as ui;
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -46,6 +48,9 @@ import 'models/canvas_card_model.dart';
 import 'widgets/cards_sub_bar.dart';
 import 'widgets/canvas_cards_layer.dart';
 import 'widgets/canvas_card_widget.dart';
+import 'models/ai_message_model.dart';
+import 'models/ai_provider_models.dart';
+import 'services/ai_service_bridge.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -113,11 +118,11 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
   bool _isPenSubBarVisible = true;
 
   final List<PenSlotPreset> _penSlots = [
-    const PenSlotPreset(id: '1', name: 'Ciano', color: Color(0xFF00E1FF), strokeWidth: 3.0, toolType: InkToolType.technical, enablePressure: false),
-    const PenSlotPreset(id: '2', name: 'Rosa', color: Color(0xFFFF007A), strokeWidth: 4.0, toolType: InkToolType.fountain, enablePressure: false),
-    const PenSlotPreset(id: '3', name: 'Roxo', color: Color(0xFFA855F7), strokeWidth: 2.5, toolType: InkToolType.pencil, enablePressure: false),
-    const PenSlotPreset(id: '4', name: 'Marca-Texto', color: Color(0xFFF59E0B), strokeWidth: 6.0, toolType: InkToolType.highlighter, enablePressure: false),
-    const PenSlotPreset(id: '5', name: 'Branco', color: Colors.white, strokeWidth: 3.0, toolType: InkToolType.technical, enablePressure: true),
+    const PenSlotPreset(id: '1', name: 'Branco Técnico', color: Colors.white, strokeWidth: 2.5, toolType: InkToolType.technical, enablePressure: true),
+    const PenSlotPreset(id: '2', name: 'Ciano Neon', color: Color(0xFF00E1FF), strokeWidth: 3.0, toolType: InkToolType.technical, enablePressure: true),
+    const PenSlotPreset(id: '3', name: 'Rosa Neon', color: Color(0xFFFF007A), strokeWidth: 3.5, toolType: InkToolType.fountain, enablePressure: true),
+    const PenSlotPreset(id: '4', name: 'Roxo Grafite', color: Color(0xFFA855F7), strokeWidth: 2.5, toolType: InkToolType.pencil, enablePressure: true),
+    const PenSlotPreset(id: '5', name: 'Marca-Texto', color: Color(0xFFF59E0B), strokeWidth: 6.0, toolType: InkToolType.highlighter, enablePressure: false),
   ];
   late String _activeSlotId;
 
@@ -126,6 +131,10 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
   int _strokesVersion = 0;
 
   bool _isAIOpen = false;
+  final List<AiMessage> _aiMessages = [];
+  bool _isAiStreaming = false;
+  AiModelDefinition _activeAiModel = AiModelDefinition.allModels.first;
+  AiScopeType _activeAiScope = AiScopeType.activeNote;
 
   // Desenhos / Escrita Manual do traço ativo
   InkStroke? _activeStroke;
@@ -189,6 +198,7 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
   }
 
   List<InkStroke> _clipboardStrokes = [];
+  CanvasCardModel? _clipboardCard;
   int _globalCounter = 0;
   Timer? _telemetrySyncTimer;
   final Map<String, InkStroke> _pendingErasures = {};
@@ -317,7 +327,10 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
       case SettingsCategory.ai:
         updated = _settings.copyWith(
           geminiApiKey: def.geminiApiKey,
-          defaultAiModel: def.defaultAiModel,
+          openAiApiKey: def.openAiApiKey,
+          claudeApiKey: def.claudeApiKey,
+          ollamaEndpointUrl: def.ollamaEndpointUrl,
+          activeAiModelId: def.activeAiModelId,
         );
         break;
     }
@@ -579,6 +592,22 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
         return true;
       }
 
+      // Se a tela de configurações estiver aberta, não intercepta atalhos de canvas (Ctrl+V, Ctrl+C, etc.), exceto Escape e Ctrl+,
+      if (_isSettingsOpen) {
+        if (event.logicalKey == LogicalKeyboardKey.escape) {
+          setState(() {
+            _isSettingsOpen = false;
+          });
+          return true;
+        } else if (event.logicalKey == LogicalKeyboardKey.comma && HardwareKeyboard.instance.isControlPressed) {
+          setState(() {
+            _isSettingsOpen = false;
+          });
+          return true;
+        }
+        return false;
+      }
+
       // Se estiver editando texto de bloco ou título de card, não intercepta teclas de edição (Backspace, etc.)
       if (globalIsEditingText) {
         if (event.logicalKey != LogicalKeyboardKey.escape) {
@@ -597,36 +626,9 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
         }
       }
 
-      if (event.logicalKey == LogicalKeyboardKey.escape) {
-        if (_isSettingsOpen) {
-          setState(() {
-            _isSettingsOpen = false;
-          });
-          return true;
-        }
-      }
-
-      // Apenas a tecla DELETE remove cards selecionados (NUNCA Backspace).
-      if (event.logicalKey == LogicalKeyboardKey.delete) {
-        final note = _currentNote;
-        if (_selectedCardId != null && note != null) {
-          final target = note.cards.cast<CanvasCardModel?>().firstWhere((c) => c?.id == _selectedCardId, orElse: () => null);
-          if (target != null) {
-            _undoManager.pushCommand(RemoveCardCommand(target), execute: true, note: note);
-            setState(() {
-              _selectedCardId = null;
-            });
-            WorkspaceStorageService.instance.scheduleAutoSave(note);
-            return true;
-          }
-        } else if (_selectionState.hasSelection) {
-          _deleteSelectedStrokes();
-          return true;
-        }
-      } else if (event.logicalKey == LogicalKeyboardKey.backspace) {
-        // Backspace APENAS deleta traços selecionados pelo laço quando não estiver editando texto, NUNCA cards!
-        if (_selectionState.hasSelection) {
-          _deleteSelectedStrokes();
+      if (event.logicalKey == LogicalKeyboardKey.delete || event.logicalKey == LogicalKeyboardKey.backspace) {
+        if (_selectedCardId != null || _selectionState.hasSelection) {
+          _deleteSelection();
           return true;
         }
       }
@@ -653,10 +655,10 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
           });
           return true;
         } else if (event.logicalKey == LogicalKeyboardKey.keyC) {
-          _copySelectedStrokes();
+          _copy();
           return true;
         } else if (event.logicalKey == LogicalKeyboardKey.keyV) {
-          _pasteStrokes();
+          _paste();
           return true;
         } else if (event.logicalKey == LogicalKeyboardKey.keyD) {
           _duplicateSelectedStrokes();
@@ -741,6 +743,53 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
       _selectionState = SelectionState.empty();
     });
     WorkspaceStorageService.instance.scheduleAutoSave(note);
+  }
+
+  void _copy() {
+    final note = _currentNote;
+    if (note == null) return;
+
+    if (_selectedCardId != null) {
+      final target = note.cards.cast<CanvasCardModel?>().firstWhere((c) => c?.id == _selectedCardId, orElse: () => null);
+      if (target != null) {
+        _clipboardCard = target;
+        DevHubServer.instance.logAction('Copiar Card (${target.title})');
+        return;
+      }
+    }
+
+    _copySelectedStrokes();
+  }
+
+  void _paste() {
+    final note = _currentNote;
+    if (note == null) return;
+
+    if (_clipboardCard != null) {
+      final mousePos = _mousePosNotifier.value ?? const Offset(400, 300);
+      final canvasMousePos = (mousePos - _panOffset) / _zoomScale;
+      final newCard = _clipboardCard!.copyWith(
+        id: 'card_${DateTime.now().millisecondsSinceEpoch}',
+        x: canvasMousePos.dx > 0 ? canvasMousePos.dx : _clipboardCard!.x + 30.0,
+        y: canvasMousePos.dy > 0 ? canvasMousePos.dy : _clipboardCard!.y + 30.0,
+      );
+
+      _undoManager.pushCommand(
+        AddCardCommand(newCard),
+        execute: true,
+        note: note,
+      );
+
+      setState(() {
+        _selectedCardId = newCard.id;
+        _selectionState = SelectionState.empty();
+      });
+      WorkspaceStorageService.instance.scheduleAutoSave(note);
+      DevHubServer.instance.logAction('Colar Card (${newCard.title})');
+      return;
+    }
+
+    _pasteStrokes();
   }
 
   void _copySelectedStrokes() {
@@ -1012,21 +1061,50 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
     });
   }
 
-  void _deleteSelectedStrokes() {
+  void _deleteSelection() {
     final note = _currentNote;
-    if (note == null || !_selectionState.hasSelection) return;
+    if (note == null) return;
 
-    final selectedStrokes = _selectionState.selectedStrokeIds.map((id) => note.getStroke(id)).whereType<InkStroke>().toList();
+    final commands = <UndoCommand>[];
 
-    DevHubServer.instance.logAction('Deletar (${selectedStrokes.length} traços)');
+    // 1. Delete standalone active card
+    if (_selectedCardId != null && !_selectionState.hasSelection) {
+      final target = note.cards.cast<CanvasCardModel?>().firstWhere((c) => c?.id == _selectedCardId, orElse: () => null);
+      if (target != null) {
+        commands.add(RemoveCardCommand(target));
+      }
+    } 
+    // 2. Delete multi-selection
+    else if (_selectionState.hasSelection) {
+      for (final cardId in _selectionState.selectedCardIds) {
+        final target = note.cards.cast<CanvasCardModel?>().firstWhere((c) => c?.id == cardId, orElse: () => null);
+        if (target != null) {
+          commands.add(RemoveCardCommand(target));
+        }
+      }
+
+      final selectedStrokes = _selectionState.selectedStrokeIds.map((id) => note.getStroke(id)).whereType<InkStroke>().toList();
+      if (selectedStrokes.isNotEmpty) {
+        commands.add(RemoveStrokesCommand(selectedStrokes));
+      }
+    }
+
+    if (commands.isEmpty) return;
+
+    DevHubServer.instance.logAction('Deletar Seleção (${commands.length} ações)');
+
+    final finalCommand = commands.length == 1 ? commands.first : BatchCommand(commands);
 
     setState(() {
-      _undoManager.pushCommand(RemoveStrokesCommand(selectedStrokes), execute: true, note: note);
+      _undoManager.pushCommand(finalCommand, execute: true, note: note);
       _strokesVersion++;
       _committedStrokesNotifier.value++;
       _selectionState = SelectionState.empty();
+      _selectedCardId = null;
       _selectionUpdateNotifier.value++;
     });
+    
+    WorkspaceStorageService.instance.scheduleAutoSave(note);
   }
 
   void _deselect() {
@@ -1040,7 +1118,7 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
 
   CanvasCardModel? _findCardAtPoint(List<CanvasCardModel> cards, Offset canvasPoint, String? selectedCardId) {
     for (final card in cards.reversed) {
-      final bool isSelected = card.id == selectedCardId;
+      final bool isSelected = card.id == selectedCardId || _selectionState.selectedCardIds.contains(card.id);
       final bool isCollapsed = card.isCollapsed;
       final bool isCompact = card.width < 540.0;
       final double measuredH = CanvasCardWidget.actualHeights[card.id] ?? 0.0;
@@ -1083,27 +1161,51 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
     if (note.strokes.isEmpty && note.cards.isEmpty) return;
 
     setState(() {
+      final allStrokeIds = note.strokes.map((s) => s.id).toSet();
+      final allCardIds = note.cards.map((c) => c.id).toSet();
+      
+      Rect? combinedBounds;
       if (note.strokes.isNotEmpty) {
-        final allIds = note.strokes.map((s) => s.id).toSet();
-        final combinedBounds = SelectionGeometry.computeCombinedBounds(note.strokes);
-
-        _activeTool = 'select';
-        _isPenSubBarVisible = false;
-        _selectionState = SelectionState(
-          type: _selectionType,
-          selectedStrokeIds: allIds,
-          bounds: combinedBounds,
-        );
+        combinedBounds = SelectionGeometry.computeCombinedBounds(note.strokes);
+      }
+      
+      // We could compute bounds for cards too if we want a unified bounding box
+      if (note.cards.isNotEmpty) {
+        double left = double.infinity, top = double.infinity;
+        double right = -double.infinity, bottom = -double.infinity;
+        for (final c in note.cards) {
+          if (c.x < left) left = c.x;
+          if (c.y < top) top = c.y;
+          if (c.x + c.width > right) right = c.x + c.width;
+          if (c.y + c.height > bottom) bottom = c.y + c.height;
+        }
+        final cardsRect = Rect.fromLTRB(left, top, right, bottom);
+        if (combinedBounds != null) {
+          combinedBounds = combinedBounds.expandToInclude(cardsRect);
+        } else {
+          combinedBounds = cardsRect;
+        }
       }
 
-      if (note.cards.isNotEmpty) {
-        if (_selectedCardId == null || !note.cards.any((c) => c.id == _selectedCardId)) {
-          _selectedCardId = note.cards.last.id;
-        }
+      _activeTool = 'select';
+      _isPenSubBarVisible = false;
+      _selectionState = SelectionState(
+        type: _selectionType,
+        selectedStrokeIds: allStrokeIds,
+        selectedCardIds: allCardIds,
+        bounds: combinedBounds,
+      );
+
+      // We might want to keep the single _selectedCardId for backward compatibility
+      // of showing the single card floating bar, or maybe clear it if multiple are selected.
+      if (allCardIds.length == 1) {
+        _selectedCardId = allCardIds.first;
+      } else {
+        _selectedCardId = null; 
       }
     });
 
-    if (note.strokes.isNotEmpty) {
+    if (note.strokes.isNotEmpty || note.cards.isNotEmpty) {
       _selectionUpdateNotifier.value++;
     }
   }
@@ -1133,14 +1235,6 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
 
     return CallbackShortcuts(
       bindings: {
-        const SingleActivator(LogicalKeyboardKey.keyA, control: true): _selectAll,
-        const SingleActivator(LogicalKeyboardKey.keyZ, control: true): _undo,
-        const SingleActivator(LogicalKeyboardKey.keyY, control: true): _redo,
-        const SingleActivator(LogicalKeyboardKey.keyZ, control: true, shift: true): _redo,
-        const SingleActivator(LogicalKeyboardKey.keyC, control: true): _copySelectedStrokes,
-        const SingleActivator(LogicalKeyboardKey.keyV, control: true): _pasteStrokes,
-        const SingleActivator(LogicalKeyboardKey.keyD, control: true): _duplicateSelectedStrokes,
-
         const SingleActivator(LogicalKeyboardKey.comma, control: true): () {
           setState(() {
             _isSettingsOpen = !_isSettingsOpen;
@@ -1160,40 +1254,26 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
         autofocus: true,
         onKeyEvent: (node, event) {
           if (event is KeyDownEvent || event is KeyRepeatEvent) {
-            // Se o foco estiver em um campo de texto, ignore o atalho para que o campo de texto processe a digitação/remoção de caracteres.
-            if (globalIsEditingText) {
-              return KeyEventResult.ignored;
-            }
-
+            // Se o foco estiver em um campo de texto (Sidebar de IA, cards, settings, etc.),
+            // ignore completamente o atalho para que o backspace/delete atue apenas no campo de texto.
             final primaryFocus = FocusManager.instance.primaryFocus;
-            if (primaryFocus != null &&
-                (primaryFocus.context?.widget is EditableText ||
-                    (primaryFocus.hasFocus &&
-                        (primaryFocus.debugLabel?.contains('EditableText') == true ||
-                            primaryFocus.debugLabel?.contains('TextField') == true)))) {
+            final isEditingText = globalIsEditingText ||
+                (primaryFocus != null &&
+                    (primaryFocus.context?.widget is EditableText ||
+                     primaryFocus.context?.findAncestorWidgetOfExactType<EditableText>() != null ||
+                     primaryFocus.context?.findAncestorWidgetOfExactType<TextField>() != null ||
+                     (primaryFocus.hasFocus &&
+                         (primaryFocus.debugLabel?.contains('EditableText') == true ||
+                          primaryFocus.debugLabel?.contains('TextField') == true))));
+
+            if (isEditingText) {
               return KeyEventResult.ignored;
             }
             
             final note = _currentNote;
-            // Apenas a tecla DELETE remove o card selecionado (NUNCA Backspace).
-            if (event.logicalKey == LogicalKeyboardKey.delete) {
-              if (_selectedCardId != null && note != null) {
-                final target = note.cards.cast<CanvasCardModel?>().firstWhere((c) => c?.id == _selectedCardId, orElse: () => null);
-                if (target != null) {
-                  _undoManager.pushCommand(RemoveCardCommand(target), execute: true, note: note);
-                  setState(() {
-                    _selectedCardId = null;
-                  });
-                  WorkspaceStorageService.instance.scheduleAutoSave(note);
-                }
-                return KeyEventResult.handled;
-              } else if (_selectionState.hasSelection) {
-                _deleteSelectedStrokes();
-                return KeyEventResult.handled;
-              }
-            } else if (event.logicalKey == LogicalKeyboardKey.backspace) {
-              if (_selectionState.hasSelection) {
-                _deleteSelectedStrokes();
+            if (event.logicalKey == LogicalKeyboardKey.delete || event.logicalKey == LogicalKeyboardKey.backspace) {
+              if (_selectedCardId != null || _selectionState.hasSelection) {
+                _deleteSelection();
                 return KeyEventResult.handled;
               }
             }
@@ -1201,8 +1281,14 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
           return KeyEventResult.ignored;
         },
         child: Scaffold(
-          body: Stack(
-            children: [
+          body: DragTarget<AiMessage>(
+            onWillAcceptWithDetails: (_) => true,
+            onAcceptWithDetails: (details) {
+              _handleInsertAiMessageIntoCanvas(details.data, details.offset);
+            },
+            builder: (context, candidateData, rejectedData) {
+              return Stack(
+                children: [
               // 1. Fundo do Canvas Infinito & Traços
               MouseRegion(
                 cursor: _activeTool == 'laser' ? SystemMouseCursors.none : MouseCursor.defer,
@@ -1239,18 +1325,36 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
                           }
                         }
 
+                        final rawDy = event.scrollDelta.dy;
                         final isCtrlPressed = HardwareKeyboard.instance.isControlPressed;
                         final isShiftPressed = HardwareKeyboard.instance.isShiftPressed;
                         if (isCtrlPressed) {
-                          final delta = -event.scrollDelta.dy * 0.0015;
+                          final clampedDelta = rawDy.clamp(-80.0, 80.0);
+                          final delta = -clampedDelta * 0.0015;
                           _setInteracting();
                           _handleZoomDelta(delta, event.localPosition);
                         } else if (isShiftPressed) {
-                          _handlePanDelta(Offset(-event.scrollDelta.dy, 0.0));
+                          final clampedDelta = rawDy.clamp(-150.0, 150.0);
+                          _handlePanDelta(Offset(-clampedDelta, 0.0));
                           _scheduleBounceCheck();
                         } else {
-                          _handlePanDelta(Offset(0.0, -event.scrollDelta.dy));
+                          final clampedDelta = rawDy.clamp(-150.0, 150.0);
+                          _handlePanDelta(Offset(0.0, -clampedDelta));
                           _scheduleBounceCheck();
+                        }
+                        
+                        // Se estiver fazendo seleção em área, atualiza o ponto atual de acordo com o novo panOffset
+                        if (_selectionState.isSelectingArea) {
+                          final canvasPoint = (event.localPosition - _panOffset) / _zoomScale;
+                          setState(() {
+                            _selectionState = _selectionState.copyWith(
+                              currentPoint: canvasPoint,
+                              lassoPoints: _selectionType == SelectionType.lasso 
+                                  ? [..._selectionState.lassoPoints, canvasPoint] 
+                                  : _selectionState.lassoPoints,
+                            );
+                            _selectionUpdateNotifier.value++;
+                          });
                         }
                       }
                     },
@@ -1309,20 +1413,36 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
                         // Interação e Seleção de Cards do Canvas (Fase 11)
                         final clickedCard = _findCardAtPoint(note.cards, canvasPoint, _selectedCardId);
                         if (clickedCard != null) {
-                          if (_selectedCardId != clickedCard.id) {
+                          // Se o card clicado já faz parte da seleção múltipla e estamos no modo select,
+                          // NÃO retornar aqui — deixar o handler do select tool iniciar o arraste.
+                          if (_activeTool == 'select' && _selectionState.selectedCardIds.contains(clickedCard.id)) {
+                            // Cai para o handler do select tool abaixo
+                          } else if (_selectionState.selectedCardIds.contains(clickedCard.id)) {
+                            // Card já selecionado na multi-seleção em outra ferramenta
+                            return;
+                          } else if (_selectedCardId != clickedCard.id) {
                             setState(() {
                               _selectedCardId = clickedCard.id;
                               _selectionState = SelectionState.empty();
                             });
                           }
-                          // O ponteiro atingiu o card, seu cabeçalho, a pílula ou alças de redimensionamento:
-                          // Retorna imediatamente para NÃO iniciar traços de desenho com a caneta no canvas!
-                          return;
-                        } else if (_selectedCardId != null) {
+                          if (_activeTool != 'select' || !_selectionState.selectedCardIds.contains(clickedCard.id)) {
+                            // O ponteiro atingiu o card, seu cabeçalho, a pílula ou alças de redimensionamento:
+                            // Retorna imediatamente para NÃO iniciar traços de desenho com a caneta no canvas!
+                            return;
+                          }
+                        } else if (_selectedCardId != null && _selectionState.selectedCardIds.isEmpty) {
                           // Toque no vazio do canvas: retira a seleção do card ativo e desativa foco
                           FocusManager.instance.primaryFocus?.unfocus();
                           setState(() {
                             _selectedCardId = null;
+                          });
+                        } else if (_selectionState.selectedCardIds.isNotEmpty) {
+                          // Toque fora da seleção múltipla: limpar tudo
+                          FocusManager.instance.primaryFocus?.unfocus();
+                          setState(() {
+                            _selectedCardId = null;
+                            _selectionState = SelectionState.empty();
                           });
                         }
 
@@ -1370,23 +1490,21 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
                               : (_protractorState.isVisible ? _protractorState.snapPoint(canvasPoint) : null);
                           final effectiveStartPoint = snapped ?? canvasPoint;
 
-                          setState(() {
-                            _isDrawing = true;
-                            _activeStroke = InkStroke(
-                              id: DateTime.now().millisecondsSinceEpoch.toString(),
-                              points: [StrokePoint(point: effectiveStartPoint, pressure: pressure)],
-                              color: currentPreset.color,
-                              strokeWidth: currentPreset.strokeWidth,
-                              toolType: currentPreset.toolType,
-                              enablePressure: currentPreset.enablePressure,
-                            );
-                          });
+                          _isDrawing = true;
+                          _activeStroke = InkStroke(
+                            id: DateTime.now().millisecondsSinceEpoch.toString(),
+                            points: [StrokePoint(point: effectiveStartPoint, pressure: pressure)],
+                            color: currentPreset.color,
+                            strokeWidth: currentPreset.strokeWidth,
+                            toolType: currentPreset.toolType,
+                            enablePressure: currentPreset.enablePressure,
+                          );
                           _activeStrokeUpdateNotifier.value++;
 
                           // Iniciar temporizador Draw & Hold (400ms para Smart Shape Snap)
                           _drawAndHoldTimer?.cancel();
-                          _drawAndHoldTimer = Timer(const Duration(milliseconds: 400), () {
-                            if (_isDrawing && _activeStroke != null && _activeStroke!.points.length >= 8) {
+                          _drawAndHoldTimer = Timer(const Duration(milliseconds: 700), () {
+                            if (_isDrawing && _activeStroke != null && _activeStroke!.points.length >= 20) {
                               final recognized = SmartShapeEngine.recognizeDrawnShape(_activeStroke!.points);
                               if (recognized != null) {
                                 _isSmartShapeSnapped = true;
@@ -1415,6 +1533,7 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
                                   strokeWidth: _activeStroke!.strokeWidth,
                                   toolType: currentPreset.toolType,
                                   enablePressure: currentPreset.enablePressure,
+                                  isShape: true,
                                   cachedPath: shapePath,
                                 );
                                 _activeStrokeUpdateNotifier.value++;
@@ -1443,6 +1562,7 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
                               strokeWidth: currentPreset.strokeWidth,
                               toolType: currentPreset.toolType,
                               enablePressure: currentPreset.enablePressure,
+                              isShape: true,
                               cachedPath: initialPath,
                             );
                           });
@@ -1626,6 +1746,7 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
                               strokeWidth: _activeStroke!.strokeWidth,
                               toolType: currentPreset.toolType,
                               enablePressure: currentPreset.enablePressure,
+                              isShape: true,
                               cachedPath: shapePath,
                             );
                             _activeStrokeUpdateNotifier.value++;
@@ -1654,6 +1775,7 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
                               strokeWidth: _activeStroke!.strokeWidth,
                               toolType: currentPreset.toolType,
                               enablePressure: currentPreset.enablePressure,
+                              isShape: true,
                               cachedPath: shapePath,
                             );
                             _activeStrokeUpdateNotifier.value++;
@@ -1674,7 +1796,7 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
                               // Reiniciar temporizador configurado de Draw & Hold
                               _drawAndHoldTimer?.cancel();
                               _drawAndHoldTimer = Timer(Duration(milliseconds: _settings.drawAndHoldDurationMs), () {
-                                if (_isDrawing && _activeStroke != null && _activeStroke!.points.length >= 8) {
+                                if (_isDrawing && _activeStroke != null && _activeStroke!.points.length >= 20) {
                                   final recognized = SmartShapeEngine.recognizeDrawnShape(_activeStroke!.points);
                                   if (recognized != null) {
                                     _isSmartShapeSnapped = true;
@@ -1702,6 +1824,7 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
                                       strokeWidth: _activeStroke!.strokeWidth,
                                       toolType: currentPreset.toolType,
                                       enablePressure: currentPreset.enablePressure,
+                                      isShape: true,
                                       cachedPath: shapePath,
                                     );
                                     _activeStrokeUpdateNotifier.value++;
@@ -1728,6 +1851,7 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
                             strokeWidth: currentPreset.strokeWidth,
                             toolType: currentPreset.toolType,
                             enablePressure: currentPreset.enablePressure,
+                            isShape: true,
                             cachedPath: shapePath,
                           );
                           _activeStrokeUpdateNotifier.value++;
@@ -1875,6 +1999,7 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
                             strokeWidth: _activeStroke!.strokeWidth,
                             toolType: _activeStroke!.toolType,
                             enablePressure: _activeStroke!.enablePressure,
+                            isShape: wasShapeSnapped || _activeTool == 'shapes',
                             boundingBox: boundingBox,
                             cachedPath: cachedPath,
                           );
@@ -1992,14 +2117,62 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
                               }
                             }
 
-                            _undoManager.pushCommand(
-                              MoveStrokesCommand(
+                            final undoCommands = <UndoCommand>[];
+                            if (originalStrokes.isNotEmpty) {
+                              undoCommands.add(MoveStrokesCommand(
                                 originalStrokes: originalStrokes,
                                 updatedStrokes: updatedStrokes,
-                              ),
-                              execute: true,
-                              note: note,
-                            );
+                              ));
+                            }
+
+                            for (final cardId in _selectionState.selectedCardIds) {
+                              final idx = note.cards.indexWhere((c) => c.id == cardId);
+                              if (idx != -1) {
+                                final prev = note.cards[idx];
+                                final double newX;
+                                final double newY;
+                                
+                                if (isResizing) {
+                                  final u = (prev.x - bounds.left) / bounds.width;
+                                  final v = (prev.y - bounds.top) / bounds.height;
+                                  newX = transformBounds.left + u * transformBounds.width;
+                                  newY = transformBounds.top + v * transformBounds.height;
+                                } else {
+                                  final dx = prev.x - pivot.dx;
+                                  final dy = prev.y - pivot.dy;
+                                  newX = pivot.dx + dx * cosA - dy * sinA;
+                                  newY = pivot.dy + dx * sinA + dy * cosA;
+                                }
+
+                                final double newWidth = isResizing ? prev.width * scaleX : prev.width;
+                                final double newHeight = isResizing ? prev.height * scaleY : prev.height;
+
+                                final updated = prev.copyWith(
+                                  x: newX,
+                                  y: newY,
+                                  width: newWidth.clamp(200.0, 1600.0),
+                                  height: newHeight.clamp(prev.minHeight, 2400.0),
+                                );
+                                
+                                undoCommands.add(UpdateCardCommand(
+                                  cardId: cardId,
+                                  previousCard: prev,
+                                  newCard: updated,
+                                ));
+                              }
+                            }
+
+                            if (undoCommands.isNotEmpty) {
+                              final finalCommand = undoCommands.length == 1
+                                  ? undoCommands.first
+                                  : BatchCommand(undoCommands);
+                                  
+                              _undoManager.pushCommand(
+                                finalCommand,
+                                execute: true,
+                                note: note,
+                              );
+                            }
                           }
 
                           final newCombinedBounds = isResizing
@@ -2058,14 +2231,42 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
                               }
                             }
 
-                            _undoManager.pushCommand(
-                              MoveStrokesCommand(
+                            final undoCommands = <UndoCommand>[];
+
+                            if (originalStrokes.isNotEmpty) {
+                              undoCommands.add(MoveStrokesCommand(
                                 originalStrokes: originalStrokes,
                                 updatedStrokes: updatedStrokes,
-                              ),
-                              execute: true,
-                              note: note,
-                            );
+                              ));
+                            }
+
+                            for (final cardId in _selectionState.selectedCardIds) {
+                              final idx = note.cards.indexWhere((c) => c.id == cardId);
+                              if (idx != -1) {
+                                final prev = note.cards[idx];
+                                final updated = prev.copyWith(
+                                  x: prev.x + delta.dx,
+                                  y: prev.y + delta.dy,
+                                );
+                                undoCommands.add(UpdateCardCommand(
+                                  cardId: cardId,
+                                  previousCard: prev,
+                                  newCard: updated,
+                                ));
+                              }
+                            }
+
+                            if (undoCommands.isNotEmpty) {
+                              final finalCommand = undoCommands.length == 1
+                                  ? undoCommands.first
+                                  : BatchCommand(undoCommands);
+                                  
+                              _undoManager.pushCommand(
+                                finalCommand,
+                                execute: true,
+                                note: note,
+                              );
+                            }
                           }
 
                           final newBounds = _selectionState.bounds?.shift(delta);
@@ -2132,6 +2333,8 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
 
                         // 2. Seleção por Área (Retângulo ou Laço)
                         final selectedIds = <String>{};
+                        final selectedCards = <String>{};
+                        
                         if (_selectionType == SelectionType.rectangle &&
                             _selectionState.startPoint != null &&
                             _selectionState.currentPoint != null) {
@@ -2143,18 +2346,10 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
                             }
                           }
 
-                          // Se não selecionou traços, verifica se englobou algum Card
-                          if (selectedIds.isEmpty) {
-                            for (final c in note.cards.reversed) {
-                              final cRect = Rect.fromLTWH(c.x, c.y, c.width, c.height);
-                              if (rect.overlaps(cRect) || rect.contains(Offset(c.x, c.y))) {
-                                setState(() {
-                                  _selectedCardId = c.id;
-                                  _selectionState = SelectionState.empty();
-                                  _selectionStartCanvasPoint = null;
-                                });
-                                return;
-                              }
+                          for (final c in note.cards) {
+                            final cRect = Rect.fromLTWH(c.x, c.y, c.width, c.height);
+                            if (rect.overlaps(cRect) || rect.contains(Offset(c.x, c.y))) {
+                              selectedCards.add(c.id);
                             }
                           }
                         } else if (_selectionType == SelectionType.lasso && _selectionState.lassoPoints.length > 2) {
@@ -2173,31 +2368,50 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
                             }
                           }
 
-                          if (selectedIds.isEmpty) {
-                            for (final c in note.cards.reversed) {
-                              final cRect = Rect.fromLTWH(c.x, c.y, c.width, c.height);
-                              if (rect.overlaps(cRect) || rect.contains(Offset(c.x, c.y))) {
-                                setState(() {
-                                  _selectedCardId = c.id;
-                                  _selectionState = SelectionState.empty();
-                                  _selectionStartCanvasPoint = null;
-                                });
-                                return;
-                              }
+                          for (final c in note.cards) {
+                            final cRect = Rect.fromLTWH(c.x, c.y, c.width, c.height);
+                            if (rect.overlaps(cRect) || rect.contains(Offset(c.x, c.y))) {
+                              selectedCards.add(c.id);
                             }
                           }
                         }
 
                         setState(() {
-                          if (selectedIds.isNotEmpty) {
-                            final selectedStrokes = note.strokes.where((s) => selectedIds.contains(s.id));
-                            final combinedBounds = SelectionGeometry.computeCombinedBounds(selectedStrokes);
+                          if (selectedIds.isNotEmpty || selectedCards.isNotEmpty) {
+                            Rect? combinedBounds;
+                            if (selectedIds.isNotEmpty) {
+                              final selectedStrokes = note.strokes.where((s) => selectedIds.contains(s.id));
+                              combinedBounds = SelectionGeometry.computeCombinedBounds(selectedStrokes);
+                            }
+                            if (selectedCards.isNotEmpty) {
+                              double left = double.infinity, top = double.infinity;
+                              double right = -double.infinity, bottom = -double.infinity;
+                              for (final c in note.cards.where((c) => selectedCards.contains(c.id))) {
+                                if (c.x < left) left = c.x;
+                                if (c.y < top) top = c.y;
+                                if (c.x + c.width > right) right = c.x + c.width;
+                                if (c.y + c.height > bottom) bottom = c.y + c.height;
+                              }
+                              final cardsRect = Rect.fromLTRB(left, top, right, bottom);
+                              if (combinedBounds != null) {
+                                combinedBounds = combinedBounds.expandToInclude(cardsRect);
+                              } else {
+                                combinedBounds = cardsRect;
+                              }
+                            }
+                            
                             _selectionState = SelectionState(
                               type: _selectionType,
                               selectedStrokeIds: selectedIds,
+                              selectedCardIds: selectedCards,
                               bounds: combinedBounds,
                             );
-                            _selectedCardId = null;
+                            
+                            if (selectedCards.length == 1) {
+                              _selectedCardId = selectedCards.first;
+                            } else {
+                              _selectedCardId = null;
+                            }
                           } else {
                             _selectionState = SelectionState.empty();
                             _selectedCardId = null;
@@ -2456,6 +2670,7 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
                           CanvasCardsLayer(
                             cards: note.cards,
                             selectedCardId: _selectedCardId,
+                            selectionState: _selectionState,
                             panNotifier: _panNotifier,
                             zoomNotifier: _zoomNotifier,
                             onUpdateCard: (updated) {
@@ -2472,6 +2687,7 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
                               }
                             },
                             onSelectCard: (cardId) {
+                              if (_selectedCardId == cardId) return;
                               setState(() {
                                 _selectedCardId = cardId;
                                 _selectionState = SelectionState.empty();
@@ -2527,8 +2743,16 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
                     onRotatePanStart: _onRotatePanStart,
                     onRotatePanUpdate: _onRotatePanUpdate,
                     onRotatePanEnd: _onRotatePanEnd,
-                    onDelete: _deleteSelectedStrokes,
+                    onDelete: _deleteSelection,
                     onDeselect: _deselect,
+                    onAskAi: _settings.enableAiSelectionActions
+                        ? () {
+                            setState(() {
+                              _isAIOpen = true;
+                            });
+                            _handleSubmitAiPrompt('O que significa ou como resolver o conteúdo selecionado?');
+                          }
+                        : null,
                   ),
                 ),
 
@@ -3026,17 +3250,345 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
                     _isAIOpen = false;
                   });
                 },
-                onSubmitPrompt: (promptText) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text('Prompt enviado para IA: $promptText')),
-                  );
+                messages: _aiMessages,
+                isStreaming: _isAiStreaming,
+                activeModel: _activeAiModel,
+                activeScope: _activeAiScope,
+                availableNoteTitles: _notes.map((n) => n.title).toList(),
+                onSelectModel: (m) {
+                  setState(() {
+                    _activeAiModel = m;
+                  });
+                },
+                onSelectScope: (s) {
+                  setState(() {
+                    _activeAiScope = s;
+                  });
+                },
+                onSubmitPrompt: _handleSubmitAiPrompt,
+                onClearChat: () {
+                  setState(() {
+                    _aiMessages.clear();
+                  });
+                },
+                onInsertIntoCanvas: (msg) {
+                  _handleInsertAiMessageIntoCanvas(msg);
+                },
+                onOpenSettings: () {
+                  setState(() {
+                    _isSettingsOpen = true;
+                    _activeSettingsCategory = SettingsCategory.ai;
+                  });
                 },
               ),
             ],
-          ),
-        ),
+          );
+        },
       ),
+    ),
+  ),
+);
+  }
+
+  Future<String?> _renderSelectedStrokesToBase64() async {
+    final note = _currentNote;
+    if (note == null || !_selectionState.hasSelection || _selectionState.bounds == null) return null;
+
+    final selectedIds = _selectionState.selectedStrokeIds;
+    final selectedStrokes = note.strokes.where((s) => selectedIds.contains(s.id)).toList();
+    if (selectedStrokes.isEmpty) return null;
+
+    final bounds = _selectionState.bounds!;
+    const padding = 24.0;
+    final paddedBounds = bounds.inflate(padding);
+    final width = math.max(160.0, math.min(1024.0, paddedBounds.width));
+    final height = math.max(160.0, math.min(1024.0, paddedBounds.height));
+
+    final recorder = ui.PictureRecorder();
+    final canvas = Canvas(recorder, Rect.fromLTWH(0, 0, width, height));
+
+    // Fundo contrastante para reconhecimento de visão computacional / OCR
+    canvas.drawRect(Rect.fromLTWH(0, 0, width, height), Paint()..color = const Color(0xFF0D0E15));
+    canvas.translate(-paddedBounds.left, -paddedBounds.top);
+
+    for (final stroke in selectedStrokes) {
+      if (stroke.points.isEmpty) continue;
+      final strokePaint = Paint()
+        ..color = stroke.color == Colors.black ? Colors.white : stroke.color
+        ..strokeWidth = math.max(3.0, stroke.strokeWidth)
+        ..strokeCap = StrokeCap.round
+        ..strokeJoin = StrokeJoin.round
+        ..style = PaintingStyle.stroke;
+
+      if (stroke.points.length == 1) {
+        canvas.drawCircle(stroke.points.first.point, stroke.strokeWidth / 2, strokePaint..style = PaintingStyle.fill);
+      } else {
+        final path = Path();
+        path.moveTo(stroke.points.first.point.dx, stroke.points.first.point.dy);
+        for (int i = 1; i < stroke.points.length; i++) {
+          path.lineTo(stroke.points[i].point.dx, stroke.points[i].point.dy);
+        }
+        canvas.drawPath(path, strokePaint);
+      }
+    }
+
+    final picture = recorder.endRecording();
+    final img = await picture.toImage(width.round(), height.round());
+    final byteData = await img.toByteData(format: ui.ImageByteFormat.png);
+    if (byteData == null) return null;
+    return base64Encode(byteData.buffer.asUint8List());
+  }
+
+  Future<String?> _renderNoteStrokesToBase64(NoteDocument note) async {
+    if (note.strokes.isEmpty) return null;
+
+    final allPoints = <Offset>[];
+    for (final s in note.strokes) {
+      for (final p in s.points) {
+        allPoints.add(p.point);
+      }
+    }
+    if (allPoints.isEmpty) return null;
+
+    double minX = double.infinity, minY = double.infinity, maxX = double.negativeInfinity, maxY = double.negativeInfinity;
+    for (final p in allPoints) {
+      if (p.dx < minX) minX = p.dx;
+      if (p.dy < minY) minY = p.dy;
+      if (p.dx > maxX) maxX = p.dx;
+      if (p.dy > maxY) maxY = p.dy;
+    }
+
+    final rawBounds = Rect.fromLTRB(minX, minY, maxX, maxY);
+    const padding = 32.0;
+    final paddedBounds = rawBounds.inflate(padding);
+    final width = math.max(200.0, math.min(1280.0, paddedBounds.width));
+    final height = math.max(200.0, math.min(1280.0, paddedBounds.height));
+
+    final recorder = ui.PictureRecorder();
+    final canvas = Canvas(recorder, Rect.fromLTWH(0, 0, width, height));
+
+    // Fundo contrastante escuro para reconhecimento nítido da caligrafia pelo Gemini
+    canvas.drawRect(Rect.fromLTWH(0, 0, width, height), Paint()..color = const Color(0xFF0D0E15));
+    canvas.translate(-paddedBounds.left, -paddedBounds.top);
+
+    for (final stroke in note.strokes) {
+      if (stroke.points.isEmpty) continue;
+      final strokePaint = Paint()
+        ..color = stroke.color == Colors.black ? Colors.white : stroke.color
+        ..strokeWidth = math.max(2.5, stroke.strokeWidth)
+        ..strokeCap = StrokeCap.round
+        ..strokeJoin = StrokeJoin.round
+        ..style = PaintingStyle.stroke;
+
+      if (stroke.points.length == 1) {
+        canvas.drawCircle(stroke.points.first.point, stroke.strokeWidth / 2, strokePaint..style = PaintingStyle.fill);
+      } else {
+        final path = Path();
+        path.moveTo(stroke.points.first.point.dx, stroke.points.first.point.dy);
+        for (int i = 1; i < stroke.points.length; i++) {
+          path.lineTo(stroke.points[i].point.dx, stroke.points[i].point.dy);
+        }
+        canvas.drawPath(path, strokePaint);
+      }
+    }
+
+    final picture = recorder.endRecording();
+    final img = await picture.toImage(width.round(), height.round());
+    final byteData = await img.toByteData(format: ui.ImageByteFormat.png);
+    if (byteData == null) return null;
+    return base64Encode(byteData.buffer.asUint8List());
+  }
+
+  Future<void> _handleSubmitAiPrompt(String promptText, [String? userAttachedImageBase64]) async {
+    if (promptText.trim().isEmpty && (userAttachedImageBase64 == null || userAttachedImageBase64.isEmpty)) return;
+
+    final userMsg = AiMessage(
+      id: DateTime.now().millisecondsSinceEpoch.toString(),
+      role: AiMessageRole.user,
+      content: promptText.trim().isNotEmpty ? promptText.trim() : '(Imagem enviada para análise)',
+      timestamp: DateTime.now(),
     );
+
+    final assistantMsgId = (DateTime.now().millisecondsSinceEpoch + 1).toString();
+    final assistantMsg = AiMessage(
+      id: assistantMsgId,
+      role: AiMessageRole.assistant,
+      content: '',
+      timestamp: DateTime.now(),
+      isStreaming: true,
+      modelName: _activeAiModel.displayName,
+    );
+
+    setState(() {
+      _aiMessages.add(userMsg);
+      _aiMessages.add(assistantMsg);
+      _isAiStreaming = true;
+    });
+
+    // Constrói o contexto com base nos elementos selecionados, notas mencionadas (@) e grau de consciência ativo
+    String scopeContext = '';
+    final imagesList = <String>[];
+    if (userAttachedImageBase64 != null && userAttachedImageBase64.isNotEmpty) {
+      imagesList.add(userAttachedImageBase64);
+      scopeContext += 'Imagem enviada pelo usuário em anexo para análise.\n';
+    }
+
+    final note = _currentNote;
+
+    // 1. Processamento de Menções @nome_da_nota no prompt
+    final mentionMatches = RegExp(r'@([a-zA-Z0-9_\-]+)').allMatches(promptText);
+    if (mentionMatches.isNotEmpty) {
+      final mentionedTitles = mentionMatches.map((m) => m.group(1)!.replaceAll('_', ' ').toLowerCase()).toSet();
+      for (final n in _notes) {
+        final nTitleLower = n.title.toLowerCase();
+        final nTitleSanitized = n.title.replaceAll(' ', '_').toLowerCase();
+        if (mentionedTitles.contains(nTitleLower) || mentionedTitles.contains(nTitleSanitized)) {
+          scopeContext += '\n--- NOTA MENCIONADA: [${n.title}] ---\n';
+          if (n.cards.isNotEmpty) {
+            scopeContext += 'Cards na nota:\n' + n.cards.map((c) => '[${c.title}]: ${c.content}').join('\n') + '\n';
+          }
+          if (n.strokes.isNotEmpty) {
+            final strokeImg = await _renderNoteStrokesToBase64(n);
+            if (strokeImg != null) {
+              imagesList.add(strokeImg);
+              scopeContext += '(Traços desenhados na nota [${n.title}] incluídos como imagem em anexo)\n';
+            }
+          }
+        }
+      }
+    }
+
+    // 2. Processamento dos Escopos Ativos
+    if (_selectionState.hasSelection && note != null) {
+      final selectedIds = _selectionState.selectedStrokeIds;
+      final selectedStrokes = note.strokes.where((s) => selectedIds.contains(s.id)).toList();
+      if (selectedStrokes.isNotEmpty) {
+        final img = await _renderSelectedStrokesToBase64();
+        if (img != null) imagesList.add(img);
+        scopeContext += '\nImagem em anexo com a caligrafia/desenho selecionado pelo usuário no canvas. Interprete o conteúdo como a mensagem/dúvida do usuário e responda diretamente a ela.';
+      }
+      if (_selectedCardId != null) {
+        final card = note.cards.cast<CanvasCardModel?>().firstWhere((c) => c?.id == _selectedCardId, orElse: () => null);
+        if (card != null) {
+          scopeContext += '\nCard selecionado:\n[${card.title}]:\n${card.content}';
+        }
+      }
+    } else if (_activeAiScope == AiScopeType.activeNote && note != null) {
+      scopeContext += '\n--- NOTA ATIVA ATUAL: [${note.title}] ---\n';
+      if (note.cards.isNotEmpty) {
+        final cardTexts = note.cards.map((c) => 'Card [${c.title}]:\n${c.content}').join('\n---\n');
+        scopeContext += 'Cards e anotações no Canvas:\n$cardTexts\n';
+      }
+      if (note.strokes.isNotEmpty) {
+        final strokeImg = await _renderNoteStrokesToBase64(note);
+        if (strokeImg != null) {
+          imagesList.add(strokeImg);
+          scopeContext += '(Traços e caligrafia manuscrita da nota atual incluídos como imagem em anexo. Leia e interprete os traços desenhados)\n';
+        }
+      }
+    } else if (_activeAiScope == AiScopeType.allNotes) {
+      scopeContext += '\n--- CADERNO COMPLETO / TODAS AS NOTAS (${_notes.length} notas) ---\n';
+      for (final n in _notes) {
+        scopeContext += '\nNota: [${n.title}]\n';
+        if (n.cards.isNotEmpty) {
+          scopeContext += 'Cards:\n' + n.cards.map((c) => '- [${c.title}]: ${c.content}').join('\n') + '\n';
+        }
+        if (n.strokes.isNotEmpty) {
+          final strokeImg = await _renderNoteStrokesToBase64(n);
+          if (strokeImg != null) {
+            imagesList.add(strokeImg);
+            scopeContext += '(Traços e caligrafia manuscrita desta nota incluídos como imagem em anexo.)\n';
+          }
+        }
+      }
+    }
+
+    final buffer = StringBuffer();
+    int lastUiUpdate = 0;
+
+    AiServiceBridge.instance.streamPrompt(
+      userPrompt: promptText,
+      model: _activeAiModel,
+      scopeContext: scopeContext,
+      imagesBase64: imagesList,
+    ).listen(
+      (chunk) {
+        buffer.write(chunk);
+        final now = DateTime.now().millisecondsSinceEpoch;
+        if (now - lastUiUpdate > 35) {
+          lastUiUpdate = now;
+          setState(() {
+            final index = _aiMessages.indexWhere((m) => m.id == assistantMsgId);
+            if (index != -1) {
+              _aiMessages[index] = _aiMessages[index].copyWith(
+                content: buffer.toString(),
+                isStreaming: true,
+              );
+            }
+          });
+        }
+      },
+      onError: (err) {
+        setState(() {
+          final index = _aiMessages.indexWhere((m) => m.id == assistantMsgId);
+          if (index != -1) {
+            _aiMessages[index] = _aiMessages[index].copyWith(
+              errorMessage: err.toString(),
+              isStreaming: false,
+            );
+          }
+          _isAiStreaming = false;
+        });
+      },
+      onDone: () {
+        setState(() {
+          final index = _aiMessages.indexWhere((m) => m.id == assistantMsgId);
+          if (index != -1) {
+            _aiMessages[index] = _aiMessages[index].copyWith(
+              content: buffer.toString(),
+              isStreaming: false,
+            );
+          }
+          _isAiStreaming = false;
+        });
+      },
+    );
+  }
+
+  void _handleInsertAiMessageIntoCanvas(AiMessage message, [Offset? screenPosition]) {
+    final note = _currentNote;
+    if (note == null) return;
+
+    final size = MediaQuery.of(context).size;
+    final targetScreen = screenPosition ?? Offset(size.width / 2 - 190, size.height / 2 - 130);
+    final worldX = (targetScreen.dx - _panOffset.dx) / _zoomScale;
+    final worldY = (targetScreen.dy - _panOffset.dy) / _zoomScale;
+
+    // Limpa tags de sugestões dinâmicas para não poluir o conteúdo do Card no Canvas
+    final cleanContent = message.content
+        .replaceAll(RegExp(r'\[(?:SUGESTOES|SUGESTÕES):\s*.*?\]', caseSensitive: false), '')
+        .trim();
+
+    final newCard = CanvasCardModel(
+      id: 'card_ai_${DateTime.now().millisecondsSinceEpoch}',
+      title: 'IA: ${message.modelName ?? "STEM"}',
+      x: worldX,
+      y: worldY,
+      width: 440,
+      height: 320,
+      content: cleanContent,
+    );
+
+    _undoManager.pushCommand(
+      AddCardCommand(newCard),
+      execute: true,
+      note: note,
+    );
+
+    setState(() {
+      _selectedCardId = newCard.id;
+    });
+    WorkspaceStorageService.instance.scheduleAutoSave(note);
   }
 
   void _eraseStrokesNear(Offset canvasPoint) {

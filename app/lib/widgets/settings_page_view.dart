@@ -1,5 +1,6 @@
 import 'dart:ui';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import '../theme/moscaro_v2_tokens.dart';
 import 'settings_models.dart';
 import 'settings_slider_tile.dart';
@@ -7,6 +8,7 @@ import 'settings_toggle_tile.dart';
 import 'settings_shortcuts_view.dart';
 import 'settings_sandbox_card.dart';
 import 'settings_theme_view.dart';
+import 'ai_provider_help_button.dart';
 import '../theme/moscaro_theme_controller.dart';
 import '../services/workspace_storage_service.dart';
 import '../services/windows_file_dialog_service.dart';
@@ -34,8 +36,35 @@ class SettingsPageView extends StatefulWidget {
 }
 
 class _SettingsPageViewState extends State<SettingsPageView> {
+  final ScrollController _scrollController = ScrollController();
   bool _isResetHovered = false;
   bool _isApiKeyObscured = true;
+  bool _isOpenAiKeyObscured = true;
+  bool _isClaudeKeyObscured = true;
+
+  late final TextEditingController _geminiController;
+  late final TextEditingController _openAiController;
+  late final TextEditingController _claudeController;
+  late final TextEditingController _ollamaController;
+
+  @override
+  void initState() {
+    super.initState();
+    _geminiController = TextEditingController(text: widget.settings.geminiApiKey);
+    _openAiController = TextEditingController(text: widget.settings.openAiApiKey);
+    _claudeController = TextEditingController(text: widget.settings.claudeApiKey);
+    _ollamaController = TextEditingController(text: widget.settings.ollamaEndpointUrl);
+  }
+
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    _geminiController.dispose();
+    _openAiController.dispose();
+    _claudeController.dispose();
+    _ollamaController.dispose();
+    super.dispose();
+  }
 
   String _getCategorySubtitle() {
     switch (widget.activeCategory) {
@@ -65,7 +94,9 @@ class _SettingsPageViewState extends State<SettingsPageView> {
           width: double.infinity,
           height: double.infinity,
           child: Scrollbar(
+            controller: _scrollController,
             child: SingleChildScrollView(
+              controller: _scrollController,
               padding: const EdgeInsets.only(top: 86, bottom: 32),
               child: Align(
                 alignment: Alignment.topCenter,
@@ -789,31 +820,277 @@ class _SettingsPageViewState extends State<SettingsPageView> {
   }
 
   Widget _buildAiSettings() {
-    final controller = TextEditingController(text: widget.settings.geminiApiKey);
-    final bool hasKey = widget.settings.geminiApiKey.isNotEmpty;
+
+    final bool hasGemini = widget.settings.geminiApiKey.isNotEmpty;
+    final bool hasOpenAi = widget.settings.openAiApiKey.isNotEmpty;
+    final bool hasClaude = widget.settings.claudeApiKey.isNotEmpty;
+    final bool hasOllama = widget.settings.ollamaEndpointUrl.isNotEmpty;
+    final theme = MoscaroThemeController.instance.currentTheme;
+    final accent = theme.accentPrimary;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       key: const ValueKey('ai_settings'),
       children: [
+        // 1. Banner de Privacidade Local-First
         Container(
-          margin: const EdgeInsets.only(bottom: 12),
-          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
+          margin: const EdgeInsets.only(bottom: 16),
+          padding: const EdgeInsets.all(14),
           decoration: BoxDecoration(
-            color: const Color(0xFF0C1422).withValues(alpha: 0.45),
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: Colors.white.withValues(alpha: 0.08), width: 1.1),
+            color: accent.withValues(alpha: 0.08),
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: accent.withValues(alpha: 0.3)),
           ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+          child: Row(
             children: [
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  const Text(
-                    'Chave de API do Google Gemini',
-                    style: TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w600, letterSpacing: -0.1),
+              SvgIcon(assetName: 'ai', color: accent, size: 20),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  'Privacidade Garantida: Suas chaves de API ficam salvas exclusivamente no seu computador e nenhuma informação passa por servidores intermediários.',
+                  style: TextStyle(
+                    color: MoscaroTokens.textSecondary,
+                    fontSize: 12,
+                    height: 1.35,
                   ),
+                ),
+              ),
+            ],
+          ),
+        ),
+
+        // 2. Provedores de IA & Chaves de API
+        Padding(
+          padding: const EdgeInsets.only(left: 4, bottom: 8),
+          child: Text(
+            'PROVEDORES & CHAVES DE API',
+            style: TextStyle(color: accent.withValues(alpha: 0.8), fontSize: 11, fontWeight: FontWeight.bold, letterSpacing: 1.0),
+          ),
+        ),
+
+        // Google Gemini
+        _buildApiKeyCard(
+          title: 'Google Gemini API',
+          description: 'Gemini 2.5 Flash & 1.5 Pro. Chave gratuita no Google AI Studio (aistudio.google.com).',
+          hasKey: hasGemini,
+          isEnabled: widget.settings.enableGemini,
+          controller: _geminiController,
+          obscureText: _isApiKeyObscured,
+          hintText: 'AIzaSy...',
+          accentColor: accent,
+          surfaceColor: theme.backgroundSurface,
+          helpInfo: const AiProviderInfo(
+            providerName: 'Google Gemini API',
+            pricingType: '100% Gratuito (com cota)',
+            isFree: true,
+            capabilities: 'Especialista em matemática, integrais/derivadas passo a passo, deduções físicas, OCR de manuscritos e diagramas KaTeX no canvas.',
+            steps: [
+              'Acesse o Google AI Studio (aistudio.google.com).',
+              'Faça login com sua conta Google pessoal ou profissional.',
+              'Clique no botão azul "Get API key" e depois "Create API key".',
+              'Copie a chave gerada (inicia com AIzaSy...) e cole abaixo.',
+            ],
+            officialUrl: 'https://aistudio.google.com/app/apikey',
+            buttonLabel: 'Abrir Google AI Studio (Gratuito)',
+          ),
+          onToggleObscure: () => setState(() => _isApiKeyObscured = !_isApiKeyObscured),
+          onChanged: (val) => widget.onUpdateSettings(widget.settings.copyWith(geminiApiKey: val.trim())),
+          onToggleEnable: (val) => widget.onUpdateSettings(widget.settings.copyWith(enableGemini: val)),
+        ),
+
+        // OpenAI
+        _buildApiKeyCard(
+          title: 'OpenAI API',
+          description: 'GPT-4o e GPT-4o mini para raciocínio lógico e análise multimodal.',
+          hasKey: hasOpenAi,
+          isEnabled: widget.settings.enableOpenAi,
+          controller: _openAiController,
+          obscureText: _isOpenAiKeyObscured,
+          hintText: 'sk-proj-...',
+          accentColor: accent,
+          surfaceColor: theme.backgroundSurface,
+          helpInfo: const AiProviderInfo(
+            providerName: 'OpenAI API',
+            pricingType: 'Pago (Pré-pago a partir de \$5)',
+            isFree: false,
+            capabilities: 'GPT-4o e GPT-4o mini. Alto nível de precisão algorítmica, raciocínio lógico formal e estruturação de cartões de estudo.',
+            steps: [
+              'Acesse o portal de desenvolvedores da OpenAI (platform.openai.com).',
+              'Faça login e adicione créditos na seção "Billing" (mínimo \$5).',
+              'Acesse "API Keys", clique em "Create new secret key" e copie o token.',
+              'Cole a chave gerada (inicia com sk-proj-...) no campo abaixo.',
+            ],
+            officialUrl: 'https://platform.openai.com/api-keys',
+            buttonLabel: 'Abrir OpenAI Platform',
+          ),
+          onToggleObscure: () => setState(() => _isOpenAiKeyObscured = !_isOpenAiKeyObscured),
+          onChanged: (val) => widget.onUpdateSettings(widget.settings.copyWith(openAiApiKey: val.trim())),
+          onToggleEnable: (val) => widget.onUpdateSettings(widget.settings.copyWith(enableOpenAi: val)),
+        ),
+
+        // Anthropic Claude
+        _buildApiKeyCard(
+          title: 'Anthropic Claude API',
+          description: 'Claude 3.5 Sonnet & Haiku para escrita científica e código estruturado.',
+          hasKey: hasClaude,
+          isEnabled: widget.settings.enableClaude,
+          controller: _claudeController,
+          obscureText: _isClaudeKeyObscured,
+          hintText: 'sk-ant-...',
+          accentColor: accent,
+          surfaceColor: theme.backgroundSurface,
+          helpInfo: const AiProviderInfo(
+            providerName: 'Anthropic Claude API',
+            pricingType: 'Pago (Pré-pago a partir de \$5)',
+            isFree: false,
+            capabilities: 'Claude 3.5 Sonnet. Didática refinada para escrita científica, resumos acadêmicos e formatação limpa de LaTeX e teoremas.',
+            steps: [
+              'Acesse o Console da Anthropic (console.anthropic.com).',
+              'Configure sua forma de pagamento em "Plans & Billing".',
+              'Vá para "API Keys", gere uma nova chave ("Create Key") e copie.',
+              'Cole a chave gerada (inicia com sk-ant-...) no campo abaixo.',
+            ],
+            officialUrl: 'https://console.anthropic.com/settings/keys',
+            buttonLabel: 'Abrir Anthropic Console',
+          ),
+          onToggleObscure: () => setState(() => _isClaudeKeyObscured = !_isClaudeKeyObscured),
+          onChanged: (val) => widget.onUpdateSettings(widget.settings.copyWith(claudeApiKey: val.trim())),
+          onToggleEnable: (val) => widget.onUpdateSettings(widget.settings.copyWith(enableClaude: val)),
+        ),
+
+        // Ollama Local
+        _buildApiKeyCard(
+          title: 'Ollama Local (100% Offline)',
+          description: 'URL do servidor local do Ollama para executar DeepSeek-R1, Llama 3 ou Qwen sem internet.',
+          hasKey: hasOllama,
+          isEnabled: widget.settings.enableOllama,
+          controller: _ollamaController,
+          obscureText: false,
+          hintText: 'http://localhost:11434',
+          accentColor: accent,
+          surfaceColor: theme.backgroundSurface,
+          badgeLabel: hasOllama ? 'Ativo' : 'Desativado',
+          helpInfo: const AiProviderInfo(
+            providerName: 'Ollama Local (Offline)',
+            pricingType: '100% Gratuito & Offline',
+            isFree: true,
+            capabilities: 'Privacidade total: executa LLMs como DeepSeek-R1, Llama 3.3 e Qwen 2.5 diretamente no hardware da sua máquina sem enviar dados para nuvem.',
+            steps: [
+              'Baixe e instale o aplicativo Ollama em ollama.com.',
+              'Abra o PowerShell ou Terminal e digite: ollama run deepseek-r1:8b',
+              'Mantenha o Ollama rodando em segundo plano.',
+              'Confirme se a URL abaixo é http://localhost:11434.',
+            ],
+            officialUrl: 'https://ollama.com',
+            buttonLabel: 'Baixar Ollama no Site Oficial',
+          ),
+          onToggleObscure: null,
+          onChanged: (val) => widget.onUpdateSettings(widget.settings.copyWith(ollamaEndpointUrl: val.trim())),
+          onToggleEnable: (val) => widget.onUpdateSettings(widget.settings.copyWith(enableOllama: val)),
+        ),
+
+        const SizedBox(height: 12),
+
+        // 3. Toggles Granulares de Privacidade e Funcionalidades
+        Padding(
+          padding: const EdgeInsets.only(left: 4, bottom: 8),
+          child: Text(
+            'CONTROLE DE RECURSOS & PRIVACIDADE',
+            style: TextStyle(color: accent.withValues(alpha: 0.8), fontSize: 11, fontWeight: FontWeight.bold, letterSpacing: 1.0),
+          ),
+        ),
+
+        SettingsToggleTile(
+          title: 'Chat Conversacional na Sidebar',
+          description: 'Exibe o painel lateral de chat com suporte a LaTeX, KaTeX e histórico.',
+          value: widget.settings.enableAiSidebar,
+          onChanged: (val) => widget.onUpdateSettings(widget.settings.copyWith(enableAiSidebar: val)),
+        ),
+
+        SettingsToggleTile(
+          title: 'Botão de IA na Seleção (Lasso & Cards)',
+          description: 'Exibe o botão de ação rápida na pílula flutuante ao selecionar elementos no canvas.',
+          value: widget.settings.enableAiSelectionActions,
+          onChanged: (val) => widget.onUpdateSettings(widget.settings.copyWith(enableAiSelectionActions: val)),
+        ),
+
+        SettingsToggleTile(
+          title: 'Comandos Inline (/ai) nos Cards',
+          description: 'Permite invocar a IA diretamente dentro dos blocos de texto digitando /ai.',
+          value: widget.settings.enableAiInlineCommands,
+          onChanged: (val) => widget.onUpdateSettings(widget.settings.copyWith(enableAiInlineCommands: val)),
+        ),
+
+        SettingsToggleTile(
+          title: 'Geração de Diagramas Mermaid',
+          description: 'Permite à IA criar fluxogramas, árvores e diagramas técnicos no canvas.',
+          value: widget.settings.enableAiMermaidDiagrams,
+          onChanged: (val) => widget.onUpdateSettings(widget.settings.copyWith(enableAiMermaidDiagrams: val)),
+        ),
+
+        SettingsToggleTile(
+          title: 'Reconhecimento de Tinta (OCR para LaTeX)',
+          description: 'Habilita a conversão de equações manuscritas com a caneta em Cards STEM formatados.',
+          value: widget.settings.enableAiHandwritingOcr,
+          onChanged: (val) => widget.onUpdateSettings(widget.settings.copyWith(enableAiHandwritingOcr: val)),
+        ),
+
+        SettingsToggleTile(
+          title: 'Modo Tutor Socrático',
+          description: 'Quando ativado, a IA prioriza formular perguntas e dicas progressivas (> [!TIP]) em vez de apenas dar a resposta pronta.',
+          value: widget.settings.enableAiSocraticMode,
+          onChanged: (val) => widget.onUpdateSettings(widget.settings.copyWith(enableAiSocraticMode: val)),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildApiKeyCard({
+    required String title,
+    required String description,
+    required bool hasKey,
+    required bool isEnabled,
+    required TextEditingController controller,
+    required bool obscureText,
+    required String hintText,
+    required Color accentColor,
+    required Color surfaceColor,
+    required AiProviderInfo helpInfo,
+    String? badgeLabel,
+    VoidCallback? onToggleObscure,
+    required ValueChanged<String> onChanged,
+    required ValueChanged<bool> onToggleEnable,
+  }) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
+      decoration: BoxDecoration(
+        color: surfaceColor.withValues(alpha: 0.45),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.08), width: 1.1),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                title,
+                style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w600, letterSpacing: -0.1),
+              ),
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Switch(
+                    value: isEnabled,
+                    onChanged: onToggleEnable,
+                    activeColor: accentColor,
+                    inactiveTrackColor: Colors.white.withValues(alpha: 0.1),
+                  ),
+                  const SizedBox(width: 8),
+                  AiProviderHelpButton(info: helpInfo),
+                  const SizedBox(width: 8),
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                     decoration: BoxDecoration(
@@ -840,7 +1117,7 @@ class _SettingsPageViewState extends State<SettingsPageView> {
                         ),
                         const SizedBox(width: 5),
                         Text(
-                          hasKey ? 'Configurada' : 'Não configurada',
+                          badgeLabel ?? (hasKey ? 'Configurada' : 'Não configurada'),
                           style: TextStyle(
                             color: hasKey ? MoscaroTokens.auroraGreen : Colors.amber,
                             fontSize: 11,
@@ -852,47 +1129,71 @@ class _SettingsPageViewState extends State<SettingsPageView> {
                   ),
                 ],
               ),
-              const SizedBox(height: 4),
-              Text(
-                'Permite ao conNotes resolver equações LaTeX e gerar gráficos no canvas localmente.',
-                style: TextStyle(color: Colors.white.withValues(alpha: 0.55), fontSize: 12),
-              ),
-              const SizedBox(height: 14),
-              TextField(
-                controller: controller,
-                obscureText: _isApiKeyObscured,
-                style: const TextStyle(color: Colors.white, fontSize: 13, fontFamily: 'monospace'),
-                decoration: InputDecoration(
-                  hintText: 'Cole sua Gemini API Key aqui (AIza...)',
-                  hintStyle: const TextStyle(color: Colors.white30, fontSize: 13),
-                  filled: true,
-                  fillColor: Colors.black.withValues(alpha: 0.35),
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-                  prefixIcon: const Icon(Icons.key_rounded, size: 16, color: Colors.white38),
-                  suffixIcon: IconButton(
-                    icon: Icon(
-                      _isApiKeyObscured ? Icons.visibility_off_outlined : Icons.visibility_outlined,
-                      size: 16,
-                      color: Colors.white38,
-                    ),
-                    onPressed: () => setState(() => _isApiKeyObscured = !_isApiKeyObscured),
-                  ),
-                  enabledBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                    borderSide: BorderSide(color: Colors.white.withValues(alpha: 0.12)),
-                  ),
-                  focusedBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                    borderSide: BorderSide(color: MoscaroTokens.auroraBlue, width: 1.3),
-                  ),
-                ),
-                onSubmitted: (val) => widget.onUpdateSettings(widget.settings.copyWith(geminiApiKey: val.trim())),
-                onChanged: (val) => widget.onUpdateSettings(widget.settings.copyWith(geminiApiKey: val.trim())),
-              ),
             ],
           ),
-        ),
-      ],
+          const SizedBox(height: 4),
+          Text(
+            description,
+            style: TextStyle(color: Colors.white.withValues(alpha: 0.55), fontSize: 12),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: controller,
+            obscureText: obscureText,
+            style: const TextStyle(color: Colors.white, fontSize: 13, fontFamily: 'monospace'),
+            decoration: InputDecoration(
+              hintText: hintText,
+              hintStyle: const TextStyle(color: Colors.white30, fontSize: 13),
+              filled: true,
+              fillColor: Colors.black.withValues(alpha: 0.35),
+              contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+              prefixIcon: const Icon(Icons.key_rounded, size: 16, color: Colors.white38),
+              suffixIcon: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  IconButton(
+                    icon: const Icon(
+                      Icons.content_paste_rounded,
+                      size: 16,
+                      color: Colors.white54,
+                    ),
+                    tooltip: 'Colar da área de transferência',
+                    onPressed: () async {
+                      final data = await Clipboard.getData(Clipboard.kTextPlain);
+                      if (data != null && data.text != null && data.text!.isNotEmpty) {
+                        final val = data.text!.trim();
+                        controller.text = val;
+                        controller.selection = TextSelection.collapsed(offset: val.length);
+                        onChanged(val);
+                      }
+                    },
+                  ),
+                  if (onToggleObscure != null)
+                    IconButton(
+                      icon: Icon(
+                        obscureText ? Icons.visibility_off_outlined : Icons.visibility_outlined,
+                        size: 16,
+                        color: Colors.white38,
+                      ),
+                      tooltip: obscureText ? 'Mostrar chave' : 'Ocultar chave',
+                      onPressed: onToggleObscure,
+                    ),
+                ],
+              ),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: BorderSide(color: Colors.white.withValues(alpha: 0.12)),
+              ),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: BorderSide(color: accentColor, width: 1.3),
+              ),
+            ),
+            onSubmitted: onChanged,
+            onChanged: onChanged,
+          ),
+        ],
+      ),
     );
   }
 }

@@ -255,7 +255,7 @@ class SmartShapeEngine {
 
   /// Reconhece automaticamente com alta precisão se um traço corresponde a uma forma geométrica
   static ShapeType? recognizeDrawnShape(List<StrokePoint> strokePoints) {
-    if (strokePoints.length < 8) return null;
+    if (strokePoints.length < 15) return null;
 
     final first = strokePoints.first.point;
     final last = strokePoints.last.point;
@@ -280,7 +280,7 @@ class SmartShapeEngine {
 
     final bounds = Rect.fromLTRB(minX, minY, maxX, maxY);
     final directDist = (last - first).distance;
-    final isClosed = directDist < pathLength * 0.32;
+    final isClosed = directDist < pathLength * 0.20;
 
     // 2. Traço Aberto: Linha Reta vs Seta vs Seta Dupla
     if (!isClosed) {
@@ -310,7 +310,7 @@ class SmartShapeEngine {
         }
       }
 
-      if (directRatio > 0.75) {
+      if (directRatio > 0.85) {
         return ShapeType.line;
       }
       return null;
@@ -368,7 +368,7 @@ class SmartShapeEngine {
     // 3.5 Mais de 6 cantos ou contorno irregular -> Testa circularidade
     final area = bounds.width * bounds.height * 0.785;
     final circularity = (4.0 * math.pi * area) / (pathLength * pathLength);
-    if (circularity > 0.65) {
+    if (circularity > 0.70) {
       final ratio = bounds.width / (bounds.height + 0.001);
       if (ratio >= 0.80 && ratio <= 1.25) {
         return ShapeType.circle;
@@ -403,7 +403,7 @@ class SmartShapeEngine {
       }
     }
 
-    const minCornerAngle = 0.85; // ~48.7 graus de deflexão angular (evita falsos cantos em traços ondulados)
+    const minCornerAngle = 1.13; // ~65 graus de deflexão angular (evita falsos cantos em traços ondulados)
     final minDistanceBetweenCorners = n / 8.0;
     final List<int> cornerIndices = [];
 

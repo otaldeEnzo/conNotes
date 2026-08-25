@@ -9,6 +9,8 @@ class SettingsService {
   SettingsService._internal();
 
   static const String _settingsFileName = 'settings.json';
+  AppSettingsState _settings = const AppSettingsState();
+  AppSettingsState get settings => _settings;
 
   File _getSettingsFile() {
     return File(_settingsFileName);
@@ -22,16 +24,19 @@ class SettingsService {
         final content = await file.readAsString();
         final json = jsonDecode(content) as Map<String, dynamic>;
         debugPrint('[SettingsService] Configurações carregadas do disco.');
-        return AppSettingsState.fromJson(json);
+        _settings = AppSettingsState.fromJson(json);
+        return _settings;
       }
     } catch (e) {
       debugPrint('[SettingsService] Erro ao carregar configurações: $e');
     }
-    return AppSettingsState.defaults();
+    _settings = AppSettingsState.defaults();
+    return _settings;
   }
 
   /// Salva as configurações de forma assíncrona no disco local
   Future<void> saveSettings(AppSettingsState settings) async {
+    _settings = settings;
     try {
       final file = _getSettingsFile();
       final content = const JsonEncoder.withIndent('  ').convert(settings.toJson());

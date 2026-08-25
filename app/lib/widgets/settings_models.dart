@@ -82,9 +82,23 @@ class AppSettingsState {
   final double angleSnapStepDegrees;
   final double inkSnapTolerance;
 
-  // 5. Inteligência Artificial STEM
+  // 5. Inteligência Artificial STEM (Multi-Provedor & Privacidade)
   final String geminiApiKey;
-  final String defaultAiModel;
+  final String openAiApiKey;
+  final String claudeApiKey;
+  final String ollamaEndpointUrl;
+  final String activeAiModelId;
+  final bool enableGemini;
+  final bool enableOpenAi;
+  final bool enableClaude;
+  final bool enableOllama;
+
+  final bool enableAiSidebar;
+  final bool enableAiSelectionActions;
+  final bool enableAiInlineCommands;
+  final bool enableAiSocraticMode;
+  final bool enableAiMermaidDiagrams;
+  final bool enableAiHandwritingOcr;
 
   const AppSettingsState({
     this.activeThemeId = 'moscaro_cyan',
@@ -109,7 +123,20 @@ class AppSettingsState {
     this.angleSnapStepDegrees = 15.0,
     this.inkSnapTolerance = 24.0,
     this.geminiApiKey = '',
-    this.defaultAiModel = 'gemini-2.5-flash',
+    this.openAiApiKey = '',
+    this.claudeApiKey = '',
+    this.ollamaEndpointUrl = '',
+    this.activeAiModelId = 'gemini-2.5-flash',
+    this.enableGemini = false,
+    this.enableOpenAi = false,
+    this.enableClaude = false,
+    this.enableOllama = false,
+    this.enableAiSidebar = true,
+    this.enableAiSelectionActions = true,
+    this.enableAiInlineCommands = true,
+    this.enableAiSocraticMode = false,
+    this.enableAiMermaidDiagrams = true,
+    this.enableAiHandwritingOcr = true,
   });
 
   factory AppSettingsState.defaults() => const AppSettingsState();
@@ -137,7 +164,20 @@ class AppSettingsState {
     double? angleSnapStepDegrees,
     double? inkSnapTolerance,
     String? geminiApiKey,
-    String? defaultAiModel,
+    String? openAiApiKey,
+    String? claudeApiKey,
+    String? ollamaEndpointUrl,
+    String? activeAiModelId,
+    bool? enableGemini,
+    bool? enableOpenAi,
+    bool? enableClaude,
+    bool? enableOllama,
+    bool? enableAiSidebar,
+    bool? enableAiSelectionActions,
+    bool? enableAiInlineCommands,
+    bool? enableAiSocraticMode,
+    bool? enableAiMermaidDiagrams,
+    bool? enableAiHandwritingOcr,
   }) {
     return AppSettingsState(
       activeThemeId: activeThemeId ?? this.activeThemeId,
@@ -162,7 +202,20 @@ class AppSettingsState {
       angleSnapStepDegrees: angleSnapStepDegrees ?? this.angleSnapStepDegrees,
       inkSnapTolerance: (inkSnapTolerance ?? this.inkSnapTolerance).clamp(12.0, 40.0),
       geminiApiKey: geminiApiKey ?? this.geminiApiKey,
-      defaultAiModel: defaultAiModel ?? this.defaultAiModel,
+      openAiApiKey: openAiApiKey ?? this.openAiApiKey,
+      claudeApiKey: claudeApiKey ?? this.claudeApiKey,
+      ollamaEndpointUrl: ollamaEndpointUrl ?? this.ollamaEndpointUrl,
+      activeAiModelId: activeAiModelId ?? this.activeAiModelId,
+      enableGemini: enableGemini ?? this.enableGemini,
+      enableOpenAi: enableOpenAi ?? this.enableOpenAi,
+      enableClaude: enableClaude ?? this.enableClaude,
+      enableOllama: enableOllama ?? this.enableOllama,
+      enableAiSidebar: enableAiSidebar ?? this.enableAiSidebar,
+      enableAiSelectionActions: enableAiSelectionActions ?? this.enableAiSelectionActions,
+      enableAiInlineCommands: enableAiInlineCommands ?? this.enableAiInlineCommands,
+      enableAiSocraticMode: enableAiSocraticMode ?? this.enableAiSocraticMode,
+      enableAiMermaidDiagrams: enableAiMermaidDiagrams ?? this.enableAiMermaidDiagrams,
+      enableAiHandwritingOcr: enableAiHandwritingOcr ?? this.enableAiHandwritingOcr,
     );
   }
 
@@ -190,7 +243,20 @@ class AppSettingsState {
       'angleSnapStepDegrees': angleSnapStepDegrees,
       'inkSnapTolerance': inkSnapTolerance,
       'geminiApiKey': geminiApiKey,
-      'defaultAiModel': defaultAiModel,
+      'openAiApiKey': openAiApiKey,
+      'claudeApiKey': claudeApiKey,
+      'ollamaEndpointUrl': ollamaEndpointUrl,
+      'activeAiModelId': activeAiModelId,
+      'enableGemini': enableGemini,
+      'enableOpenAi': enableOpenAi,
+      'enableClaude': enableClaude,
+      'enableOllama': enableOllama,
+      'enableAiSidebar': enableAiSidebar,
+      'enableAiSelectionActions': enableAiSelectionActions,
+      'enableAiInlineCommands': enableAiInlineCommands,
+      'enableAiSocraticMode': enableAiSocraticMode,
+      'enableAiMermaidDiagrams': enableAiMermaidDiagrams,
+      'enableAiHandwritingOcr': enableAiHandwritingOcr,
     };
   }
 
@@ -226,7 +292,20 @@ class AppSettingsState {
       angleSnapStepDegrees: (json['angleSnapStepDegrees'] as num?)?.toDouble() ?? 15.0,
       inkSnapTolerance: (json['inkSnapTolerance'] as num?)?.toDouble() ?? 24.0,
       geminiApiKey: json['geminiApiKey'] as String? ?? '',
-      defaultAiModel: json['defaultAiModel'] as String? ?? 'gemini-2.5-flash',
+      openAiApiKey: json['openAiApiKey'] as String? ?? '',
+      claudeApiKey: json['claudeApiKey'] as String? ?? '',
+      ollamaEndpointUrl: json['ollamaEndpointUrl'] as String? ?? '',
+      activeAiModelId: json['activeAiModelId'] as String? ?? (json['defaultAiModel'] as String? ?? 'gemini-2.5-flash'),
+      enableGemini: json['enableGemini'] as bool? ?? false,
+      enableOpenAi: json['enableOpenAi'] as bool? ?? false,
+      enableClaude: json['enableClaude'] as bool? ?? false,
+      enableOllama: json['enableOllama'] as bool? ?? false,
+      enableAiSidebar: json['enableAiSidebar'] as bool? ?? true,
+      enableAiSelectionActions: json['enableAiSelectionActions'] as bool? ?? true,
+      enableAiInlineCommands: json['enableAiInlineCommands'] as bool? ?? true,
+      enableAiSocraticMode: json['enableAiSocraticMode'] as bool? ?? false,
+      enableAiMermaidDiagrams: json['enableAiMermaidDiagrams'] as bool? ?? true,
+      enableAiHandwritingOcr: json['enableAiHandwritingOcr'] as bool? ?? true,
     );
   }
 }

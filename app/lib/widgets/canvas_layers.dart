@@ -500,7 +500,7 @@ class StrokePictureCache {
 
     try {
       // 1. Caneta Tinteiro / Caligráfica / Pressão Orgânica (Perfect Freehand)
-      if (stroke.toolType == InkToolType.fountain || stroke.enablePressure) {
+      if ((stroke.toolType == InkToolType.fountain || stroke.enablePressure) && !stroke.isShape) {
         reusablePaint
           ..color = _getStrokeColor(stroke)
           ..style = PaintingStyle.fill;
@@ -576,12 +576,17 @@ class StrokePictureCache {
     final path = Path();
     if (points.isEmpty) return path;
     if (points.length == 1) {
-      path.addOval(Rect.fromCircle(center: points[0].point, radius: 0.1));
+      path.moveTo(points[0].point.dx, points[0].point.dy);
+      path.lineTo(points[0].point.dx, points[0].point.dy);
       return path;
     }
     if (points.length == 2) {
-      path.moveTo(points[0].point.dx, points[0].point.dy);
-      path.lineTo(points[1].point.dx, points[1].point.dy);
+      final p0 = points[0].point;
+      final p1 = points[1].point;
+      final mid = Offset((p0.dx + p1.dx) / 2, (p0.dy + p1.dy) / 2);
+      path.moveTo(p0.dx, p0.dy);
+      path.quadraticBezierTo(p0.dx, p0.dy, mid.dx, mid.dy);
+      path.lineTo(p1.dx, p1.dy);
       return path;
     }
 
@@ -930,7 +935,7 @@ class ActiveStrokePainter extends CustomPainter {
       }
 
       // 1. Caneta Tinteiro / Caligráfica / Pressão Orgânica (Perfect Freehand)
-      if (stroke.toolType == InkToolType.fountain || stroke.enablePressure) {
+      if ((stroke.toolType == InkToolType.fountain || stroke.enablePressure) && !stroke.isShape) {
         _reusablePaint
           ..color = _getStrokeColor(stroke)
           ..style = PaintingStyle.fill;
@@ -982,8 +987,6 @@ class ActiveStrokePainter extends CustomPainter {
 
       if (stroke.cachedPath != null) {
         canvas.drawPath(stroke.cachedPath!, _reusablePaint);
-      } else if (stroke.points.length > 50) {
-        canvas.drawRawPoints(ui.PointMode.polygon, stroke.rawPoints, _reusablePaint);
       } else {
         final path = _buildSmoothCatmullRomPath(stroke.points);
         canvas.drawPath(path, _reusablePaint);
@@ -1007,12 +1010,17 @@ class ActiveStrokePainter extends CustomPainter {
     final path = Path();
     if (points.isEmpty) return path;
     if (points.length == 1) {
-      path.addOval(Rect.fromCircle(center: points[0].point, radius: 0.1));
+      path.moveTo(points[0].point.dx, points[0].point.dy);
+      path.lineTo(points[0].point.dx, points[0].point.dy);
       return path;
     }
     if (points.length == 2) {
-      path.moveTo(points[0].point.dx, points[0].point.dy);
-      path.lineTo(points[1].point.dx, points[1].point.dy);
+      final p0 = points[0].point;
+      final p1 = points[1].point;
+      final mid = Offset((p0.dx + p1.dx) / 2, (p0.dy + p1.dy) / 2);
+      path.moveTo(p0.dx, p0.dy);
+      path.quadraticBezierTo(p0.dx, p0.dy, mid.dx, mid.dy);
+      path.lineTo(p1.dx, p1.dy);
       return path;
     }
 

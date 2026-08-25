@@ -163,6 +163,61 @@ class SvgIcon extends StatelessWidget {
   <line x1="12" y1="17" x2="12" y2="22"/>
   <path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24Z"/>
 </svg>''',
+    'select': '''<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+  <path d="M5 3a2 2 0 0 0-2 2"/>
+  <path d="M19 3a2 2 0 0 1 2 2"/>
+  <path d="M21 19a2 2 0 0 1-2 2"/>
+  <path d="M5 21a2 2 0 0 1-2-2"/>
+  <path d="M9 3h2"/>
+  <path d="M9 21h2"/>
+  <path d="M13 3h2"/>
+  <path d="M13 21h2"/>
+  <path d="M3 9v2"/>
+  <path d="M21 9v2"/>
+  <path d="M3 13v2"/>
+  <path d="M21 13v2"/>
+</svg>''',
+    'ai': '''<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+  <path d="M12 2v4"/>
+  <path d="M12 18v4"/>
+  <path d="m4.93 4.93 2.83 2.83"/>
+  <path d="m16.24 16.24 2.83 2.83"/>
+  <path d="M2 12h4"/>
+  <path d="M18 12h4"/>
+  <path d="m4.93 19.07 2.83-2.83"/>
+  <path d="m16.24 7.76 2.83-2.83"/>
+</svg>''',
+    'shapes': '''<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+  <path d="M8.3 10a.7.7 0 0 1-.626-1.079L11.4 3.1a.7.7 0 0 1 1.198 0l3.726 5.82A.7.7 0 0 1 15.7 10z"/>
+  <rect x="3" y="14" width="7" height="7" rx="1"/>
+  <circle cx="17.5" cy="17.5" r="3.5"/>
+</svg>''',
+    'grid': '''<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+  <rect width="18" height="18" x="3" y="3" rx="2"/>
+  <path d="M3 9h18"/>
+  <path d="M3 15h18"/>
+  <path d="M9 3v18"/>
+  <path d="M15 3v18"/>
+</svg>''',
+    'sparkle': '''<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+  <path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z"/>
+</svg>''',
+    'pen': '''<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+  <path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/>
+</svg>''',
+    'eraser': '''<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+  <path d="m7 21-4.3-4.3c-1-1-1-2.5 0-3.4l9.6-9.6c1-1 2.5-1 3.4 0l5.6 5.6c1 1 1 2.5 0 3.4L13 21"/>
+  <path d="M22 21H7"/>
+  <path d="m5 11 9 9"/>
+</svg>''',
+    'undo': '''<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+  <path d="M3 7v6h6"/>
+  <path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13"/>
+</svg>''',
+    'redo': '''<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+  <path d="M21 7v6h-6"/>
+  <path d="M3 17a9 9 0 0 1 9-9 9 9 0 0 1 6 2.3l3 2.7"/>
+</svg>''',
     'lock': '''<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
   <rect width="18" height="11" x="3" y="11" rx="2" ry="2"/>
   <path d="M7 11V7a5 5 0 0 1 10 0v4"/>

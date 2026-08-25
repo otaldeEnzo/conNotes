@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import '../theme/moscaro_v2_tokens.dart';
+import '../theme/moscaro_theme_controller.dart';
 
 /// Componente de Alternância (Switch / Toggle) estilizado no padrão Moscaro v2 Pro Max.
 class SettingsToggleTile extends StatefulWidget {
@@ -25,6 +25,9 @@ class _SettingsToggleTileState extends State<SettingsToggleTile> {
 
   @override
   Widget build(BuildContext context) {
+    final theme = MoscaroThemeController.instance.currentTheme;
+    final accent = theme.accentPrimary;
+
     return MouseRegion(
       onEnter: (_) => setState(() => _isHovered = true),
       onExit: (_) => setState(() => _isHovered = false),
@@ -37,19 +40,19 @@ class _SettingsToggleTileState extends State<SettingsToggleTile> {
           padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
           decoration: BoxDecoration(
             color: _isHovered
-                ? const Color(0xFF10192A).withValues(alpha: 0.6)
-                : const Color(0xFF0C1422).withValues(alpha: 0.45),
+                ? theme.backgroundSurface.withValues(alpha: 0.65)
+                : theme.backgroundSurface.withValues(alpha: 0.45),
             borderRadius: BorderRadius.circular(16),
             border: Border.all(
               color: _isHovered
-                  ? MoscaroTokens.auroraBlue.withValues(alpha: 0.4)
+                  ? accent.withValues(alpha: 0.45)
                   : Colors.white.withValues(alpha: 0.08),
               width: 1.1,
             ),
             boxShadow: _isHovered
                 ? [
                     BoxShadow(
-                      color: MoscaroTokens.auroraBlue.withValues(alpha: 0.12),
+                      color: accent.withValues(alpha: 0.12),
                       blurRadius: 16,
                       offset: const Offset(0, 4),
                     ),
@@ -93,18 +96,18 @@ class _SettingsToggleTileState extends State<SettingsToggleTile> {
                 decoration: BoxDecoration(
                   borderRadius: BorderRadius.circular(16),
                   color: widget.value
-                      ? MoscaroTokens.auroraBlue.withValues(alpha: 0.28)
+                      ? accent.withValues(alpha: 0.32)
                       : Colors.white.withValues(alpha: 0.06),
                   border: Border.all(
                     color: widget.value
-                        ? MoscaroTokens.auroraBlue.withValues(alpha: 0.85)
+                        ? accent.withValues(alpha: 0.85)
                         : Colors.white.withValues(alpha: 0.18),
                     width: 1.2,
                   ),
                   boxShadow: widget.value
                       ? [
                           BoxShadow(
-                            color: MoscaroTokens.auroraBlue.withValues(alpha: 0.35),
+                            color: accent.withValues(alpha: 0.35),
                             blurRadius: 10,
                             spreadRadius: -1,
                           ),
@@ -120,7 +123,7 @@ class _SettingsToggleTileState extends State<SettingsToggleTile> {
                     height: 18,
                     decoration: BoxDecoration(
                       shape: BoxShape.circle,
-                      color: widget.value ? MoscaroTokens.auroraBlue : Colors.white70,
+                      color: widget.value ? accent : Colors.white70,
                       boxShadow: [
                         BoxShadow(
                           color: Colors.black.withValues(alpha: 0.4),

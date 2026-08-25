@@ -49,6 +49,13 @@ class _CardSlashCommandPopoverState extends State<CardSlashCommandPopover> {
 
   static const List<SlashCommandItem> _allCommands = [
     SlashCommandItem(
+      key: 'ia ai assistente prompt pergunta resolver gerar',
+      title: 'Pedir à IA STEM (/ai)',
+      subtitle: 'Gera deduções, fórmulas LaTeX ou explicações',
+      icon: Icons.auto_awesome_rounded,
+      snippet: '> [!TIP]\n> IA: Digite sua dúvida ou use a Sidebar de IA para gerar novos cards.',
+    ),
+    SlashCommandItem(
       key: 'dica tip insight sugestao',
       title: 'Callout Dica / Insight',
       subtitle: 'Caixa de destaque com ícone e borda ciano',

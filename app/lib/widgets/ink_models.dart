@@ -78,6 +78,7 @@ class InkStroke {
   final double strokeWidth;
   final InkToolType toolType;
   final bool enablePressure;
+  final bool isShape; // Flag para formas geométricas (devem ser renderizadas como stroke, não fill)
   final Offset transform; // Usado para Flyweight pattern (compartilha a geometria realocando apenas a posição visual)
   Rect? boundingBox; // Para Viewport Culling (BoundingBox final JÁ INCLUI o transform)
   Path? cachedPath; // Caminho pré-calculado (no espaço local, SEM transform) para renderização instantânea durante Pan/Zoom
@@ -90,6 +91,7 @@ class InkStroke {
     required this.strokeWidth,
     this.toolType = InkToolType.technical,
     this.enablePressure = false,
+    this.isShape = false,
     this.transform = Offset.zero,
     this.boundingBox,
     this.cachedPath,
@@ -103,6 +105,7 @@ class InkStroke {
       'strokeWidth': strokeWidth,
       'toolType': toolType.name,
       'enablePressure': enablePressure,
+      'isShape': isShape,
       'transform': {'x': transform.dx, 'y': transform.dy},
       'points': points.map((p) => p.toJson()).toList(),
     };
@@ -143,6 +146,7 @@ class InkStroke {
       strokeWidth: (json['strokeWidth'] as num?)?.toDouble() ?? 3.0,
       toolType: tool,
       enablePressure: json['enablePressure'] as bool? ?? false,
+      isShape: json['isShape'] as bool? ?? false,
       transform: trans,
     );
   }

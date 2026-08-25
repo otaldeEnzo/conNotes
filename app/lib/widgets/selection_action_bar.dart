@@ -15,6 +15,7 @@ class SelectionActionBar extends StatefulWidget {
   final GestureDragEndCallback? onRotatePanEnd;
   final VoidCallback onDelete;
   final VoidCallback onDeselect;
+  final VoidCallback? onAskAi;
 
   const SelectionActionBar({
     super.key,
@@ -27,6 +28,7 @@ class SelectionActionBar extends StatefulWidget {
     this.onRotatePanEnd,
     required this.onDelete,
     required this.onDeselect,
+    this.onAskAi,
   });
 
   @override
@@ -108,6 +110,16 @@ class _SelectionActionBarState extends State<SelectionActionBar> {
               // 3. Rotação (Clique: +90° | Arrastar: 360° Livre)
               _buildRotationButton(),
               const SizedBox(width: 4),
+
+              if (widget.onAskAi != null) ...[
+                // 3.5 Perguntar à IA
+                _buildActionButton(
+                  assetName: 'ai',
+                  tooltip: 'Perguntar à IA sobre a seleção',
+                  onPressed: widget.onAskAi!,
+                ),
+                const SizedBox(width: 4),
+              ],
 
               Container(width: 1, height: 16, color: Colors.white24),
               const SizedBox(width: 4),
