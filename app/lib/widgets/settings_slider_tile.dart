@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../theme/moscaro_v2_tokens.dart';
+import '../theme/moscaro_theme_controller.dart';
 
 /// Componente de Controle Deslizante (Slider) estilizado no padrão Moscaro v2 Pro Max.
 class SettingsSliderTile extends StatefulWidget {
@@ -33,6 +34,9 @@ class _SettingsSliderTileState extends State<SettingsSliderTile> {
 
   @override
   Widget build(BuildContext context) {
+    final theme = MoscaroThemeController.instance.currentTheme;
+    final accent = theme.accentPrimary;
+
     final displayStr = widget.formatValue != null
         ? widget.formatValue!(widget.value)
         : widget.value.toStringAsFixed(1);
@@ -50,19 +54,19 @@ class _SettingsSliderTileState extends State<SettingsSliderTile> {
         padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
         decoration: BoxDecoration(
           color: _isHovered
-              ? const Color(0xFF10192A).withValues(alpha: 0.6)
-              : const Color(0xFF0C1422).withValues(alpha: 0.45),
+              ? theme.backgroundSurface.withValues(alpha: 0.65)
+              : theme.backgroundSurface.withValues(alpha: 0.45),
           borderRadius: BorderRadius.circular(16),
           border: Border.all(
             color: _isHovered
-                ? MoscaroTokens.auroraBlue.withValues(alpha: 0.4)
+                ? accent.withValues(alpha: 0.45)
                 : Colors.white.withValues(alpha: 0.08),
             width: 1.1,
           ),
           boxShadow: _isHovered
               ? [
                   BoxShadow(
-                    color: MoscaroTokens.auroraBlue.withValues(alpha: 0.12),
+                    color: accent.withValues(alpha: 0.12),
                     blurRadius: 16,
                     offset: const Offset(0, 4),
                   ),

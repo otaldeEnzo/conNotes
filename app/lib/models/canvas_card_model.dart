@@ -1,3 +1,4 @@
+import 'dart:math' as math;
 import 'dart:ui';
 import 'package:flutter/material.dart';
 
@@ -13,7 +14,7 @@ class CanvasCardModel {
   double y;
   double width;
   double height;
-  double minHeight;
+  final double? _manualMinHeight;
   String content;
   String fontFamily;
   double fontSize;
@@ -33,7 +34,7 @@ class CanvasCardModel {
     required this.y,
     this.width = 340.0,
     this.height = 200.0,
-    this.minHeight = 40.0,
+    double? minHeight,
     this.content = '',
     this.fontFamily = 'Inter',
     this.fontSize = 14.0,
@@ -45,8 +46,119 @@ class CanvasCardModel {
     this.customGlassColor,
     DateTime? createdAt,
     DateTime? updatedAt,
-  })  : createdAt = createdAt ?? DateTime.now(),
+  })  : _manualMinHeight = minHeight,
+        createdAt = createdAt ?? DateTime.now(),
         updatedAt = updatedAt ?? DateTime.now();
+
+  /// Retorna a altura mínima requerida para acomodar todo o conteúdo sem barras de rolagem
+  double get minHeight => calculateMinHeight();
+
+  /// Retorna a área mínima (largura * altura mínima) requerida pelo conteúdo.
+  double get minArea => width * calculateMinHeight();
+
+  /// Calcula a altura mínima necessária para que todo o conteúdo do card caiba
+  /// perfeitamente sem gerar barras de rolagem (scroll) ou avisos de overflow.
+  double calculateMinHeight() {
+    if (isCollapsed) return 36.0;
+
+    const headerHeight = 36.0;
+    const paddingVertical = 24.0; // 8px topo + 8px base + respiro
+    final availableTextWidth = math.max(40.0, width - 46.0); // 14px outer + 4px inner + bordas de cada lado
+
+    if (content.trim().isEmpty) {
+      final titleTp = TextPainter(
+        text: TextSpan(
+          text: 'Card STEM',
+          style: TextStyle(
+            fontFamily: fontFamily,
+            fontSize: fontSize + 2.0,
+            fontWeight: FontWeight.w600,
+            letterSpacing: 0.2,
+          ),
+        ),
+        textDirection: TextDirection.ltr,
+      )..layout(maxWidth: availableTextWidth);
+
+      final descTp = TextPainter(
+        text: TextSpan(
+          text: 'Clique duas vezes para digitar texto, fórmulas LaTeX (\$E=mc^2\$), diagramas Mermaid ou "/" para comandos...',
+          style: TextStyle(
+            fontFamily: fontFamily,
+            fontSize: fontSize,
+            height: 1.4,
+            fontStyle: FontStyle.italic,
+          ),
+        ),
+        textDirection: TextDirection.ltr,
+      )..layout(maxWidth: availableTextWidth);
+
+      final placeholderHeight = headerHeight + 24.0 + titleTp.height + 8.0 + descTp.height + 24.0;
+      return math.max(120.0, placeholderHeight);
+    }
+
+    final rawChunks = content.split('\n---\n');
+    double contentHeight = 0.0;
+
+    for (final chunk in rawChunks) {
+      final trimmed = chunk.trim();
+      if (trimmed.isEmpty && rawChunks.length > 1) continue;
+
+      if (trimmed.startsWith('```mermaid')) {
+        final lineCount = trimmed.split('\n').length;
+        contentHeight += math.max(160.0, lineCount * 22.0) + 20.0;
+      } else if (trimmed.startsWith('```')) {
+        final lineCount = trimmed.split('\n').length;
+        contentHeight += (lineCount * (fontSize * 1.45)) + 40.0;
+      } else if (trimmed.startsWith(r'$$')) {
+        contentHeight += (fontSize * 3.0) + 28.0;
+      } else if (trimmed.startsWith('> [!')) {
+        final lines = trimmed.split('\n');
+        double calloutInner = 36.0;
+        for (final l in lines) {
+          final tp = TextPainter(
+            text: TextSpan(
+              text: l.startsWith('>') ? l.substring(1).trim() : l,
+              style: TextStyle(fontFamily: fontFamily, fontSize: fontSize * 0.95, height: 1.45),
+            ),
+            textDirection: TextDirection.ltr,
+          )..layout(maxWidth: math.max(40.0, availableTextWidth - 28.0));
+          calloutInner += tp.height + 4.0;
+        }
+        contentHeight += calloutInner + 20.0;
+      } else {
+        final lines = chunk.split('\n');
+        for (final line in lines) {
+          final trimmedLine = line.trim();
+          double lineFontSize = fontSize;
+          if (trimmedLine.startsWith('# ')) {
+            lineFontSize = fontSize * 1.5;
+          } else if (trimmedLine.startsWith('## ')) {
+            lineFontSize = fontSize * 1.3;
+          } else if (trimmedLine.startsWith('### ')) {
+            lineFontSize = fontSize * 1.15;
+          }
+
+          final tp = TextPainter(
+            text: TextSpan(
+              text: line.isEmpty ? ' ' : line,
+              style: TextStyle(
+                fontFamily: fontFamily,
+                fontSize: lineFontSize,
+                height: 1.45,
+              ),
+            ),
+            textDirection: TextDirection.ltr,
+          )..layout(maxWidth: availableTextWidth);
+
+          contentHeight += tp.height;
+        }
+        contentHeight += 12.0;
+      }
+    }
+
+    final totalMin = headerHeight + paddingVertical + contentHeight + 24.0;
+    return math.max(110.0, totalMin);
+  }
 
   CanvasCardModel copyWith({
     String? id,
@@ -75,7 +187,7 @@ class CanvasCardModel {
       y: y ?? this.y,
       width: width ?? this.width,
       height: height ?? this.height,
-      minHeight: minHeight ?? this.minHeight,
+      minHeight: minHeight ?? _manualMinHeight,
       content: content ?? this.content,
       fontFamily: fontFamily ?? this.fontFamily,
       fontSize: fontSize ?? this.fontSize,

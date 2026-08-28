@@ -257,13 +257,14 @@ class _SettingsPageViewState extends State<SettingsPageView> {
     final isLight = MoscaroTokens.isLight;
     final textPrimary = MoscaroTokens.textPrimary;
     final textSecondary = MoscaroTokens.textSecondary;
-    final accentCyan = MoscaroTokens.auroraBlue;
+    final theme = MoscaroThemeController.instance.currentTheme;
+    final themeAccent = theme.accentPrimary;
 
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: isLight ? Colors.white.withValues(alpha: 0.6) : const Color(0xFF0C1422).withValues(alpha: 0.45),
+        color: isLight ? Colors.white.withValues(alpha: 0.6) : theme.backgroundSurface.withValues(alpha: 0.45),
         borderRadius: BorderRadius.circular(16),
         border: Border.all(
           color: isLight ? Colors.black.withValues(alpha: 0.08) : Colors.white.withValues(alpha: 0.08),
@@ -277,7 +278,7 @@ class _SettingsPageViewState extends State<SettingsPageView> {
               SvgIcon(
                 name: 'folder',
                 size: 20,
-                color: accentCyan,
+                color: themeAccent,
               ),
               const SizedBox(width: 12),
               Expanded(
@@ -309,9 +310,9 @@ class _SettingsPageViewState extends State<SettingsPageView> {
                 icon: const SvgIcon(name: 'folder', size: 14, color: Colors.white),
                 label: const Text('Alterar Pasta', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: accentCyan.withValues(alpha: 0.25),
+                  backgroundColor: themeAccent.withValues(alpha: 0.25),
                   foregroundColor: Colors.white,
-                  side: BorderSide(color: accentCyan.withValues(alpha: 0.6), width: 1.2),
+                  side: BorderSide(color: themeAccent.withValues(alpha: 0.6), width: 1.2),
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                   padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                   elevation: 0,
@@ -326,13 +327,13 @@ class _SettingsPageViewState extends State<SettingsPageView> {
               color: isLight ? Colors.black.withValues(alpha: 0.04) : Colors.black.withValues(alpha: 0.35),
               borderRadius: BorderRadius.circular(10),
               border: Border.all(
-                color: accentCyan.withValues(alpha: 0.2),
+                color: themeAccent.withValues(alpha: 0.3),
               ),
             ),
             child: Text(
               currentPath.isNotEmpty ? currentPath : 'Padrão: Documentos/conNotes',
               style: TextStyle(
-                color: accentCyan,
+                color: themeAccent,
                 fontSize: 12,
                 fontFamily: 'monospace',
               ),
@@ -348,7 +349,8 @@ class _SettingsPageViewState extends State<SettingsPageView> {
     final isLight = MoscaroTokens.isLight;
     final textPrimary = MoscaroTokens.textPrimary;
     final textSecondary = MoscaroTokens.textSecondary;
-    final accentCyan = MoscaroTokens.auroraBlue;
+    final theme = MoscaroThemeController.instance.currentTheme;
+    final themeAccent = theme.accentPrimary;
     final fontManager = CustomFontManager.instance;
     final textCtrl = TextEditingController();
 
@@ -356,7 +358,7 @@ class _SettingsPageViewState extends State<SettingsPageView> {
       margin: const EdgeInsets.only(bottom: 12),
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: isLight ? Colors.white.withValues(alpha: 0.6) : const Color(0xFF0C1422).withValues(alpha: 0.45),
+        color: isLight ? Colors.white.withValues(alpha: 0.6) : theme.backgroundSurface.withValues(alpha: 0.45),
         borderRadius: BorderRadius.circular(16),
         border: Border.all(
           color: isLight ? Colors.black.withValues(alpha: 0.08) : Colors.white.withValues(alpha: 0.08),
@@ -367,7 +369,7 @@ class _SettingsPageViewState extends State<SettingsPageView> {
         children: [
           Row(
             children: [
-              Icon(Icons.font_download_rounded, size: 20, color: accentCyan),
+              SvgIcon(name: 'typography', size: 20, color: themeAccent),
               const SizedBox(width: 12),
               Expanded(
                 child: Column(
@@ -415,7 +417,7 @@ class _SettingsPageViewState extends State<SettingsPageView> {
                     ),
                     focusedBorder: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(10),
-                      borderSide: BorderSide(color: accentCyan, width: 1.2),
+                      borderSide: BorderSide(color: themeAccent, width: 1.2),
                     ),
                   ),
                   onSubmitted: (val) {
@@ -436,12 +438,12 @@ class _SettingsPageViewState extends State<SettingsPageView> {
                     setState(() {});
                   }
                 },
-                icon: const Icon(Icons.add, size: 16),
+                icon: const SvgIcon(name: 'add', size: 14, color: Colors.white),
                 label: const Text('Adicionar Fonte', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: accentCyan.withValues(alpha: 0.25),
+                  backgroundColor: themeAccent.withValues(alpha: 0.25),
                   foregroundColor: Colors.white,
-                  side: BorderSide(color: accentCyan.withValues(alpha: 0.6), width: 1.2),
+                  side: BorderSide(color: themeAccent.withValues(alpha: 0.6), width: 1.2),
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                   padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
                   elevation: 0,
@@ -459,7 +461,7 @@ class _SettingsPageViewState extends State<SettingsPageView> {
                 return Chip(
                   backgroundColor: isLight ? Colors.black.withValues(alpha: 0.05) : Colors.white.withValues(alpha: 0.08),
                   label: Text(f, style: TextStyle(color: textPrimary, fontSize: 11.5, fontFamily: f)),
-                  deleteIcon: Icon(Icons.close, size: 14, color: textSecondary),
+                  deleteIcon: SvgIcon(name: 'close', size: 12, color: textSecondary),
                   onDeleted: () {
                     fontManager.removeFont(f);
                     setState(() {});

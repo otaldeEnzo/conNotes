@@ -1,3 +1,4 @@
+import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import '../theme/moscaro_v2_tokens.dart';
 import '../theme/moscaro_v2_extension.dart';
@@ -6,14 +7,9 @@ import '../models/canvas_card_model.dart';
 import 'card_format_floating_pill.dart';
 import 'markdown_latex_block_view.dart';
 import 'svg_icon.dart';
+import 'card_resizable_frame.dart';
 
-enum CardResizeHandle {
-  right,
-  bottom,
-  bottomRight,
-}
-
-/// Widget Completo do Card no Canvas Infinito (100% Moscaro Glass + 3 Alças de Seleção).
+/// Widget Completo do Card no Canvas Infinito (100% Moscaro Glass + Regiões Dinâmicas de Redimensionamento).
 class CanvasCardWidget extends StatefulWidget {
   static final Map<String, double> actualHeights = {};
 
@@ -49,16 +45,16 @@ class _CanvasCardWidgetState extends State<CanvasCardWidget> {
   }
 
   Offset? _dragStartPos;
-  double? _initialWidth;
-  double? _initialHeight;
   double? _initialCardX;
   double? _initialCardY;
-  final ValueNotifier<Size?> _dragSizeNotifier = ValueNotifier(null);
   bool _isEditingTitle = false;
+  bool _isEditingBlock = false;
   late TextEditingController _titleController;
+  final FocusNode _titleFocusNode = FocusNode();
   final GlobalKey<MarkdownLatexBlockViewState> _blockViewKey = GlobalKey<MarkdownLatexBlockViewState>();
   CardActiveTextStyles _activeStyles = const CardActiveTextStyles();
   final ValueNotifier<Offset> _dragOffsetNotifier = ValueNotifier<Offset>(Offset.zero);
+  final GlobalKey _cardContainerKey = GlobalKey();
 
   @override
   void initState() {
@@ -72,31 +68,63 @@ class _CanvasCardWidgetState extends State<CanvasCardWidget> {
     if (oldWidget.card.title != widget.card.title && !_isEditingTitle) {
       _titleController.text = widget.card.title;
     }
+    if (!widget.isSelected && oldWidget.isSelected) {
+      _isEditingBlock = false;
+    }
   }
 
   @override
   void dispose() {
     CanvasCardWidget.actualHeights.remove(widget.card.id);
     _titleController.dispose();
+    _titleFocusNode.dispose();
     _dragOffsetNotifier.dispose();
-    _dragSizeNotifier.dispose();
     super.dispose();
+  }
+
+  void _submitTitle() {
+    globalIsEditingText = false;
+    final clean = _titleController.text.trim();
+    widget.onUpdateCard(widget.card.copyWith(title: clean.isNotEmpty ? clean : 'Card STEM'));
+    setState(() => _isEditingTitle = false);
+  }
+
+  void _onHeaderPanStart(DragStartDetails details) {
+    if (_isEditingTitle) return;
+    widget.onSelectCard(widget.card.id);
+    if (widget.card.isPinned) return;
+    _dragStartPos = details.globalPosition;
+    _initialCardX = widget.card.x;
+    _initialCardY = widget.card.y;
+    _dragOffsetNotifier.value = Offset.zero;
+  }
+
+  void _onHeaderPanUpdate(DragUpdateDetails details) {
+    if (_isEditingTitle || widget.card.isPinned || _dragStartPos == null) return;
+    final delta = (details.globalPosition - _dragStartPos!) / _currentZoom;
+    _dragOffsetNotifier.value = delta;
+  }
+
+  void _onHeaderPanEnd(DragEndDetails details) {
+    if (_isEditingTitle || widget.card.isPinned || _dragStartPos == null) return;
+    final finalDelta = _dragOffsetNotifier.value;
+    _dragOffsetNotifier.value = Offset.zero;
+    _dragStartPos = null;
+    if (finalDelta != Offset.zero && _initialCardX != null && _initialCardY != null) {
+      widget.onUpdateCard(widget.card.copyWith(
+        x: _initialCardX! + finalDelta.dx,
+        y: _initialCardY! + finalDelta.dy,
+      ));
+    }
+  }
+
+  void _onHeaderPanCancel() {
+    _dragOffsetNotifier.value = Offset.zero;
+    _dragStartPos = null;
   }
 
   @override
   Widget build(BuildContext context) {
-    final isInteracting = _dragSizeNotifier.value != null || _dragOffsetNotifier.value != Offset.zero;
-    if (!isInteracting) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) {
-          final box = context.findRenderObject() as RenderBox?;
-          if (box != null && box.hasSize && box.size.height > 20.0) {
-            CanvasCardWidget.actualHeights[widget.card.id] = box.size.height;
-          }
-        }
-      });
-    }
-
     return ValueListenableBuilder<Offset>(
       valueListenable: _dragOffsetNotifier,
       builder: (context, dragOffset, child) {
@@ -115,170 +143,124 @@ class _CanvasCardWidgetState extends State<CanvasCardWidget> {
           final glassTint = widget.card.customGlassColor ?? MoscaroTokens.glassTint;
           final isSelected = widget.isSelected;
           final isCollapsed = widget.card.isCollapsed;
+          final showFloatingPill = isSelected && _isEditingBlock;
 
           final cardBody = !isCollapsed
               ? MarkdownLatexBlockView(
                   key: _blockViewKey,
                   card: widget.card,
+                  onEditingModeChanged: (editing) {
+                    if (mounted && _isEditingBlock != editing) {
+                      setState(() => _isEditingBlock = editing);
+                    }
+                  },
                   onActiveStylesChanged: (styles) {
                     if (mounted) {
                       setState(() => _activeStyles = styles);
                     }
                   },
                   onContentChanged: (newContent) {
-                    widget.onUpdateCard(widget.card.copyWith(content: newContent));
+                    final updatedCard = widget.card.copyWith(content: newContent);
+                    final calculatedMin = updatedCard.calculateMinHeight();
+                    final finalHeight = math.max(widget.card.height, calculatedMin);
+                    widget.onUpdateCard(updatedCard.copyWith(height: finalHeight));
                   },
                 )
               : const SizedBox.shrink();
 
-          return ValueListenableBuilder<Size?>(
-            valueListenable: _dragSizeNotifier,
-            builder: (context, dragSize, child) {
-              return SizedBox(
-                width: dragSize?.width ?? widget.card.width,
-                child: child,
-              );
-            },
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.center,
-              children: [
-              // 1. Pílula Flutuante Superior
-              SizedBox(
-                height: 48.0,
-                child: isSelected
-                    ? OverflowBox(
-                        maxHeight: 500,
-                        alignment: Alignment.bottomCenter,
-                        child: TapRegion(
-                          groupId: 'card_block_editor_${widget.card.id}',
-                          child: CardFormatFloatingPill(
-                            card: widget.card,
-                            cardWidth: widget.card.width,
-                            activeStyles: _activeStyles,
-                            onUpdateCard: widget.onUpdateCard,
-                            onInsertSnippet: (snippet) {
-                              if (_blockViewKey.currentState != null) {
-                                _blockViewKey.currentState!.insertSnippetAtActive(snippet);
-                              } else {
-                                final updatedContent = '${widget.card.content}$snippet';
-                                widget.onUpdateCard(widget.card.copyWith(content: updatedContent));
-                              }
-                            },
-                            onWrapSelection: (prefix, suffix) {
-                              if (_blockViewKey.currentState != null) {
-                                _blockViewKey.currentState!.wrapSelection(prefix: prefix, suffix: suffix);
-                              } else {
-                                final updatedContent = '${widget.card.content}$prefix$suffix';
-                                widget.onUpdateCard(widget.card.copyWith(content: updatedContent));
-                              }
-                            },
-                            onApplyTextColor: (color) {
-                              final hex = '#${color.toARGB32().toRadixString(16).padLeft(8, '0').substring(2)}';
-                              if (_blockViewKey.currentState != null) {
-                                _blockViewKey.currentState!.wrapSelection(
-                                  prefix: '<span style="color: $hex">',
-                                  suffix: '</span>',
-                                );
-                              } else {
-                                widget.onUpdateCard(widget.card.copyWith(textColor: color));
-                              }
-                            },
-                            onApplyFontSize: (size) {
-                              if (_blockViewKey.currentState != null && _blockViewKey.currentState!.isEditing) {
-                                _blockViewKey.currentState!.wrapSelection(
-                                  prefix: '<span style="font-size: ${size}px">',
-                                  suffix: '</span>',
-                                );
-                              } else {
-                                widget.onUpdateCard(widget.card.copyWith(fontSize: size));
-                              }
-                            },
-                            onDeleteCard: () => widget.onDeleteCard(widget.card.id),
-                            onDuplicateCard: () => widget.onDuplicateCard(widget.card),
-                          ),
-                        ),
-                      )
-                    : const SizedBox.shrink(),
-              ),
-
-              // 2. O Card Principal em Vidro Líquido Moscaro
-              Stack(
+          return CardResizableFrame(
+            card: widget.card,
+            isSelected: isSelected,
+            zoomScale: widget.zoomScale,
+            zoomNotifier: widget.zoomNotifier,
+            onUpdateCard: widget.onUpdateCard,
+            builder: (context, currentSize) {
+              return Stack(
                 clipBehavior: Clip.none,
                 children: [
-                  GestureDetector(
-                    behavior: HitTestBehavior.opaque,
-                    onTap: () => widget.onSelectCard(widget.card.id),
-                    child: ClipRRect(
-                      borderRadius: BorderRadius.circular(14),
-                      child: ValueListenableBuilder<Size?>(
-                        valueListenable: _dragSizeNotifier,
-                        builder: (context, dragSize, child) {
-                          return _buildCardContainer(
-                            isSelected: isSelected,
-                            themeAccent: themeAccent,
-                            isLight: isLight,
-                            glassTint: glassTint,
-                            textPrimary: textPrimary,
-                            textSecondary: textSecondary,
-                            isCollapsed: isCollapsed,
-                            dragSize: dragSize,
-                            child: child!,
-                          );
-                        },
-                        child: cardBody,
+                  // 1. O Card Principal em Vidro Líquido Moscaro
+                  Positioned.fill(
+                    child: TapRegion(
+                      groupId: 'card_block_editor_${widget.card.id}',
+                      onTapOutside: (_) {
+                        if (_blockViewKey.currentState?.isEditing == true) {
+                          _blockViewKey.currentState?.commitBlockEdit();
+                        }
+                      },
+                      child: GestureDetector(
+                        key: _cardContainerKey,
+                        behavior: HitTestBehavior.opaque,
+                        onTap: () => widget.onSelectCard(widget.card.id),
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(14),
+                          child: RepaintBoundary(
+                            child: _buildCardContainer(
+                              isSelected: isSelected,
+                              themeAccent: themeAccent,
+                              isLight: isLight,
+                              glassTint: glassTint,
+                              textPrimary: textPrimary,
+                              textSecondary: textSecondary,
+                              isCollapsed: isCollapsed,
+                              currentSize: currentSize,
+                              child: cardBody,
+                            ),
+                          ),
+                        ),
                       ),
                     ),
                   ),
 
-                    // 3. Moldura de Seleção com as 3 Alças Padrão (Direita, Baixo, Canto Inferior Direito)
-                    if (isSelected && !widget.card.isPinned && !isCollapsed) ...[
-                      // 1. Alça Lateral Direita (Resize Horizontal - Perfeitamente Centralizada)
-                      Positioned(
-                        right: -8,
-                        top: 0,
-                        bottom: 0,
-                        child: Center(
-                          child: _buildResizeHandle(
-                            handle: CardResizeHandle.right,
-                            cursor: SystemMouseCursors.resizeLeftRight,
-                            themeAccent: themeAccent,
-                            isLight: isLight,
-                          ),
+                  // 2. Pílula Flutuante Superior (Exibida SOMENTE durante a edição ativa de um bloco)
+                  if (showFloatingPill)
+                    Positioned(
+                      top: -50.0,
+                      left: 0,
+                      right: 12.0,
+                      child: Center(
+                        child: CardFormatFloatingPill(
+                          card: widget.card,
+                          cardWidth: widget.card.width,
+                          activeStyles: _activeStyles,
+                          onUpdateCard: widget.onUpdateCard,
+                          onInsertSnippet: (snippet) {
+                            if (_blockViewKey.currentState != null) {
+                              _blockViewKey.currentState!.insertSnippetAtActive(snippet);
+                            } else {
+                              final updatedContent = '${widget.card.content}$snippet';
+                              widget.onUpdateCard(widget.card.copyWith(content: updatedContent));
+                            }
+                          },
+                          onWrapSelection: (prefix, suffix) {
+                            if (_blockViewKey.currentState != null) {
+                              _blockViewKey.currentState!.wrapSelection(prefix: prefix, suffix: suffix);
+                            } else {
+                              final updatedContent = '${widget.card.content}$prefix$suffix';
+                              widget.onUpdateCard(widget.card.copyWith(content: updatedContent));
+                            }
+                          },
+                          onApplyTextColor: (color) {
+                            if (_blockViewKey.currentState != null && _blockViewKey.currentState!.isEditing) {
+                              _blockViewKey.currentState!.applyTextColor(color);
+                            } else {
+                              widget.onUpdateCard(widget.card.copyWith(textColor: color));
+                            }
+                          },
+                          onApplyFontSize: (size) {
+                            if (_blockViewKey.currentState != null && _blockViewKey.currentState!.isEditing) {
+                              _blockViewKey.currentState!.applyFontSize(size);
+                            } else {
+                              widget.onUpdateCard(widget.card.copyWith(fontSize: size));
+                            }
+                          },
+                          onDeleteCard: () => widget.onDeleteCard(widget.card.id),
+                          onDuplicateCard: () => widget.onDuplicateCard(widget.card),
                         ),
                       ),
-
-                      // 2. Alça Inferior (Resize Vertical - Perfeitamente Centralizada)
-                      Positioned(
-                        bottom: -8,
-                        left: 0,
-                        right: 0,
-                        child: Center(
-                          child: _buildResizeHandle(
-                            handle: CardResizeHandle.bottom,
-                            cursor: SystemMouseCursors.resizeUpDown,
-                            themeAccent: themeAccent,
-                            isLight: isLight,
-                          ),
-                        ),
-                      ),
-
-                      // 3. Alça do Vértice Inferior Direito (Resize em Escala Diagonal)
-                      Positioned(
-                        right: -8,
-                        bottom: -8,
-                        child: _buildResizeHandle(
-                          handle: CardResizeHandle.bottomRight,
-                          cursor: SystemMouseCursors.resizeUpLeftDownRight,
-                          themeAccent: themeAccent,
-                          isLight: isLight,
-                        ),
-                      ),
-                    ],
-                  ],
-                ),
-              ],
-            ),
+                    ),
+                ],
+              );
+            },
           );
         },
       ),
@@ -293,7 +275,7 @@ class _CanvasCardWidgetState extends State<CanvasCardWidget> {
     required Color textPrimary,
     required Color textSecondary,
     required bool isCollapsed,
-    required Size? dragSize,
+    required Size currentSize,
     required Widget child,
   }) {
     final borderColor = isSelected
@@ -311,111 +293,71 @@ class _CanvasCardWidgetState extends State<CanvasCardWidget> {
       ),
     ];
 
-    final currentWidth = dragSize?.width ?? widget.card.width;
-    final currentHeight = dragSize?.height ?? widget.card.height;
-
-    return Container(
-      width: currentWidth,
-      constraints: BoxConstraints(
-        minHeight: currentHeight != 200.0 ? currentHeight : 0.0,
-        minWidth: 200,
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          // Cabeçalho de Arraste do Card
-          GestureDetector(
-            behavior: HitTestBehavior.opaque,
-            onPanStart: (details) {
-              widget.onSelectCard(widget.card.id);
-              if (widget.card.isPinned) return;
-              _dragStartPos = details.globalPosition;
-              _initialCardX = widget.card.x;
-              _initialCardY = widget.card.y;
-              _dragOffsetNotifier.value = Offset.zero;
-            },
-            onPanUpdate: (details) {
-              if (widget.card.isPinned || _dragStartPos == null) return;
-              final delta = (details.globalPosition - _dragStartPos!) / _currentZoom;
-              _dragOffsetNotifier.value = delta;
-            },
-            onPanEnd: (details) {
-              if (widget.card.isPinned || _dragStartPos == null) return;
-              final finalDelta = _dragOffsetNotifier.value;
-              _dragOffsetNotifier.value = Offset.zero;
-              _dragStartPos = null;
-              if (finalDelta != Offset.zero && _initialCardX != null && _initialCardY != null) {
-                widget.onUpdateCard(widget.card.copyWith(
-                  x: _initialCardX! + finalDelta.dx,
-                  y: _initialCardY! + finalDelta.dy,
-                ));
-              }
-            },
-            onPanCancel: () {
-              _dragOffsetNotifier.value = Offset.zero;
-              _dragStartPos = null;
-            },
-            child: Container(
-              height: 36,
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-              decoration: BoxDecoration(
-                color: isLight ? Colors.black.withValues(alpha: 0.03) : Colors.white.withValues(alpha: 0.04),
-                borderRadius: const BorderRadius.vertical(top: Radius.circular(14)),
-                border: Border(
-                  bottom: BorderSide(
-                    color: isLight ? Colors.black12 : Colors.white.withValues(alpha: 0.08),
-                    width: 0.8,
+    return SizedBox(
+      width: currentSize.width,
+      height: currentSize.height,
+      child: ClipRect(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            // Cabeçalho de Arraste e Título do Card
+            GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: () => widget.onSelectCard(widget.card.id),
+              onDoubleTap: () {
+                globalIsEditingText = true;
+                setState(() {
+                  _isEditingTitle = true;
+                  _titleController.text = widget.card.title;
+                });
+                _titleFocusNode.requestFocus();
+              },
+              onPanStart: _onHeaderPanStart,
+              onPanUpdate: _onHeaderPanUpdate,
+              onPanEnd: _onHeaderPanEnd,
+              onPanCancel: _onHeaderPanCancel,
+              child: Container(
+                height: 36,
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                decoration: BoxDecoration(
+                  color: isLight ? Colors.black.withValues(alpha: 0.03) : Colors.white.withValues(alpha: 0.04),
+                  borderRadius: const BorderRadius.vertical(top: Radius.circular(14)),
+                  border: Border(
+                    bottom: BorderSide(
+                      color: isLight ? Colors.black12 : Colors.white.withValues(alpha: 0.08),
+                      width: 0.8,
+                    ),
                   ),
                 ),
-              ),
-              child: Row(
-                children: [
-                  SvgIcon(name: 'pin', size: 14, color: widget.card.isPinned ? const Color(0xFFFF007A) : themeAccent),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: _isEditingTitle
-                        ? Container(
-                            height: 24,
-                            alignment: Alignment.centerLeft,
-                            child: TextField(
-                              controller: _titleController,
-                              autofocus: true,
-                              style: TextStyle(
-                                color: textPrimary,
-                                fontSize: 11.5,
-                                fontWeight: FontWeight.bold,
-                                letterSpacing: 0.3,
+                child: Row(
+                  children: [
+                    SvgIcon(name: 'pin', size: 14, color: widget.card.isPinned ? const Color(0xFFFF007A) : themeAccent),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: _isEditingTitle
+                          ? Container(
+                              height: 24,
+                              alignment: Alignment.centerLeft,
+                              child: TextField(
+                                controller: _titleController,
+                                focusNode: _titleFocusNode,
+                                autofocus: true,
+                                style: TextStyle(
+                                  color: textPrimary,
+                                  fontSize: 11.5,
+                                  fontWeight: FontWeight.bold,
+                                  letterSpacing: 0.3,
+                                ),
+                                decoration: const InputDecoration(
+                                  isDense: true,
+                                  contentPadding: EdgeInsets.zero,
+                                  border: InputBorder.none,
+                                ),
+                                onSubmitted: (_) => _submitTitle(),
+                                onTapOutside: (_) => _submitTitle(),
                               ),
-                              decoration: const InputDecoration(
-                                isDense: true,
-                                contentPadding: EdgeInsets.zero,
-                                border: InputBorder.none,
-                              ),
-                              onSubmitted: (val) {
-                                globalIsEditingText = false;
-                                final clean = val.trim();
-                                widget.onUpdateCard(widget.card.copyWith(title: clean.isNotEmpty ? clean : 'Card STEM'));
-                                setState(() => _isEditingTitle = false);
-                              },
-                              onTapOutside: (_) {
-                                globalIsEditingText = false;
-                                final clean = _titleController.text.trim();
-                                widget.onUpdateCard(widget.card.copyWith(title: clean.isNotEmpty ? clean : 'Card STEM'));
-                                setState(() => _isEditingTitle = false);
-                              },
-                            ),
-                          )
-                        : GestureDetector(
-                            behavior: HitTestBehavior.opaque,
-                            onDoubleTap: () {
-                              globalIsEditingText = true;
-                              setState(() {
-                                _isEditingTitle = true;
-                                _titleController.text = widget.card.title;
-                              });
-                            },
-                            child: Tooltip(
+                            )
+                          : Tooltip(
                               message: 'Clique duas vezes para renomear',
                               child: Text(
                                 widget.card.title,
@@ -428,105 +370,29 @@ class _CanvasCardWidgetState extends State<CanvasCardWidget> {
                                 overflow: TextOverflow.ellipsis,
                               ),
                             ),
-                          ),
-                  ),
-                  if (widget.card.isPinned)
-                    Padding(
-                      padding: const EdgeInsets.only(right: 6),
-                      child: SvgIcon(name: 'lock', size: 13, color: textSecondary),
                     ),
-                ],
+                    if (widget.card.isPinned)
+                      Padding(
+                        padding: const EdgeInsets.only(right: 6),
+                        child: SvgIcon(name: 'lock', size: 13, color: textSecondary),
+                      ),
+                  ],
+                ),
               ),
             ),
-          ),
 
-          // Corpo do Card (Blocos de Conteúdo passado como child para evitar rebuild no resize)
-          if (!isCollapsed) child,
-        ],
-      ).moscaroV2(
-        borderRadius: 14,
-        backgroundColor: glassTint,
-        borderColor: borderColor,
-        borderWidth: isSelected ? 1.5 : 1.0,
-        customShadows: cardShadows,
-        padding: EdgeInsets.zero,
-        enableBlur: false,
-      ),
-    );
-  }
-
-  Widget _buildResizeHandle({
-    required CardResizeHandle handle,
-    required MouseCursor cursor,
-    required Color themeAccent,
-    required bool isLight,
-  }) {
-    return MouseRegion(
-      cursor: cursor,
-      child: GestureDetector(
-        behavior: HitTestBehavior.opaque,
-        onPanStart: (details) {
-          _dragStartPos = details.globalPosition;
-          _initialWidth = widget.card.width;
-          _initialHeight = widget.card.height;
-        },
-        onPanUpdate: (details) {
-          if (_dragStartPos == null) return;
-          final delta = (details.globalPosition - _dragStartPos!) / _currentZoom;
-
-          double newWidth = _dragSizeNotifier.value?.width ?? widget.card.width;
-          double newHeight = _dragSizeNotifier.value?.height ?? widget.card.height;
-
-          if (handle == CardResizeHandle.right || handle == CardResizeHandle.bottomRight) {
-            newWidth = (_initialWidth! + delta.dx).clamp(200.0, 1600.0);
-          }
-          if (handle == CardResizeHandle.bottom || handle == CardResizeHandle.bottomRight) {
-            newHeight = (_initialHeight! + delta.dy).clamp(widget.card.minHeight, 2400.0);
-          }
-
-          if (newWidth != _dragSizeNotifier.value?.width || newHeight != _dragSizeNotifier.value?.height) {
-            _dragSizeNotifier.value = Size(newWidth, newHeight);
-          }
-        },
-        onPanEnd: (details) {
-          if (_dragSizeNotifier.value != null) {
-            final finalWidth = _dragSizeNotifier.value!.width;
-            final finalHeight = _dragSizeNotifier.value!.height;
-            widget.onUpdateCard(widget.card.copyWith(
-              width: finalWidth,
-              height: finalHeight,
-            ));
-            _dragSizeNotifier.value = null;
-          }
-          _dragStartPos = null;
-        },
-        onPanCancel: () {
-          if (_dragSizeNotifier.value != null) {
-            _dragSizeNotifier.value = null;
-          }
-          _dragStartPos = null;
-        },
-        child: Container(
-          width: 24,
-          height: 24,
-          alignment: Alignment.center,
-          color: Colors.transparent,
-          child: Container(
-            width: 14,
-            height: 14,
-            decoration: BoxDecoration(
-              color: isLight ? Colors.white : const Color(0xFF0D1117),
-              shape: BoxShape.circle,
-              border: Border.all(color: themeAccent, width: 2.5),
-              boxShadow: [
-                BoxShadow(
-                  color: themeAccent.withValues(alpha: 0.7),
-                  blurRadius: 6,
-                  spreadRadius: 1,
-                ),
-              ],
-            ),
-          ),
+            // Corpo do Card (Blocos de Conteúdo passado como child para evitar rebuild no resize)
+            if (!isCollapsed) Expanded(child: child),
+          ],
+        ).moscaroV2(
+          borderRadius: 14,
+          backgroundColor: glassTint,
+          borderColor: borderColor,
+          borderWidth: isSelected ? 1.5 : 1.0,
+          customShadows: cardShadows,
+          padding: EdgeInsets.zero,
+          enableBlur: MoscaroTokens.enableCardsBlur && MoscaroTokens.blurSigma > 0,
+          blurSigma: MoscaroTokens.blurSigma,
         ),
       ),
     );

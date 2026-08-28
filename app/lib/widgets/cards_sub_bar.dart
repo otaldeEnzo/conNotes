@@ -6,8 +6,6 @@ import 'svg_icon.dart';
 
 enum CardTypePreset {
   generalMarkdownLatex,
-  mathFormula,
-  stickyNote,
 }
 
 /// Sub-Barra de Criação de Cards no Canvas (100% Moscaro Glass).
@@ -44,18 +42,6 @@ class CardsSubBar extends StatelessWidget {
             'icon': 'card',
             'label': 'Card Markdown & LaTeX',
             'desc': 'Texto rico, equações e diagramas',
-          },
-          {
-            'preset': CardTypePreset.mathFormula,
-            'icon': 'math',
-            'label': 'Equação STEM',
-            'desc': 'Bloco de fórmulas matemáticas',
-          },
-          {
-            'preset': CardTypePreset.stickyNote,
-            'icon': 'pin',
-            'label': 'Sticky Note',
-            'desc': 'Lembrete adesivo em vidro',
           },
         ];
 

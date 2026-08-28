@@ -98,6 +98,34 @@ class InkStroke {
     this.cachedRawPoints,
   });
 
+  InkStroke copyWith({
+    String? id,
+    List<StrokePoint>? points,
+    Color? color,
+    double? strokeWidth,
+    InkToolType? toolType,
+    bool? enablePressure,
+    bool? isShape,
+    Offset? transform,
+    Rect? boundingBox,
+    Path? cachedPath,
+    Float32List? cachedRawPoints,
+  }) {
+    return InkStroke(
+      id: id ?? this.id,
+      points: points ?? this.points,
+      color: color ?? this.color,
+      strokeWidth: strokeWidth ?? this.strokeWidth,
+      toolType: toolType ?? this.toolType,
+      enablePressure: enablePressure ?? this.enablePressure,
+      isShape: isShape ?? this.isShape,
+      transform: transform ?? this.transform,
+      boundingBox: boundingBox ?? this.boundingBox,
+      cachedPath: cachedPath ?? this.cachedPath,
+      cachedRawPoints: cachedRawPoints ?? this.cachedRawPoints,
+    );
+  }
+
   Map<String, dynamic> toJson() {
     return {
       'id': id,

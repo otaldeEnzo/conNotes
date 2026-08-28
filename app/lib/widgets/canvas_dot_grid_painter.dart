@@ -359,36 +359,41 @@ class CanvasDotGridPainter extends CustomPainter {
     }
   }
 
-  /// Renderiza o modo Isométrico Rígido (Grid 3D com linhas a 30° e 150°)
+  /// Renderiza o modo Isométrico Rígido (Grid 3D com triângulos equiláteros e vértices coincidentes a 60°/120°)
   void _paintIsometricLattice(Canvas canvas, double left, double top, double right, double bottom) {
-    const double isoSpacing = 32.0;
-    final double sin30 = math.sin(math.pi / 6);
-    final double cos30 = math.cos(math.pi / 6);
-    final double triangleHeight = isoSpacing * sin30 * 2;
-    final double triangleWidth = isoSpacing * cos30 * 2;
+    const double S = 32.0; // Lado do triângulo equilátero
+    final double H = S * (math.sqrt(3) / 2.0); // Altura exata: S * sin(60°) ≈ 27.7128
+    const double invSlope = 1.0 / 1.7320508075688772; // dx/dy = 1 / sqrt(3) ≈ 0.57735
 
     final linePaint = Paint()
       ..color = theme.gridColor.withValues(alpha: theme.gridColor.a > 0.05 ? theme.gridColor.a * 0.8 : 0.20)
       ..strokeWidth = 0.8 / zoomScale;
 
-    final double startY = (top / triangleHeight).floor() * triangleHeight;
-    for (double y = startY; y <= bottom + triangleHeight; y += triangleHeight) {
+    // 1. Linhas Horizontais (y = j * H)
+    final double startY = (top / H).floor() * H;
+    for (double y = startY; y <= bottom + H; y += H) {
       if (y < 0) continue;
       canvas.drawLine(Offset(math.max(0.0, left), y), Offset(right, y), linePaint);
     }
 
-    final double startX = (left / triangleWidth).floor() * triangleWidth;
-    for (double x = startX - (bottom - top) * math.tan(math.pi / 6); x <= right + (bottom - top) * math.tan(math.pi / 6); x += triangleWidth) {
-      canvas.drawLine(
-        Offset(x, top),
-        Offset(x + (bottom - top) * math.tan(math.pi / 6), bottom),
-        linePaint,
-      );
-      canvas.drawLine(
-        Offset(x, top),
-        Offset(x - (bottom - top) * math.tan(math.pi / 6), bottom),
-        linePaint,
-      );
+    // 2. Linhas Diagonais a +60° (x(y) = x0 + y / sqrt(3)) e -60° (x(y) = x0 - y / sqrt(3))
+    // x0 é o intercepto no eixo y=0, espaçado a cada S pixels
+    final double minX0 = left - (bottom * invSlope);
+    final double maxX0 = right + (bottom * invSlope);
+    final double startX0 = (minX0 / S).floor() * S;
+
+    final double effectiveTop = math.max(0.0, top);
+
+    for (double x0 = startX0; x0 <= maxX0 + S; x0 += S) {
+      // Diagonal Descendente (+60°)
+      final xTop1 = x0 + effectiveTop * invSlope;
+      final xBottom1 = x0 + bottom * invSlope;
+      canvas.drawLine(Offset(xTop1, effectiveTop), Offset(xBottom1, bottom), linePaint);
+
+      // Diagonal Ascendente (-60°)
+      final xTop2 = x0 - effectiveTop * invSlope;
+      final xBottom2 = x0 - bottom * invSlope;
+      canvas.drawLine(Offset(xTop2, effectiveTop), Offset(xBottom2, bottom), linePaint);
     }
   }
 

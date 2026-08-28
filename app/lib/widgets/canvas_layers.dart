@@ -237,7 +237,7 @@ class CanvasTile {
     }
 
     isDirty = false;
-    _needsTextureBake = totalStrokes >= 4;
+    _needsTextureBake = false;
   }
 
   /// Desenha o tile inteiro com 1 única chamada Skia Picture GPU (0.01ms por tile)
@@ -260,23 +260,8 @@ class CanvasTile {
     }
   }
 
-  /// Fase 2: Converte o Picture composto em textura GPU em idle
-  bool tryBake() {
-    if (!_needsTextureBake || picture == null) return false;
-    try {
-      final img = picture!.toImageSync(
-        StrokePictureCache.tileSize.toInt(),
-        StrokePictureCache.tileSize.toInt(),
-      );
-      image?.dispose();
-      image = img;
-      _needsTextureBake = false;
-      return true;
-    } catch (_) {
-      _needsTextureBake = false;
-      return false;
-    }
-  }
+  /// Desativado para evitar perda de cor por premultiplied alpha em toImageSync
+  bool tryBake() => false;
 
   void invalidatePictures() {
     image?.dispose();
@@ -320,6 +305,17 @@ class StrokePictureCache {
   }
 
   void insertStrokeToTiles(InkStroke stroke) {
+    if (stroke.cachedPath == null) {
+      if ((stroke.toolType == InkToolType.fountain || stroke.enablePressure) && !stroke.isShape) {
+        stroke.cachedPath = FreehandOutlineRenderer.generateOutlinePath(
+          stroke.points,
+          baseWidth: stroke.strokeWidth,
+          isTapered: stroke.toolType == InkToolType.fountain,
+        );
+      } else if (!stroke.isShape) {
+        stroke.cachedPath = _buildSmoothCatmullRomPath(stroke.points);
+      }
+    }
     final bounds = stroke.boundingBox ?? SelectionGeometry.computeStrokeBounds(stroke);
     final minTx = (bounds.left / tileSize).floor();
     final maxTx = (bounds.right / tileSize).floor();
@@ -550,14 +546,8 @@ class StrokePictureCache {
         ..strokeJoin = StrokeJoin.round
         ..style = PaintingStyle.stroke;
 
-      if (stroke.cachedPath != null) {
-        canvas.drawPath(stroke.cachedPath!, reusablePaint);
-      } else if (stroke.points.length > 50) {
-        canvas.drawRawPoints(ui.PointMode.polygon, stroke.rawPoints, reusablePaint);
-      } else {
-        stroke.cachedPath ??= _buildSmoothCatmullRomPath(stroke.points);
-        canvas.drawPath(stroke.cachedPath!, reusablePaint);
-      }
+      stroke.cachedPath ??= _buildSmoothCatmullRomPath(stroke.points);
+      canvas.drawPath(stroke.cachedPath!, reusablePaint);
     } finally {
       if (hasTransform) {
         canvas.restore();
@@ -756,7 +746,8 @@ class CommittedStrokesPainter extends CustomPainter {
     required this.zoomScale,
     required this.pictureCache,
     this.isInteracting = false,
-  });
+    Listenable? repaint,
+  }) : super(repaint: repaint);
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -821,22 +812,14 @@ class TransientStrokesPictureCache {
         canvas.translate(stroke.transform.dx, stroke.transform.dy);
       }
       final color = StrokePictureCache._getStrokeColor(stroke);
-      if (stroke.points.length > 50) {
-        reusablePaint
-          ..color = color
-          ..strokeWidth = stroke.strokeWidth
-          ..strokeCap = StrokeCap.round
-          ..style = PaintingStyle.stroke;
-        canvas.drawRawPoints(ui.PointMode.polygon, stroke.rawPoints, reusablePaint);
-      } else {
-        stroke.cachedPath ??= StrokePictureCache._buildSmoothCatmullRomPath(stroke.points);
-        reusablePaint
-          ..color = color
-          ..strokeWidth = stroke.strokeWidth
-          ..strokeCap = StrokeCap.round
-          ..style = PaintingStyle.stroke;
-        canvas.drawPath(stroke.cachedPath!, reusablePaint);
-      }
+      stroke.cachedPath ??= StrokePictureCache._buildSmoothCatmullRomPath(stroke.points);
+      reusablePaint
+        ..color = color
+        ..strokeWidth = stroke.strokeWidth
+        ..strokeCap = StrokeCap.round
+        ..strokeJoin = StrokeJoin.round
+        ..style = PaintingStyle.stroke;
+      canvas.drawPath(stroke.cachedPath!, reusablePaint);
       canvas.restore();
     }
 

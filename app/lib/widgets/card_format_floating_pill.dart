@@ -8,6 +8,8 @@ import '../models/canvas_card_model.dart';
 import '../services/custom_font_manager.dart';
 import 'latex_stem_symbols_palette.dart';
 
+bool globalIsHoveringFloatingPill = false;
+
 /// Estado dos estilos ativos no cursor / seleção para confirmação visual na barra.
 class CardActiveTextStyles {
   final bool isBold;
@@ -134,7 +136,7 @@ class _CardFormatFloatingPillState extends State<CardFormatFloatingPill> {
               ),
               child: Container(
                 height: 38,
-                constraints: BoxConstraints(maxWidth: math.max(widget.cardWidth, 480.0)),
+                constraints: BoxConstraints(maxWidth: widget.cardWidth),
                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                 decoration: BoxDecoration(
                   color: isLight
@@ -158,7 +160,7 @@ class _CardFormatFloatingPillState extends State<CardFormatFloatingPill> {
             )
           : Container(
               height: 38,
-              constraints: BoxConstraints(maxWidth: math.max(widget.cardWidth, 480.0)),
+              constraints: BoxConstraints(maxWidth: widget.cardWidth),
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
               decoration: BoxDecoration(
                 color: isLight
@@ -203,10 +205,13 @@ class _CardFormatFloatingPillState extends State<CardFormatFloatingPill> {
             final popoverBlur = (MoscaroTokens.enableSubBarsBlur && MoscaroTokens.blurSigma > 0) ? MoscaroTokens.blurSigma : 0.0;
             final fonts = CustomFontManager.instance.availableFonts;
 
-            return Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.center,
-              children: [
+            return MouseRegion(
+              onEnter: (_) => globalIsHoveringFloatingPill = true,
+              onExit: (_) => globalIsHoveringFloatingPill = false,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
                 // 1. Popover do Menu de Fontes Moscaro
                 if (_isFontMenuOpen) ...[
                   _buildMoscaroFontPopover(fonts, isLight, glassTint, themeAccent, textPrimary, textSecondary, popoverBlur),
@@ -258,15 +263,19 @@ class _CardFormatFloatingPillState extends State<CardFormatFloatingPill> {
                   child: Listener(
                     onPointerSignal: (pointerSignal) {
                       if (pointerSignal is PointerScrollEvent && _pillScrollController.hasClients) {
-                        final target = (_pillScrollController.offset + pointerSignal.scrollDelta.dy * 1.3).clamp(
-                          0.0,
-                          _pillScrollController.position.maxScrollExtent,
-                        );
-                        _pillScrollController.animateTo(
-                          target,
-                          duration: const Duration(milliseconds: 140),
-                          curve: Curves.easeOutCubic,
-                        );
+                        GestureBinding.instance.pointerSignalResolver.register(pointerSignal, (event) {
+                          if (event is PointerScrollEvent && _pillScrollController.hasClients) {
+                            final target = (_pillScrollController.offset + event.scrollDelta.dy * 1.3).clamp(
+                              0.0,
+                              _pillScrollController.position.maxScrollExtent,
+                            );
+                            _pillScrollController.animateTo(
+                              target,
+                              duration: const Duration(milliseconds: 140),
+                              curve: Curves.easeOutCubic,
+                            );
+                          }
+                        });
                       }
                     },
                     child: SingleChildScrollView(
@@ -306,7 +315,8 @@ class _CardFormatFloatingPillState extends State<CardFormatFloatingPill> {
                     ),
                   ),
                 ),
-              ],
+                ],
+              ),
             );
           },
         ),
@@ -428,7 +438,9 @@ class _CardFormatFloatingPillState extends State<CardFormatFloatingPill> {
                 return InkWell(
                   onTap: () {
                     widget.onUpdateCard(widget.card.copyWith(fontFamily: font));
-                    setState(() => _isFontMenuOpen = false);
+                    Future.delayed(const Duration(milliseconds: 50), () {
+                      if (mounted) setState(() => _isFontMenuOpen = false);
+                    });
                   },
                   child: Container(
                     padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
@@ -618,7 +630,9 @@ class _CardFormatFloatingPillState extends State<CardFormatFloatingPill> {
               child: InkWell(
                 onTap: () {
                   widget.onWrapSelection('<mark style="background: $hex">', '</mark>');
-                  setState(() => _isHighlightMenuOpen = false);
+                  Future.delayed(const Duration(milliseconds: 50), () {
+                    if (mounted) setState(() => _isHighlightMenuOpen = false);
+                  });
                 },
                 borderRadius: BorderRadius.circular(6),
                 child: Container(
@@ -703,7 +717,9 @@ class _CardFormatFloatingPillState extends State<CardFormatFloatingPill> {
               child: InkWell(
                 onTap: () {
                   widget.onApplyTextColor(c);
-                  setState(() => _isColorPaletteOpen = false);
+                  Future.delayed(const Duration(milliseconds: 50), () {
+                    if (mounted) setState(() => _isColorPaletteOpen = false);
+                  });
                 },
                 borderRadius: BorderRadius.circular(6),
                 child: Container(

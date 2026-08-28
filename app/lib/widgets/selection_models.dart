@@ -300,7 +300,7 @@ class SelectionGeometry {
     return (p - projection).distanceSquared;
   }
 
-  /// Calcula as posições dos 3 manipuladores de redimensionamento (Horizontal, Vertical e Geral)
+  /// Calcula as posições dos 8 manipuladores de redimensionamento e rotação
   static Map<SelectionHandleType, Offset> getHandlePositions(Rect bounds, double zoomScale, {double rotation = 0.0, Offset? pivot}) {
     final center = pivot ?? bounds.center;
     final inflated = bounds.inflate(6.0 / zoomScale);
@@ -315,16 +315,21 @@ class SelectionGeometry {
     }
 
     return {
+      SelectionHandleType.topLeft: rotatePoint(inflated.topLeft),
+      SelectionHandleType.topCenter: rotatePoint(Offset(inflated.center.dx, inflated.top)),
+      SelectionHandleType.topRight: rotatePoint(inflated.topRight),
+      SelectionHandleType.centerLeft: rotatePoint(Offset(inflated.left, inflated.center.dy)),
       SelectionHandleType.centerRight: rotatePoint(Offset(inflated.right, inflated.center.dy)),
+      SelectionHandleType.bottomLeft: rotatePoint(inflated.bottomLeft),
       SelectionHandleType.bottomCenter: rotatePoint(Offset(inflated.center.dx, inflated.bottom)),
       SelectionHandleType.bottomRight: rotatePoint(inflated.bottomRight),
     };
   }
 
-  /// Detecta se o ponto clicado atingiu um dos 9 manipuladores da seleção
+  /// Detecta se o ponto clicado atingiu um dos manipuladores da seleção
   static SelectionHandleType getHandleAtPoint(Offset point, Rect bounds, double zoomScale, {double rotation = 0.0, Offset? pivot}) {
     final handles = getHandlePositions(bounds, zoomScale, rotation: rotation, pivot: pivot);
-    final hitTolerance = 14.0 / zoomScale;
+    final hitTolerance = 18.0 / zoomScale;
     final hitToleranceSq = hitTolerance * hitTolerance;
 
     for (final entry in handles.entries) {

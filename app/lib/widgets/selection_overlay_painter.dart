@@ -67,7 +67,8 @@ class SelectedStrokesPictureCache {
 /// Painter isolado de alta performance para desenhar o Overlay de Seleção
 /// (Caixa delimitadora, Laço dinâmico, Traços em arraste e Alças Moscaro v2).
 class SelectionOverlayPainter extends CustomPainter {
-  final SelectionState selectionState;
+  final SelectionState? selectionState;
+  final SelectionState Function()? getSelectionState;
   final NoteDocument note;
   final Offset panOffset;
   final double zoomScale;
@@ -75,7 +76,8 @@ class SelectionOverlayPainter extends CustomPainter {
   final SelectedStrokesPictureCache dragCache;
 
   SelectionOverlayPainter({
-    required this.selectionState,
+    this.selectionState,
+    this.getSelectionState,
     required this.note,
     required this.panOffset,
     required this.zoomScale,
@@ -85,47 +87,50 @@ class SelectionOverlayPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
+    final activeState = getSelectionState != null ? getSelectionState!() : (selectionState ?? const SelectionState());
+
     canvas.save();
     canvas.translate(panOffset.dx, panOffset.dy);
     canvas.scale(zoomScale);
 
     // 1. Desenhar a área de seleção em andamento (Retângulo ou Laço)
-    if (selectionState.isSelectingArea) {
-      if (selectionState.type == SelectionType.rectangle &&
-          selectionState.startPoint != null &&
-          selectionState.currentPoint != null) {
-        _drawSelectingRect(canvas, Rect.fromPoints(selectionState.startPoint!, selectionState.currentPoint!));
-      } else if (selectionState.type == SelectionType.lasso && selectionState.lassoPoints.length > 1) {
-        _drawSelectingLasso(canvas, selectionState.lassoPoints);
+    if (activeState.isSelectingArea) {
+      if (activeState.type == SelectionType.rectangle &&
+          activeState.startPoint != null &&
+          activeState.currentPoint != null) {
+        _drawSelectingRect(canvas, Rect.fromPoints(activeState.startPoint!, activeState.currentPoint!));
+      } else if (activeState.type == SelectionType.lasso && activeState.lassoPoints.length > 1) {
+        _drawSelectingLasso(canvas, activeState.lassoPoints);
       }
     }
 
-    // 2. Se houver traços selecionados, desenhar a Bounding Box e traços em arraste/transformação
-    if (selectionState.hasSelection) {
-      final bounds = selectionState.bounds!;
-      final dragOffset = selectionState.dragOffset;
-      final transformBounds = selectionState.transformBounds;
+    // 2. Se houver traços selecionados ou multi-seleção, desenhar a Bounding Box com 8 alças
+    final hasStrokesOrMultiItems = activeState.selectedStrokeIds.isNotEmpty || activeState.selectedCardIds.length > 1;
+    if (activeState.hasSelection && hasStrokesOrMultiItems) {
+      final bounds = activeState.bounds!;
+      final dragOffset = activeState.dragOffset;
+      final transformBounds = activeState.transformBounds;
       final isResizing = transformBounds != null &&
-          selectionState.activeHandle != SelectionHandleType.rotation &&
-          selectionState.activeHandle != SelectionHandleType.none;
+          activeState.activeHandle != SelectionHandleType.rotation &&
+          activeState.activeHandle != SelectionHandleType.none;
       final activeBox = isResizing ? transformBounds : bounds.shift(dragOffset);
       final pivot = activeBox.center;
-      final rotation = selectionState.rotationAngle;
+      final rotation = activeState.rotationAngle;
 
       // 2.1 Zero-Lag: Desenhar traços selecionados deslocados / rotacionados / escalados
-      if (selectionState.isDraggingSelection || selectionState.isTransforming) {
+      if (activeState.isDraggingSelection || activeState.isTransforming) {
         if (isResizing) {
-          // Fidelidade 1:1 Absoluta: Mapeia matematicamente cada ponto e gera o traço com espessura uniforme,
-          // eliminando distorções elípticas de canvas.scale() e garantindo idêntico resultado ao commit final.
-          _drawResizedStrokesPreview(canvas, note, selectionState.selectedStrokeIds, bounds, transformBounds);
+          _drawResizedStrokesPreview(canvas, note, activeState.selectedStrokeIds, bounds, transformBounds);
         } else {
           canvas.save();
-          canvas.translate(pivot.dx, pivot.dy);
-          if (rotation != 0.0) canvas.rotate(rotation);
-          canvas.translate(-pivot.dx, -pivot.dy);
           canvas.translate(dragOffset.dx, dragOffset.dy);
+          if (rotation != 0.0) {
+            canvas.translate(bounds.center.dx, bounds.center.dy);
+            canvas.rotate(rotation);
+            canvas.translate(-bounds.center.dx, -bounds.center.dy);
+          }
 
-          dragCache.update(note, selectionState.selectedStrokeIds);
+          dragCache.update(note, activeState.selectedStrokeIds);
           dragCache.draw(canvas);
           canvas.restore();
         }
@@ -137,7 +142,7 @@ class SelectionOverlayPainter extends CustomPainter {
         activeBox,
         rotation: isResizing ? 0.0 : rotation,
         pivot: pivot,
-        activeHandle: selectionState.activeHandle,
+        activeHandle: activeState.activeHandle,
       );
     }
 
@@ -209,10 +214,7 @@ class SelectionOverlayPainter extends CustomPainter {
       ..style = PaintingStyle.stroke;
     canvas.drawRRect(rrect, borderPaint);
 
-    // 3 Alças de Redimensionamento:
-    // 1. centerRight (ajuste horizontal)
-    // 2. bottomCenter (ajuste vertical)
-    // 3. bottomRight (ajuste geral bidimensional)
+    // 8 Alças de Redimensionamento (4 cantos + 4 lados)
     final handlePaint = Paint()
       ..color = MoscaroTokens.auroraBlue
       ..style = PaintingStyle.fill;
@@ -224,20 +226,21 @@ class SelectionOverlayPainter extends CustomPainter {
     final cornerRadius = 5.0 / zoomScale;
     final edgeRadius = 4.0 / zoomScale;
 
-    // 1. Aresta Direita (Horizontal)
-    final centerRight = Offset(inflated.right, inflated.center.dy);
-    canvas.drawCircle(centerRight, edgeRadius, handlePaint);
-    canvas.drawCircle(centerRight, edgeRadius, handleBorder);
+    final handlePositions = {
+      inflated.topLeft: cornerRadius,
+      Offset(inflated.center.dx, inflated.top): edgeRadius,
+      inflated.topRight: cornerRadius,
+      Offset(inflated.left, inflated.center.dy): edgeRadius,
+      Offset(inflated.right, inflated.center.dy): edgeRadius,
+      inflated.bottomLeft: cornerRadius,
+      Offset(inflated.center.dx, inflated.bottom): edgeRadius,
+      inflated.bottomRight: cornerRadius,
+    };
 
-    // 2. Aresta Inferior (Vertical)
-    final bottomCenter = Offset(inflated.center.dx, inflated.bottom);
-    canvas.drawCircle(bottomCenter, edgeRadius, handlePaint);
-    canvas.drawCircle(bottomCenter, edgeRadius, handleBorder);
-
-    // 3. Vértice Inferior-Direito (Geral)
-    final bottomRight = inflated.bottomRight;
-    canvas.drawCircle(bottomRight, cornerRadius, handlePaint);
-    canvas.drawCircle(bottomRight, cornerRadius, handleBorder);
+    for (final entry in handlePositions.entries) {
+      canvas.drawCircle(entry.key, entry.value, handlePaint);
+      canvas.drawCircle(entry.key, entry.value, handleBorder);
+    }
 
     // HUD Moscaro de Graus em Rotação (Exibido no topo da seleção durante rotação ativa)
     if (rotation != 0.0 || activeHandle == SelectionHandleType.rotation) {

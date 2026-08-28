@@ -162,6 +162,8 @@ class LaserPointerPainter extends CustomPainter {
       final bucketPaths = List.generate(numBuckets, (_) => Path());
       final bucketAlphas = [1.0, 0.65, 0.35, 0.12];
 
+      final bucketStarted = List.filled(numBuckets, false);
+
       for (int i = 0; i < trail.length - 1; i++) {
         final p0 = trail[i];
         final p1 = trail[i + 1];
@@ -173,8 +175,20 @@ class LaserPointerPainter extends CustomPainter {
         bucketIndex = bucketIndex.clamp(0, numBuckets - 1);
 
         final targetPath = bucketPaths[bucketIndex];
-        targetPath.moveTo(p0.point.dx, p0.point.dy);
-        targetPath.lineTo(p1.point.dx, p1.point.dy);
+        final midX = (p0.point.dx + p1.point.dx) / 2.0;
+        final midY = (p0.point.dy + p1.point.dy) / 2.0;
+
+        if (!bucketStarted[bucketIndex] || trail[i].isSegmentStart) {
+          targetPath.moveTo(p0.point.dx, p0.point.dy);
+          targetPath.lineTo(midX, midY);
+          bucketStarted[bucketIndex] = true;
+        } else {
+          targetPath.quadraticBezierTo(p0.point.dx, p0.point.dy, midX, midY);
+        }
+
+        if (i == trail.length - 2) {
+          targetPath.lineTo(p1.point.dx, p1.point.dy);
+        }
       }
 
       // Desenha cada balde de tempo em lote na GPU

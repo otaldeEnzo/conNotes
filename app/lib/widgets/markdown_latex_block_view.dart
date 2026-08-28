@@ -41,6 +41,7 @@ class MarkdownLatexBlockView extends StatefulWidget {
   final CanvasCardModel card;
   final ValueChanged<String> onContentChanged;
   final ValueChanged<CardActiveTextStyles>? onActiveStylesChanged;
+  final ValueChanged<bool>? onEditingModeChanged;
   final bool isInteractive;
 
   const MarkdownLatexBlockView({
@@ -48,6 +49,7 @@ class MarkdownLatexBlockView extends StatefulWidget {
     required this.card,
     required this.onContentChanged,
     this.onActiveStylesChanged,
+    this.onEditingModeChanged,
     this.isInteractive = true,
   });
 
@@ -87,7 +89,7 @@ class MarkdownLatexBlockViewState extends State<MarkdownLatexBlockView> {
 
     // Preserva a seleção de texto sempre que for válida
     if (sel.isValid && sel.start >= 0) {
-      if (sel.end > sel.start) {
+      if (sel.end >= sel.start) {
         _lastSelection = sel;
       }
     }
@@ -254,6 +256,7 @@ class MarkdownLatexBlockViewState extends State<MarkdownLatexBlockView> {
       _blockController.loadFromFormattedText(block.rawText);
       _showSlashMenu = false;
     });
+    widget.onEditingModeChanged?.call(true);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) {
         _blockFocusNode.requestFocus();
@@ -286,13 +289,14 @@ class MarkdownLatexBlockViewState extends State<MarkdownLatexBlockView> {
   }
 
   /// Conclui a edição do bloco e fecha a caixa de edição
-  void _commitBlockEdit() {
+  void commitBlockEdit() {
     if (_editingBlockIndex == null) return;
     _syncBlockContent();
     setState(() {
       _editingBlockIndex = null;
       _showSlashMenu = false;
     });
+    widget.onEditingModeChanged?.call(false);
     globalIsEditingText = false;
   }
 
@@ -370,6 +374,9 @@ class MarkdownLatexBlockViewState extends State<MarkdownLatexBlockView> {
   /// Insere um snippet no bloco ativo ou no final do card sem fechar o bloco
   void insertSnippetAtActive(String snippet) {
     if (_editingBlockIndex != null) {
+      if (_lastSelection.isValid && _lastSelection.start >= 0) {
+        _blockController.selection = _lastSelection;
+      }
       final text = _blockController.text;
       final sel = _blockController.selection;
       if (sel.isValid && sel.start >= 0 && sel.end >= 0) {
@@ -383,6 +390,8 @@ class MarkdownLatexBlockViewState extends State<MarkdownLatexBlockView> {
         _blockController.selection = TextSelection.collapsed(offset: newText.length);
         _syncBlockContent();
       }
+      _lastSelection = _blockController.selection;
+      _blockFocusNode.requestFocus();
     } else {
       final current = widget.card.content;
       final updated = current.isEmpty ? snippet : '$current\n\n$snippet';
@@ -390,15 +399,14 @@ class MarkdownLatexBlockViewState extends State<MarkdownLatexBlockView> {
     }
   }
 
-  /// Aplica ou remove (toggle) formatação no texto selecionado ou ativa typingStyle para os próximos caracteres
+  /// Aplica ou remove (toggle) formatação no texto selecionado ou ativa typingStyle para os próximos caracteres (100% WYSIWYG)
   void wrapSelection({required String prefix, required String suffix}) {
     if (_editingBlockIndex == null) {
       editLastBlock();
     }
 
     if (_editingBlockIndex != null) {
-      // Restaura a seleção salva se o TextField perdeu foco ao clicar na barra superior
-      if (_lastSelection.isValid && _lastSelection.start >= 0 && _lastSelection.end > _lastSelection.start) {
+      if (_lastSelection.isValid && _lastSelection.start >= 0) {
         _blockController.selection = _lastSelection;
       }
 
@@ -437,11 +445,44 @@ class MarkdownLatexBlockViewState extends State<MarkdownLatexBlockView> {
           }
         }
       } else {
+        // Para snippets (como listas)
         insertSnippetAtActive('$prefix$suffix');
+        return; // insertSnippetAtActive já atualiza o sync e o focus
       }
 
       _lastSelection = _blockController.selection;
       _syncBlockContent();
+      widget.onActiveStylesChanged?.call(getActiveStyles());
+      _blockFocusNode.requestFocus();
+    }
+  }
+
+  /// Aplica cor do texto via WYSIWYG Spans
+  void applyTextColor(Color color) {
+    if (_editingBlockIndex == null) editLastBlock();
+    if (_editingBlockIndex != null) {
+      if (_lastSelection.isValid && _lastSelection.start >= 0) {
+        _blockController.selection = _lastSelection;
+      }
+      _blockController.toggleFormatting(setTextColor: color);
+      _lastSelection = _blockController.selection;
+      _syncBlockContent();
+      widget.onActiveStylesChanged?.call(getActiveStyles());
+      _blockFocusNode.requestFocus();
+    }
+  }
+
+  /// Aplica tamanho da fonte via WYSIWYG Spans
+  void applyFontSize(double size) {
+    if (_editingBlockIndex == null) editLastBlock();
+    if (_editingBlockIndex != null) {
+      if (_lastSelection.isValid && _lastSelection.start >= 0) {
+        _blockController.selection = _lastSelection;
+      }
+      _blockController.toggleFormatting(setFontSize: size);
+      _lastSelection = _blockController.selection;
+      _syncBlockContent();
+      widget.onActiveStylesChanged?.call(getActiveStyles());
       _blockFocusNode.requestFocus();
     }
   }
@@ -464,77 +505,102 @@ class MarkdownLatexBlockViewState extends State<MarkdownLatexBlockView> {
     final fontSize = widget.card.fontSize;
 
     final blocks = _parseContentIntoBlocks(widget.card.content);
-    final availableBodyHeight = math.max(80.0, widget.card.height - 46.0);
+    final availableBodyHeight = math.max(60.0, widget.card.height - 46.0);
     final isSingleBlock = blocks.length <= 1;
 
     if (widget.card.content.trim().isEmpty && _editingBlockIndex == null) {
-      return GestureDetector(
-        behavior: HitTestBehavior.opaque,
-        onTap: () {
-          _startEditingBlock(const ParsedContentBlock(
-            index: 0,
-            type: BlockType.markdownText,
-            rawText: '',
-          ));
-        },
-        onDoubleTap: () {
-          _startEditingBlock(const ParsedContentBlock(
-            index: 0,
-            type: BlockType.markdownText,
-            rawText: '',
-          ));
-        },
-        child: Container(
-          width: double.infinity,
-          constraints: BoxConstraints(minHeight: availableBodyHeight),
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
-          alignment: Alignment.topLeft,
-          child: Text(
-            'Clique para adicionar texto, fórmulas \$LaTeX\$, callouts ou diagramas...\n(Digite "/" para comandos rápidos ou Ctrl+Enter para novos blocos)',
-            style: TextStyle(
-              color: textPrimary.withValues(alpha: 0.45),
-              fontFamily: fontFamily,
-              fontSize: fontSize,
-              fontStyle: FontStyle.italic,
-              height: 1.4,
-            ),
-          ),
-        ),
+      return _buildPlaceholderSuggestionView(
+        availableBodyHeight: availableBodyHeight,
+        isLight: isLight,
+        themeAccent: themeAccent,
+        textPrimary: textPrimary,
+        fontFamily: fontFamily,
+        fontSize: fontSize,
       );
     }
 
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-      child: Container(
-        width: double.infinity,
-        constraints: BoxConstraints(minHeight: availableBodyHeight),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            ...blocks.map((block) {
-              final isEditing = _editingBlockIndex == block.index;
-              if (isEditing) {
-                return _buildEditingField(
+      child: ClipRect(
+        child: Container(
+          width: double.infinity,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              ...blocks.map((block) {
+                final isEditing = _editingBlockIndex == block.index;
+                if (isEditing) {
+                  return _buildEditingField(
+                    block,
+                    isLight,
+                    themeAccent,
+                    textPrimary,
+                    fontFamily,
+                    fontSize,
+                  );
+                }
+                return _buildRenderedBlock(
                   block,
                   isLight,
                   themeAccent,
                   textPrimary,
                   fontFamily,
                   fontSize,
-                  minHeight: isSingleBlock ? availableBodyHeight - 20.0 : 60.0,
                 );
-              }
-              return _buildRenderedBlock(
-                block,
-                isLight,
-                themeAccent,
-                textPrimary,
-                fontFamily,
-                fontSize,
-                minHeight: isSingleBlock ? availableBodyHeight - 20.0 : 36.0,
-              );
-            }),
+              }),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildPlaceholderSuggestionView({
+    required double availableBodyHeight,
+    required bool isLight,
+    required Color themeAccent,
+    required Color textPrimary,
+    required String fontFamily,
+    required double fontSize,
+  }) {
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: () {
+        _startEditingBlock(const ParsedContentBlock(
+          index: 0,
+          type: BlockType.markdownText,
+          rawText: '',
+        ));
+      },
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(
+              'Card STEM',
+              style: TextStyle(
+                color: textPrimary.withValues(alpha: 0.35),
+                fontFamily: fontFamily,
+                fontSize: fontSize + 2.0,
+                fontWeight: FontWeight.w600,
+                letterSpacing: 0.2,
+              ),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              'Clique duas vezes para digitar texto, fórmulas LaTeX (\$E=mc^2\$), diagramas Mermaid ou "/" para comandos...',
+              style: TextStyle(
+                color: textPrimary.withValues(alpha: 0.28),
+                fontFamily: fontFamily,
+                fontSize: fontSize,
+                height: 1.4,
+                fontStyle: FontStyle.italic,
+              ),
+            ),
           ],
         ),
       ),
@@ -547,18 +613,10 @@ class MarkdownLatexBlockViewState extends State<MarkdownLatexBlockView> {
     Color themeAccent,
     Color textPrimary,
     String fontFamily,
-    double fontSize, {
-    double minHeight = 60.0,
-  }) {
-    return TapRegion(
-      groupId: 'card_block_editor_${widget.card.id}',
-      onTapOutside: (_) {
-        if (_editingBlockIndex == block.index) {
-          _commitBlockEdit();
-        }
-      },
-      child: CallbackShortcuts(
-        bindings: {
+    double fontSize,
+  ) {
+    return CallbackShortcuts(
+      bindings: {
         const SingleActivator(LogicalKeyboardKey.keyZ, control: true): () {
           _blockController.undo();
           _syncBlockContent();
@@ -619,60 +677,38 @@ class MarkdownLatexBlockViewState extends State<MarkdownLatexBlockView> {
             },
             child: Container(
               width: double.infinity,
-              constraints: BoxConstraints(minHeight: minHeight),
-              margin: const EdgeInsets.only(bottom: 6),
-              padding: const EdgeInsets.only(left: 10, right: 80, top: 8, bottom: 8),
+              margin: const EdgeInsets.only(bottom: 4),
+              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
               decoration: BoxDecoration(
-                color: themeAccent.withValues(alpha: isLight ? 0.08 : 0.12),
-                borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: themeAccent, width: 1.5),
-                boxShadow: [
-                  BoxShadow(
-                    color: themeAccent.withValues(alpha: 0.25),
-                    blurRadius: 10,
-                    offset: const Offset(0, 2),
-                  ),
-                ],
+                color: themeAccent.withValues(alpha: isLight ? 0.06 : 0.10),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: themeAccent.withValues(alpha: 0.5), width: 1.0),
               ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  TextField(
-                    controller: _blockController,
-                    focusNode: _blockFocusNode,
-                    maxLines: null,
-                    minLines: minHeight > 100 ? 3 : 1,
-                    style: TextStyle(
-                      color: textPrimary,
-                      fontFamily: fontFamily,
-                      fontSize: fontSize,
-                      height: 1.45,
-                    ),
-                    decoration: const InputDecoration(
-                      isDense: true,
-                      border: InputBorder.none,
-                      contentPadding: EdgeInsets.zero,
-                    ),
-                    onChanged: (val) => _syncBlockContent(),
-                  ),
-                  const SizedBox(height: 6),
-                  Text(
-                    'Ctrl+Enter: Novo Bloco • "/" Comandos • Ctrl+Z/Y: Desfazer/Refazer',
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      color: textPrimary.withValues(alpha: 0.45),
-                      fontSize: 9.5,
-                    ),
-                  ),
-                ],
+              child: TextField(
+                controller: _blockController,
+                focusNode: _blockFocusNode,
+                maxLines: null,
+                minLines: 1,
+                style: TextStyle(
+                  color: textPrimary,
+                  fontFamily: fontFamily,
+                  fontSize: fontSize,
+                  height: 1.45,
+                ),
+                decoration: const InputDecoration(
+                  isDense: true,
+                  border: InputBorder.none,
+                  contentPadding: EdgeInsets.zero,
+                ),
+                onChanged: (val) => _syncBlockContent(),
               ),
             ),
           ),
 
           // Botões de Ação do Bloco no Canto Superior Direito
           Positioned(
-            top: 6,
-            right: 6,
+            top: -10,
+            right: 4,
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
               decoration: BoxDecoration(
@@ -718,7 +754,7 @@ class MarkdownLatexBlockViewState extends State<MarkdownLatexBlockView> {
                   ),
                   const SizedBox(width: 4),
                   InkWell(
-                    onTap: _commitBlockEdit,
+                    onTap: commitBlockEdit,
                     borderRadius: BorderRadius.circular(4),
                     child: Padding(
                       padding: const EdgeInsets.all(2),
@@ -795,7 +831,6 @@ class MarkdownLatexBlockViewState extends State<MarkdownLatexBlockView> {
             ),
         ],
       ),
-    ),
     );
   }
 
@@ -805,9 +840,8 @@ class MarkdownLatexBlockViewState extends State<MarkdownLatexBlockView> {
     Color themeAccent,
     Color textPrimary,
     String fontFamily,
-    double fontSize, {
-    double minHeight = 36.0,
-  }) {
+    double fontSize,
+  ) {
     final isHovered = _hoveredBlockIndex == block.index;
 
     return MouseRegion(
@@ -822,7 +856,6 @@ class MarkdownLatexBlockViewState extends State<MarkdownLatexBlockView> {
           children: [
             Container(
               width: double.infinity,
-              constraints: BoxConstraints(minHeight: minHeight),
               margin: const EdgeInsets.only(bottom: 4),
               padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
               decoration: BoxDecoration(
@@ -1415,18 +1448,15 @@ class MarkdownLatexBlockViewState extends State<MarkdownLatexBlockView> {
           }
 
           // 6. Parágrafo Comum com Parse Rico de Inline (HTML, KaTeX, Cores, etc)
-          return Padding(
-            padding: const EdgeInsets.symmetric(vertical: 1.5),
-            child: Text.rich(
-              TextSpan(
-                children: _parseRichInlineSpan(
-                  line,
-                  textPrimary: textPrimary,
-                  fontFamily: fontFamily,
-                  fontSize: fontSize,
-                  themeAccent: themeAccent,
-                  isLight: isLight,
-                ),
+          return Text.rich(
+            TextSpan(
+              children: _parseRichInlineSpan(
+                line,
+                textPrimary: textPrimary,
+                fontFamily: fontFamily,
+                fontSize: fontSize,
+                themeAccent: themeAccent,
+                isLight: isLight,
               ),
             ),
           );
@@ -1755,3 +1785,4 @@ class MarkdownLatexBlockViewState extends State<MarkdownLatexBlockView> {
     return fallback;
   }
 }
+
