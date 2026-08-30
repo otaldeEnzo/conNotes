@@ -10,6 +10,7 @@ import 'moscaro_rich_text_controller.dart';
 import 'card_slash_command_popover.dart';
 import 'card_format_floating_pill.dart';
 import 'stem_callout_box_view.dart';
+import 'svg_icon.dart';
 
 enum BlockType {
   heading,
@@ -131,52 +132,19 @@ class MarkdownLatexBlockViewState extends State<MarkdownLatexBlockView> {
 
   CardActiveTextStyles getActiveStyles() {
     if (_editingBlockIndex == null) return const CardActiveTextStyles();
-    final sel = _blockController.selection;
-
-    // Se houver estilo de digitação ativo e o cursor estiver parado (sem seleção)
-    if (_blockController.hasActiveTypingStyle && (!sel.isValid || sel.isCollapsed)) {
-      final ts = _blockController.typingStyle;
-      return CardActiveTextStyles(
-        isBold: ts.isBold,
-        isItalic: ts.isItalic,
-        isUnderline: ts.isUnderline,
-        isStrikethrough: ts.isStrikethrough,
-        isSubscript: ts.isSubscript,
-        isSuperscript: ts.isSuperscript,
-        isCode: ts.isCode,
-        isLatex: ts.isLatex,
-        textColor: ts.textColor,
-        highlightColor: ts.highlightColor,
-        fontSize: ts.fontSize,
-      );
-    }
-
-    if (!sel.isValid || sel.start < 0) return const CardActiveTextStyles();
-
-    final start = math.min(sel.start, sel.end);
-    final end = math.max(sel.start, sel.end);
-
-    // Procura spans que tocam o cursor ou a seleção
-    final matchingSpans = _blockController.styleSpans.where((s) {
-      if (start == end) {
-        return s.start <= start && s.end >= start;
-      } else {
-        return s.start < end && s.end > start;
-      }
-    }).toList();
-
+    final style = _blockController.getActiveStyleAtCurrentSelection();
     return CardActiveTextStyles(
-      isBold: matchingSpans.any((s) => s.isBold),
-      isItalic: matchingSpans.any((s) => s.isItalic),
-      isUnderline: matchingSpans.any((s) => s.isUnderline),
-      isStrikethrough: matchingSpans.any((s) => s.isStrikethrough),
-      isSubscript: matchingSpans.any((s) => s.isSubscript),
-      isSuperscript: matchingSpans.any((s) => s.isSuperscript),
-      isCode: matchingSpans.any((s) => s.isCode),
-      isLatex: matchingSpans.any((s) => s.isLatex),
-      textColor: matchingSpans.cast<RichStyleSpan?>().firstWhere((s) => s?.textColor != null, orElse: () => null)?.textColor,
-      highlightColor: matchingSpans.cast<RichStyleSpan?>().firstWhere((s) => s?.highlightColor != null, orElse: () => null)?.highlightColor,
-      fontSize: matchingSpans.cast<RichStyleSpan?>().firstWhere((s) => s?.fontSize != null, orElse: () => null)?.fontSize,
+      isBold: style.isBold,
+      isItalic: style.isItalic,
+      isUnderline: style.isUnderline,
+      isStrikethrough: style.isStrikethrough,
+      isSubscript: style.isSubscript,
+      isSuperscript: style.isSuperscript,
+      isCode: style.isCode,
+      isLatex: style.isLatex,
+      textColor: style.textColor,
+      highlightColor: style.highlightColor,
+      fontSize: style.fontSize,
     );
   }
 
@@ -698,19 +666,19 @@ class MarkdownLatexBlockViewState extends State<MarkdownLatexBlockView> {
                 decoration: const InputDecoration(
                   isDense: true,
                   border: InputBorder.none,
-                  contentPadding: EdgeInsets.zero,
+                  contentPadding: EdgeInsets.only(left: 6, top: 4, bottom: 4, right: 84),
                 ),
                 onChanged: (val) => _syncBlockContent(),
               ),
             ),
           ),
 
-          // Botões de Ação do Bloco no Canto Superior Direito
+          // Botões de Ação do Bloco no Canto Superior Direito (100% visíveis dentro do bloco)
           Positioned(
-            top: -10,
-            right: 4,
+            top: 4,
+            right: 6,
             child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
               decoration: BoxDecoration(
                 color: isLight ? const Color(0xFFF8FAFC).withValues(alpha: 0.95) : MoscaroTokens.glassTint,
                 borderRadius: BorderRadius.circular(MoscaroTokens.radiusPill),
@@ -736,7 +704,7 @@ class MarkdownLatexBlockViewState extends State<MarkdownLatexBlockView> {
                       padding: const EdgeInsets.all(2),
                       child: Tooltip(
                         message: 'Novo Bloco (Ctrl+Enter)',
-                        child: Icon(Icons.add_circle_outline_rounded, size: 14, color: themeAccent),
+                        child: SvgIcon(name: 'plus', size: 12, color: themeAccent),
                       ),
                     ),
                   ),
@@ -748,7 +716,7 @@ class MarkdownLatexBlockViewState extends State<MarkdownLatexBlockView> {
                       padding: EdgeInsets.all(2),
                       child: Tooltip(
                         message: 'Excluir Bloco',
-                        child: Icon(Icons.delete_outline_rounded, size: 14, color: Color(0xFFFF007A)),
+                        child: SvgIcon(name: 'trash', size: 12, color: Color(0xFFFF007A)),
                       ),
                     ),
                   ),
@@ -760,7 +728,7 @@ class MarkdownLatexBlockViewState extends State<MarkdownLatexBlockView> {
                       padding: const EdgeInsets.all(2),
                       child: Tooltip(
                         message: 'Concluir Edição',
-                        child: Icon(Icons.check_circle_outline_rounded, size: 15, color: themeAccent),
+                        child: SvgIcon(name: 'check', size: 12, color: themeAccent),
                       ),
                     ),
                   ),

@@ -146,6 +146,11 @@ bool Win32Window::Create(const std::wstring& title,
 
   UpdateTheme(window);
 
+  BOOL feedback_disabled = FALSE;
+  for (int i = 1; i <= 11; i++) {
+    SetWindowFeedbackSetting(window, (FEEDBACK_TYPE)i, 0, sizeof(BOOL), &feedback_disabled);
+  }
+
   return OnCreate();
 }
 
@@ -173,12 +178,53 @@ LRESULT CALLBACK Win32Window::WndProc(HWND const window,
   return DefWindowProc(window, message, wparam, lparam);
 }
 
+#ifndef WM_TABLET_QUERYSYSTEMGESTURESTATUS
+#define WM_TABLET_QUERYSYSTEMGESTURESTATUS 0x02CC
+#endif
+#ifndef TABLET_DISABLE_PRESSANDHOLD
+#define TABLET_DISABLE_PRESSANDHOLD 0x00000001
+#endif
+#ifndef TABLET_DISABLE_PENTAPFEEDBACK
+#define TABLET_DISABLE_PENTAPFEEDBACK 0x00000008
+#endif
+#ifndef TABLET_DISABLE_PENBARRELFEEDBACK
+#define TABLET_DISABLE_PENBARRELFEEDBACK 0x00000010
+#endif
+#ifndef TABLET_DISABLE_TOUCHUIFORCEON
+#define TABLET_DISABLE_TOUCHUIFORCEON 0x00000100
+#endif
+#ifndef TABLET_DISABLE_TOUCHUIFORCEOFF
+#define TABLET_DISABLE_TOUCHUIFORCEOFF 0x00000200
+#endif
+#ifndef TABLET_DISABLE_TOUCHSWITCH
+#define TABLET_DISABLE_TOUCHSWITCH 0x00000400
+#endif
+#ifndef TABLET_DISABLE_FLICKS
+#define TABLET_DISABLE_FLICKS 0x00010000
+#endif
+#ifndef TABLET_ENABLE_MULTITOUCHDATA
+#define TABLET_ENABLE_MULTITOUCHDATA 0x01000000
+#endif
+
+#define TABLET_FLAGS_ALL_DISABLED ( \
+    TABLET_DISABLE_PRESSANDHOLD | \
+    TABLET_DISABLE_PENTAPFEEDBACK | \
+    TABLET_DISABLE_PENBARRELFEEDBACK | \
+    TABLET_DISABLE_TOUCHUIFORCEON | \
+    TABLET_DISABLE_TOUCHUIFORCEOFF | \
+    TABLET_DISABLE_TOUCHSWITCH | \
+    TABLET_DISABLE_FLICKS | \
+    TABLET_ENABLE_MULTITOUCHDATA)
+
 LRESULT
 Win32Window::MessageHandler(HWND hwnd,
                             UINT const message,
                             WPARAM const wparam,
                             LPARAM const lparam) noexcept {
   switch (message) {
+    case WM_TABLET_QUERYSYSTEMGESTURESTATUS:
+      return TABLET_FLAGS_ALL_DISABLED;
+
     case WM_DESTROY:
       window_handle_ = nullptr;
       Destroy();
@@ -245,6 +291,13 @@ void Win32Window::SetChildContent(HWND content) {
 
   MoveWindow(content, frame.left, frame.top, frame.right - frame.left,
              frame.bottom - frame.top, true);
+
+  if (content) {
+    BOOL feedback_disabled = FALSE;
+    for (int i = 1; i <= 11; i++) {
+      SetWindowFeedbackSetting(content, (FEEDBACK_TYPE)i, 0, sizeof(BOOL), &feedback_disabled);
+    }
+  }
 
   SetFocus(child_content_);
 }

@@ -67,12 +67,54 @@ typedef ConnotesRedoDart = bool Function(ffi.Pointer<Utf8> docId);
 typedef ConnotesFreeStringNative = ffi.Void Function(ffi.Pointer<Utf8> ptr);
 typedef ConnotesFreeStringDart = void Function(ffi.Pointer<Utf8> ptr);
 
+typedef ConnotesInitTextureNative = ffi.Int64 Function(ffi.Pointer<Utf8> docId);
+typedef ConnotesInitTextureDart = int Function(ffi.Pointer<Utf8> docId);
+
+typedef ConnotesSendDrawEventNative = ffi.Void Function(ffi.Pointer<Utf8> docId, ffi.Pointer<Utf8> eventJson);
+typedef ConnotesSendDrawEventDart = void Function(ffi.Pointer<Utf8> docId, ffi.Pointer<Utf8> eventJson);
+
+typedef ConnotesRenderTickNative = ffi.Void Function(ffi.Pointer<Utf8> docId);
+typedef ConnotesRenderTickDart = void Function(ffi.Pointer<Utf8> docId);
+
+final class StylusNativeStateFfi extends ffi.Struct {
+  @ffi.Bool()
+  external bool is_contact;
+  
+  @ffi.Bool()
+  external bool is_barrel_primary_pressed;
+  
+  @ffi.Bool()
+  external bool is_barrel_secondary_pressed;
+  
+  @ffi.Bool()
+  external bool is_inverted_eraser;
+  
+  @ffi.Float()
+  external double pressure;
+  
+  @ffi.Int32()
+  external int tilt_x;
+  
+  @ffi.Int32()
+  external int tilt_y;
+  
+  @ffi.Uint32()
+  external int button_count;
+}
+
+typedef ConnotesGetStylusStateNative = ffi.Pointer<StylusNativeStateFfi> Function();
+typedef ConnotesGetStylusStateDart = ffi.Pointer<StylusNativeStateFfi> Function();
+
+typedef ConnotesQueryStylusCapsNative = ffi.Uint32 Function();
+typedef ConnotesQueryStylusCapsDart = int Function();
+
 /// Ponte FFI de alta performance para comunicação direta com o motor nativo `connotes_core`.
 class ConnotesNativeBridge {
   static ConnotesNativeBridge? _instance;
   static ConnotesNativeBridge get instance => _instance ??= ConnotesNativeBridge._();
 
   late final ffi.DynamicLibrary _dylib;
+  late final ffi.DynamicLibrary _processLib;
   bool _isAvailable = false;
   bool get isAvailable => _isAvailable;
 
@@ -83,6 +125,12 @@ class ConnotesNativeBridge {
   late final ConnotesUndoDart _undo;
   late final ConnotesRedoDart _redo;
   late final ConnotesFreeStringDart _freeString;
+  late final ConnotesInitTextureDart _initTexture;
+  late final ConnotesSendDrawEventDart _sendDrawEvent;
+  late final ConnotesRenderTickDart _renderTick;
+
+  ConnotesGetStylusStateDart? _getStylusState;
+  ConnotesQueryStylusCapsDart? _queryStylusCaps;
 
   ConnotesNativeBridge._() {
     _init();
@@ -92,12 +140,16 @@ class ConnotesNativeBridge {
     try {
       if (Platform.isWindows) {
         _dylib = ffi.DynamicLibrary.open('connotes_core.dll');
+        _processLib = ffi.DynamicLibrary.process();
       } else if (Platform.isAndroid) {
         _dylib = ffi.DynamicLibrary.open('libconnotes_core.so');
+        _processLib = ffi.DynamicLibrary.process();
       } else if (Platform.isMacOS) {
         _dylib = ffi.DynamicLibrary.open('libconnotes_core.dylib');
+        _processLib = ffi.DynamicLibrary.process();
       } else {
         _dylib = ffi.DynamicLibrary.process();
+        _processLib = _dylib;
       }
 
       _createDocument = _dylib
@@ -127,6 +179,31 @@ class ConnotesNativeBridge {
       _freeString = _dylib
           .lookup<ffi.NativeFunction<ConnotesFreeStringNative>>('connotes_free_string')
           .asFunction();
+
+      _initTexture = _dylib
+          .lookup<ffi.NativeFunction<ConnotesInitTextureNative>>('connotes_init_texture')
+          .asFunction();
+
+      _sendDrawEvent = _dylib
+          .lookup<ffi.NativeFunction<ConnotesSendDrawEventNative>>('connotes_send_draw_event')
+          .asFunction();
+
+      _renderTick = _dylib
+          .lookup<ffi.NativeFunction<ConnotesRenderTickNative>>('connotes_render_tick')
+          .asFunction();
+
+      try {
+        if (Platform.isWindows) {
+          _getStylusState = _processLib
+              .lookup<ffi.NativeFunction<ConnotesGetStylusStateNative>>('getStylusRealtimeState')
+              .asFunction();
+          _queryStylusCaps = _processLib
+              .lookup<ffi.NativeFunction<ConnotesQueryStylusCapsNative>>('connotes_query_stylus_caps')
+              .asFunction();
+        }
+      } catch (e) {
+        // Ignora caso não esteja rodando nativo no Windows ou se símbolos não exportados.
+      }
 
       _isAvailable = true;
     } catch (e) {
@@ -208,5 +285,48 @@ class ConnotesNativeBridge {
     final res = _redo(docIdPtr);
     calloc.free(docIdPtr);
     return res;
+  }
+
+  int? initTexture(String docId) {
+    if (!_isAvailable) return null;
+    final docIdPtr = docId.toNativeUtf8();
+    final res = _initTexture(docIdPtr);
+    calloc.free(docIdPtr);
+    return res;
+  }
+
+  void sendDrawEvent(String docId, String eventJson) {
+    if (!_isAvailable) return;
+    final docIdPtr = docId.toNativeUtf8();
+    final eventJsonPtr = eventJson.toNativeUtf8();
+    _sendDrawEvent(docIdPtr, eventJsonPtr);
+    calloc.free(docIdPtr);
+    calloc.free(eventJsonPtr);
+  }
+
+  void renderTick(String docId) {
+    if (!_isAvailable) return;
+    final docIdPtr = docId.toNativeUtf8();
+    _renderTick(docIdPtr);
+    calloc.free(docIdPtr);
+  }
+
+  /// Recupera o estado em tempo real da caneta via Win32.
+  StylusNativeStateFfi? getStylusRealtimeState() {
+    if (_getStylusState != null) {
+      final ptr = _getStylusState!();
+      if (ptr != ffi.nullptr) {
+        return ptr.ref;
+      }
+    }
+    return null;
+  }
+
+  /// Retorna as capacidades (ex: contagem de botões laterais detectados via HID).
+  int getConnectedStylusCapabilities() {
+    if (_queryStylusCaps != null) {
+      return _queryStylusCaps!();
+    }
+    return 2; // Padrão
   }
 }

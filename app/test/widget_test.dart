@@ -4,6 +4,10 @@ import 'package:connotes_app/main.dart';
 
 void main() {
   testWidgets('Canvas render test', (WidgetTester tester) async {
+    tester.view.physicalSize = const Size(1920, 1080);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(() => tester.view.resetPhysicalSize());
+
     // Carrega o app conNotes
     await tester.pumpWidget(const ConNotesApp());
 

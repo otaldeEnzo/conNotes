@@ -47,6 +47,7 @@ import '../models/ai_message_model.dart';
 import '../models/ai_provider_models.dart';
 import '../services/ai_service_bridge.dart';
 import 'cards_debug_overlay.dart';
+import '../services/cards_telemetry_controller.dart';
 
 class CanvasHomeScreen extends StatefulWidget {
   const CanvasHomeScreen({super.key});
@@ -332,22 +333,27 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
   }
 
   void _updateSettings(AppSettingsState newSettings) {
-    MoscaroTokens.blurSigma = newSettings.blurSigma;
+    final themesToKeep = newSettings.customThemes.isNotEmpty
+        ? newSettings.customThemes
+        : MoscaroThemeController.instance.customThemes;
+    final mergedSettings = newSettings.copyWith(customThemes: themesToKeep);
+
+    MoscaroTokens.blurSigma = mergedSettings.blurSigma;
     MoscaroThemeController.instance.initialize(
-      themeId: newSettings.activeThemeId,
-      bgModeId: newSettings.customBgMode,
-      customSolidHex: newSettings.customBgColorHex,
-      customGradStartHex: newSettings.customGradStartHex,
-      customGradEndHex: newSettings.customGradEndHex,
-      textureId: newSettings.customTextureType,
-      imagePath: newSettings.customImagePath,
-      imageOpacity: newSettings.customImageOpacity,
-      customThemes: newSettings.customThemes,
+      themeId: mergedSettings.activeThemeId,
+      bgModeId: mergedSettings.customBgMode,
+      customSolidHex: mergedSettings.customBgColorHex,
+      customGradStartHex: mergedSettings.customGradStartHex,
+      customGradEndHex: mergedSettings.customGradEndHex,
+      textureId: mergedSettings.customTextureType,
+      imagePath: mergedSettings.customImagePath,
+      imageOpacity: mergedSettings.customImageOpacity,
+      customThemes: themesToKeep,
     );
     setState(() {
-      _settings = newSettings;
+      _settings = mergedSettings;
     });
-    SettingsService.instance.saveSettings(newSettings);
+    SettingsService.instance.saveSettings(mergedSettings);
   }
 
   void _resetSettingsCategory() {
@@ -1215,42 +1221,12 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
   }
 
   CanvasCardModel? _findCardAtPoint(List<CanvasCardModel> cards, Offset canvasPoint, String? selectedCardId) {
-    // 1. Se houver card selecionado, prioriza suas alças e limites reais com margem de segurança
-    if (selectedCardId != null) {
-      final selected = cards.where((c) => c.id == selectedCardId).firstOrNull;
-      if (selected != null) {
-        final bool isCollapsed = selected.isCollapsed;
-        final double cardH = isCollapsed ? 36.0 : math.max(selected.height, selected.calculateMinHeight());
-        // Alças existem à direita e abaixo (com 36px de zona de toque)
-        final selectedRect = Rect.fromLTRB(
-          selected.x - 4.0,
-          selected.y - 4.0,
-          selected.x + selected.width + 36.0,
-          selected.y + cardH + 36.0,
-        );
-        if (selectedRect.contains(canvasPoint)) {
-          return selected;
-        }
-      }
-    }
-
-    // 2. Testa os outros cards em ordem reversa (topo para o fundo) com limites exatos
-    for (final card in cards.reversed) {
-      if (card.id == selectedCardId) continue;
-      final bool isCollapsed = card.isCollapsed;
-      final double cardH = isCollapsed ? 36.0 : math.max(card.height, card.calculateMinHeight());
-
-      final cardRect = Rect.fromLTWH(
-        card.x,
-        card.y,
-        card.width,
-        cardH,
-      );
-      if (cardRect.contains(canvasPoint)) {
-        return card;
-      }
-    }
-    return null;
+    final match = CardsTelemetryController.detectCardZone(
+      cards: cards,
+      selectedCardId: selectedCardId,
+      canvasPoint: canvasPoint,
+    );
+    return match.card;
   }
 
   void _selectAll() {
@@ -1439,21 +1415,14 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
                     _laserEngine.updateHoverPosition(null);
                   }
                 },
-                child: GestureDetector(
-                  onTapDown: (_) {
-                    if (_isSidebarOpen) {
-                      setState(() {
-                        _isSidebarOpen = false;
-                      });
-                    }
-                  },
-                  child: CanvasInputRouter(
+                child: CanvasInputRouter(
                     canvasContext: this,
                     activePenPreset: _activePenPreset,
                     activeStrokeUpdateNotifier: _activeStrokeUpdateNotifier,
                     selectionUpdateNotifier: _selectionUpdateNotifier,
                     panNotifier: _panNotifier,
                     zoomNotifier: _zoomNotifier,
+                    dragPictureCache: _dragPictureCache,
                     onScheduleBounceCheck: _scheduleBounceCheck,
                     onCommitStroke: (newStroke) {
                       final n = _currentNote;
@@ -1581,7 +1550,6 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
                     ),
                   ),
                 ),
-              ),
 
               // 2. Barra de Ações Rápidas da Seleção (Flutuante sobre a Bounding Box)
               if (_selectionState.hasSelection && _currentNote != null)
@@ -2460,7 +2428,7 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
     WorkspaceStorageService.instance.scheduleAutoSave(note);
   }
 
-  void _eraseStrokesNear(Offset canvasPoint) {
+  void _eraseStrokesNear(Offset canvasPoint, {EraserMode? mode}) {
     final note = _currentNote;
     if (note == null) return;
     
@@ -2476,7 +2444,8 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
 
     if (candidateStrokes.isEmpty) return;
 
-    if (_eraserConfig.mode == EraserMode.stroke) {
+    final effectiveMode = mode ?? _eraserConfig.mode;
+    if (effectiveMode == EraserMode.stroke) {
       // 1. Borracha de Traço Inteiro
       final toRemove = candidateStrokes
           .where((stroke) => SelectionGeometry.isPointNearStroke(canvasPoint, stroke, eraserRadius))
@@ -2557,7 +2526,44 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
   }
 
   @override
-  void eraseStrokesNear(Offset canvasPoint) => _eraseStrokesNear(canvasPoint);
+  void eraseStrokesNear(Offset canvasPoint, {EraserMode? mode}) => _eraseStrokesNear(canvasPoint, mode: mode);
+
+  @override
+  Color? sampleColorAt(Offset canvasPoint) {
+    final note = _currentNote;
+    if (note == null) return null;
+    final candidateIds = note.spatialIndex.queryPoint(canvasPoint, 24.0 / _zoomScale);
+    final candidateStrokes = candidateIds
+        .map((id) => note.getStroke(id))
+        .whereType<InkStroke>()
+        .toList();
+    for (final stroke in candidateStrokes.reversed) {
+      if (SelectionGeometry.isPointNearStroke(canvasPoint, stroke, 16.0 / _zoomScale)) {
+        final sampled = stroke.color;
+        final idx = _penSlots.indexWhere((s) => s.id == _activeSlotId);
+        if (idx != -1) {
+          setState(() {
+            _penSlots[idx] = _penSlots[idx].copyWith(color: sampled);
+          });
+        }
+        return sampled;
+      }
+    }
+    final card = _findCardAtPoint(note.cards, canvasPoint, _selectedCardId);
+    if (card != null) {
+      final cardColor = card.customGlassColor ?? card.highlightColor ?? card.textColor;
+      if (cardColor != null) {
+        final idx = _penSlots.indexWhere((s) => s.id == _activeSlotId);
+        if (idx != -1) {
+          setState(() {
+            _penSlots[idx] = _penSlots[idx].copyWith(color: cardColor);
+          });
+        }
+        return cardColor;
+      }
+    }
+    return null;
+  }
 
   @override
   void scheduleEraseCommit() {
@@ -2644,6 +2650,29 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
     }
     return false;
   }
+
+  // --- Implementação de Suporte a Caneta e Mesas (CanvasInputContext) ---
+  @override
+  double get eraserRadius => 24.0;
+
+  @override
+  bool get isPalmRejectionEnabled => true;
+
+  @override
+  void onStylusHover({Offset? position, double? pressure, double? tilt, double? distance}) {
+    if (position != null) {
+      _mousePosNotifier.value = position;
+    }
+  }
+
+  @override
+  void onBarrelButtonPressed({required bool isPressed, Offset? position}) {}
+
+  @override
+  void onInvertedStylusChanged({required bool isInverted}) {}
+
+  @override
+  void onPalmContactRejected({required Offset position, required double contactSize}) {}
 }
 
 /// Painter do Cursor Halo da Borracha

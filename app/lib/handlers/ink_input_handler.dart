@@ -50,6 +50,32 @@ class InkInputHandler {
     final effectiveStartPoint = snapped ?? canvasPoint;
 
     isDrawing = true;
+    final isShift = HardwareKeyboard.instance.isShiftPressed;
+    final isCtrl = HardwareKeyboard.instance.isControlPressed;
+
+    if (isShift || isCtrl) {
+      final shapeType = isCtrl ? ShapeType.arrow : ShapeType.line;
+      final initialPath = SmartShapeEngine.generateShapePath(
+        shapeType,
+        effectiveStartPoint,
+        effectiveStartPoint + const Offset(1, 1),
+      );
+      final initialPoints = SmartShapeEngine.samplePathPoints(initialPath, pressure: pressure);
+
+      activeStroke = InkStroke(
+        id: DateTime.now().millisecondsSinceEpoch.toString(),
+        points: initialPoints,
+        color: preset.color,
+        strokeWidth: preset.strokeWidth,
+        toolType: preset.toolType,
+        enablePressure: preset.enablePressure,
+        isShape: true,
+        cachedPath: initialPath,
+      );
+      activeStrokeUpdateNotifier.value++;
+      return;
+    }
+
     activeStroke = InkStroke(
       id: DateTime.now().millisecondsSinceEpoch.toString(),
       points: [StrokePoint(point: effectiveStartPoint, pressure: pressure)],

@@ -1,6 +1,7 @@
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import '../models/canvas_card_model.dart';
+import '../services/cards_telemetry_controller.dart';
 
 typedef ResizableFrameBuilder = Widget Function(
   BuildContext context,
@@ -75,6 +76,14 @@ class _CardResizableFrameState extends State<CardResizableFrame> {
     _lastDragMeasuredWidth = widget.card.width;
     _initialHeight = math.max(widget.card.height, _cachedDragMinHeight!);
     _dragSizeNotifier.value = Size(_initialWidth!, _initialHeight!);
+
+    final handle = isCorner
+        ? CardHoverZone.corner
+        : (isRight ? CardHoverZone.rightEdge : CardHoverZone.bottomEdge);
+    CardsTelemetryController.instance.startCardResize(
+      cardId: widget.card.id,
+      handle: handle,
+    );
   }
 
   void _onPanUpdate(DragUpdateDetails details, {bool isRight = false, bool isBottom = false, bool isCorner = false}) {
@@ -110,10 +119,17 @@ class _CardResizableFrameState extends State<CardResizableFrame> {
       }
     }
 
-    _dragSizeNotifier.value = Size(newWidth, newHeight);
+    final newSize = Size(newWidth, newHeight);
+    _dragSizeNotifier.value = newSize;
+
+    CardsTelemetryController.instance.updateCardResize(
+      delta: delta,
+      currentSize: newSize,
+    );
   }
 
   void _onPanEnd(DragEndDetails details) {
+    CardsTelemetryController.instance.endCardResize();
     if (_dragSizeNotifier.value != null) {
       final finalWidth = _dragSizeNotifier.value!.width;
       final dynamicMin = widget.card.copyWith(width: finalWidth).calculateMinHeight();
@@ -137,6 +153,7 @@ class _CardResizableFrameState extends State<CardResizableFrame> {
   }
 
   void _onPanCancel() {
+    CardsTelemetryController.instance.endCardResize();
     _dragSizeNotifier.value = null;
     _dragStartPos = null;
     _initialWidth = null;
@@ -162,7 +179,7 @@ class _CardResizableFrameState extends State<CardResizableFrame> {
 
         return SizedBox(
           width: currentWidth,
-          height: currentHeight,
+          height: currentHeight + 60.0,
           child: Stack(
             clipBehavior: Clip.none,
             children: [
@@ -175,8 +192,8 @@ class _CardResizableFrameState extends State<CardResizableFrame> {
               if (showHandles) ...[
                 // Borda Direita (Vertical)
                 Positioned(
-                  right: -edgeThickness / 2,
-                  top: 0,
+                  right: 0,
+                  top: 60.0,
                   width: edgeThickness,
                   height: currentHeight - cornerSize,
                   child: MouseRegion(
@@ -196,7 +213,7 @@ class _CardResizableFrameState extends State<CardResizableFrame> {
                 // Borda Inferior (Horizontal)
                 Positioned(
                   left: 0,
-                  bottom: -edgeThickness / 2,
+                  top: 60.0 + currentHeight - edgeThickness,
                   width: currentWidth - cornerSize,
                   height: edgeThickness,
                   child: MouseRegion(
@@ -215,10 +232,10 @@ class _CardResizableFrameState extends State<CardResizableFrame> {
 
                 // Canto Inferior Direito (Diagonal)
                 Positioned(
-                  right: -edgeThickness / 2,
-                  bottom: -edgeThickness / 2,
-                  width: cornerSize + edgeThickness / 2,
-                  height: cornerSize + edgeThickness / 2,
+                  right: 0,
+                  top: 60.0 + currentHeight - cornerSize,
+                  width: cornerSize,
+                  height: cornerSize,
                   child: MouseRegion(
                     cursor: SystemMouseCursors.resizeUpLeftDownRight,
                     hitTestBehavior: HitTestBehavior.opaque,

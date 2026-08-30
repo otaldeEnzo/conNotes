@@ -1,4 +1,3 @@
-import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../theme/moscaro_v2_tokens.dart';
@@ -247,6 +246,12 @@ class _SettingsPageViewState extends State<SettingsPageView> {
           description: 'Mostra indicador de taxa de quadros e taxa de amostragem no topo da tela.',
           value: widget.settings.showTelemetryHud,
           onChanged: (val) => widget.onUpdateSettings(widget.settings.copyWith(showTelemetryHud: val)),
+        ),
+        SettingsToggleTile(
+          title: 'Renderizador Nativo (Wgpu GPU)',
+          description: 'Habilita o backend de alta performance Rust/Wgpu para renderização na GPU (se desativado, usa o Flutter Impeller padrão).',
+          value: widget.settings.enableNativeRendering,
+          onChanged: (val) => widget.onUpdateSettings(widget.settings.copyWith(enableNativeRendering: val)),
         ),
       ],
     );
@@ -692,6 +697,7 @@ class _SettingsPageViewState extends State<SettingsPageView> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       key: const ValueKey('pen_settings'),
       children: [
+        _buildStylusTabletCard(),
         SettingsSliderTile(
           title: 'Suavização de Traço (Ramer-Douglas-Peucker)',
           description: 'Nível de estabilização e redução de ruído dos traços à mão livre.',
@@ -727,6 +733,408 @@ class _SettingsPageViewState extends State<SettingsPageView> {
           pressureSensitivity: widget.settings.pressureSensitivity,
         ),
       ],
+    );
+  }
+
+  Widget _buildStylusTabletCard() {
+    final isLight = MoscaroTokens.isLight;
+    final textPrimary = MoscaroTokens.textPrimary;
+    final textSecondary = MoscaroTokens.textSecondary;
+    final theme = MoscaroThemeController.instance.currentTheme;
+    final themeAccent = theme.accentPrimary;
+    final themeSecondary = theme.accentSecondary;
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 14),
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: isLight ? Colors.white.withValues(alpha: 0.65) : theme.backgroundSurface.withValues(alpha: 0.45),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(
+          color: isLight ? Colors.black.withValues(alpha: 0.08) : Colors.white.withValues(alpha: 0.08),
+          width: 1.1,
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          // Cabeçalho do Card
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: themeAccent.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: SvgIcon(name: 'tablet', size: 20, color: themeAccent),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Caneta & Mesa Digitalizadora (Stylus Hardware)',
+                      style: TextStyle(
+                        color: textPrimary,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                        letterSpacing: -0.1,
+                      ),
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      'Mapeamento dos botões laterais (Barrel Buttons), modos de acionamento e rejeição de palma.',
+                      style: TextStyle(
+                        color: textSecondary,
+                        fontSize: 11.5,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          
+          // Hardware Capability Badge — sempre visível (canal nativo Win32 sempre ativo)
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+            margin: const EdgeInsets.only(bottom: 16),
+            decoration: BoxDecoration(
+              color: MoscaroTokens.isLight ? const Color(0xFFE3F2FD) : const Color(0xFF0D1B2A),
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(
+                color: MoscaroTokens.isLight ? const Color(0xFF90CAF9) : const Color(0xFF1976D2).withValues(alpha: 0.5),
+              ),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                SvgIcon(name: 'cpu', size: 14, color: MoscaroTokens.isLight ? const Color(0xFF1565C0) : const Color(0xFF64B5F6)),
+                const SizedBox(width: 8),
+                Text(
+                  'Integração Nativa Win32 WM_POINTER ativa (2 botões laterais + pressão)',
+                  style: TextStyle(
+                    color: MoscaroTokens.isLight ? const Color(0xFF1565C0) : const Color(0xFF64B5F6),
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+            ),
+          ),
+
+          // 1. Botão Lateral Primário (Barrel 1)
+          _buildBarrelButtonSection(
+            title: 'Botão Lateral Primário (Barrel 1 / Padrão)',
+            subtitle: 'Ação executada ao pressionar o botão inferior da caneta.',
+            selectedAction: widget.settings.stylusPrimaryBarrelAction,
+            selectedTrigger: widget.settings.stylusPrimaryTriggerMode,
+            onActionChanged: (action) => widget.onUpdateSettings(
+              widget.settings.copyWith(stylusPrimaryBarrelAction: action),
+            ),
+            onTriggerChanged: (trigger) => widget.onUpdateSettings(
+              widget.settings.copyWith(stylusPrimaryTriggerMode: trigger),
+            ),
+            accentColor: themeAccent,
+          ),
+          const SizedBox(height: 16),
+
+          // 2. Botão Lateral Secundário (Barrel 2)
+          _buildBarrelButtonSection(
+            title: 'Botão Lateral Secundário / Traseiro (Barrel 2)',
+            subtitle: 'Ação executada ao pressionar o botão superior ou a ponta da borracha.',
+            selectedAction: widget.settings.stylusSecondaryBarrelAction,
+            selectedTrigger: widget.settings.stylusSecondaryTriggerMode,
+            onActionChanged: (action) => widget.onUpdateSettings(
+              widget.settings.copyWith(stylusSecondaryBarrelAction: action),
+            ),
+            onTriggerChanged: (trigger) => widget.onUpdateSettings(
+              widget.settings.copyWith(stylusSecondaryTriggerMode: trigger),
+            ),
+            accentColor: themeSecondary,
+          ),
+          const SizedBox(height: 16),
+
+          // Divisor sutil
+          Divider(
+            color: isLight ? Colors.black.withValues(alpha: 0.06) : Colors.white.withValues(alpha: 0.06),
+            height: 1,
+          ),
+          const SizedBox(height: 14),
+
+          // 3. Modos & Otimizações de Hardware
+          Row(
+            children: [
+              Expanded(
+                child: _buildInlineStylusToggle(
+                  title: 'Rejeição de Palma',
+                  description: 'Ignora toques da mão sobre a tela enquanto a caneta estiver próxima.',
+                  value: widget.settings.enablePalmRejection,
+                  onChanged: (val) => widget.onUpdateSettings(
+                    widget.settings.copyWith(enablePalmRejection: val),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: _buildInlineStylusToggle(
+                  title: 'Cursor / Hover do Stylus',
+                  description: 'Exibe ponteiro flutuante com diâmetro exato do pincel antes do toque.',
+                  value: widget.settings.enableStylusHoverPreview,
+                  onChanged: (val) => widget.onUpdateSettings(
+                    widget.settings.copyWith(enableStylusHoverPreview: val),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildBarrelButtonSection({
+    required String title,
+    required String subtitle,
+    required StylusBarrelAction selectedAction,
+    required StylusTriggerMode selectedTrigger,
+    required ValueChanged<StylusBarrelAction> onActionChanged,
+    required ValueChanged<StylusTriggerMode> onTriggerChanged,
+    required Color accentColor,
+  }) {
+    final isLight = MoscaroTokens.isLight;
+    final textPrimary = MoscaroTokens.textPrimary;
+    final textSecondary = MoscaroTokens.textSecondary;
+
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: isLight ? Colors.black.withValues(alpha: 0.025) : Colors.white.withValues(alpha: 0.03),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: isLight ? Colors.black.withValues(alpha: 0.05) : Colors.white.withValues(alpha: 0.05),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      style: TextStyle(
+                        color: textPrimary,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      subtitle,
+                      style: TextStyle(
+                        color: textSecondary,
+                        fontSize: 11,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+
+          // Action choices (Stroke Eraser, Pixel Eraser, Selection, Color Picker, Pan, Disabled)
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: StylusBarrelAction.values.map((action) {
+              final isSelected = selectedAction == action;
+              return GestureDetector(
+                onTap: () => onActionChanged(action),
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 180),
+                  padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 7),
+                  decoration: BoxDecoration(
+                    color: isSelected
+                        ? accentColor.withValues(alpha: isLight ? 0.15 : 0.22)
+                        : (isLight ? Colors.black.withValues(alpha: 0.03) : Colors.white.withValues(alpha: 0.04)),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(
+                      color: isSelected
+                          ? accentColor.withValues(alpha: 0.7)
+                          : (isLight ? Colors.black.withValues(alpha: 0.08) : Colors.white.withValues(alpha: 0.08)),
+                      width: isSelected ? 1.2 : 1.0,
+                    ),
+                    boxShadow: isSelected
+                        ? [
+                            BoxShadow(
+                              color: accentColor.withValues(alpha: 0.2),
+                              blurRadius: 8,
+                            ),
+                          ]
+                        : null,
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      SvgIcon(
+                        name: action.iconName,
+                        size: 14,
+                        color: isSelected ? accentColor : textSecondary,
+                      ),
+                      const SizedBox(width: 6),
+                      Text(
+                        action.label,
+                        style: TextStyle(
+                          color: isSelected ? (isLight ? textPrimary : Colors.white) : textSecondary,
+                          fontSize: 11.5,
+                          fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            }).toList(),
+          ),
+          const SizedBox(height: 12),
+
+          // Trigger Mode (Hold vs Toggle)
+          Row(
+            children: [
+              Text(
+                'Modo de Disparo:',
+                style: TextStyle(
+                  color: textSecondary,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+              const SizedBox(width: 10),
+              ...StylusTriggerMode.values.map((mode) {
+                final isSelected = selectedTrigger == mode;
+                return Padding(
+                  padding: const EdgeInsets.only(right: 8),
+                  child: GestureDetector(
+                    onTap: () => onTriggerChanged(mode),
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 180),
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                      decoration: BoxDecoration(
+                        color: isSelected
+                            ? accentColor.withValues(alpha: isLight ? 0.12 : 0.18)
+                            : (isLight ? Colors.black.withValues(alpha: 0.02) : Colors.white.withValues(alpha: 0.03)),
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(
+                          color: isSelected
+                              ? accentColor.withValues(alpha: 0.6)
+                              : (isLight ? Colors.black.withValues(alpha: 0.06) : Colors.white.withValues(alpha: 0.06)),
+                        ),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Container(
+                            width: 6,
+                            height: 6,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              color: isSelected ? accentColor : Colors.transparent,
+                              border: Border.all(
+                                color: isSelected ? accentColor : textSecondary.withValues(alpha: 0.4),
+                                width: 1,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 6),
+                          Text(
+                            mode.label,
+                            style: TextStyle(
+                              color: isSelected ? textPrimary : textSecondary,
+                              fontSize: 11,
+                              fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                );
+              }),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildInlineStylusToggle({
+    required String title,
+    required String description,
+    required bool value,
+    required ValueChanged<bool> onChanged,
+  }) {
+    final isLight = MoscaroTokens.isLight;
+    final textPrimary = MoscaroTokens.textPrimary;
+    final textSecondary = MoscaroTokens.textSecondary;
+    final themeAccent = MoscaroThemeController.instance.currentTheme.accentPrimary;
+
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: isLight ? Colors.black.withValues(alpha: 0.025) : Colors.white.withValues(alpha: 0.03),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: isLight ? Colors.black.withValues(alpha: 0.05) : Colors.white.withValues(alpha: 0.05),
+        ),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: TextStyle(
+                    color: textPrimary,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  description,
+                  style: TextStyle(
+                    color: textSecondary,
+                    fontSize: 10.5,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 8),
+          Transform.scale(
+            scale: 0.8,
+            child: Switch(
+              value: value,
+              onChanged: onChanged,
+              activeThumbColor: themeAccent,
+              activeTrackColor: themeAccent.withValues(alpha: 0.4),
+              inactiveThumbColor: textSecondary,
+              inactiveTrackColor: isLight ? Colors.black12 : Colors.white12,
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -1087,7 +1495,7 @@ class _SettingsPageViewState extends State<SettingsPageView> {
                   Switch(
                     value: isEnabled,
                     onChanged: onToggleEnable,
-                    activeColor: accentColor,
+                    activeThumbColor: accentColor,
                     inactiveTrackColor: Colors.white.withValues(alpha: 0.1),
                   ),
                   const SizedBox(width: 8),

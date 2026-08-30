@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'theme/moscaro_v2_tokens.dart';
 import 'theme/moscaro_theme_controller.dart';
 import 'services/windows_mime_association_service.dart';
+import 'services/stylus_native_channel.dart';
 import 'ffi/native_bridge.dart';
 import 'widgets/canvas_scaffold.dart';
 
@@ -10,6 +11,7 @@ import 'services/settings_service.dart';
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   WindowsMimeAssociationService.registerMimeAssociation();
+  StylusNativeChannel.instance.initialize();
   final isRustReady = ConnotesNativeBridge.instance.isAvailable;
   debugPrint('[ConNotes] Motor Rust Core inicializado: $isRustReady');
 

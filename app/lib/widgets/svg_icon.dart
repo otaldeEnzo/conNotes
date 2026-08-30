@@ -222,6 +222,25 @@ class SvgIcon extends StatelessWidget {
   <rect width="18" height="11" x="3" y="11" rx="2" ry="2"/>
   <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
 </svg>''',
+    'hand': '''<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+  <path d="M18 11V6a2 2 0 0 0-4 0v4"/>
+  <path d="M14 10V4a2 2 0 0 0-4 0v6"/>
+  <path d="M10 10.5V6a2 2 0 0 0-4 0v8"/>
+  <path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15"/>
+</svg>''',
+    'eyedropper': '''<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+  <path d="m2 22 1-1h3l9-9"/>
+  <path d="M3 21v-3l9-9"/>
+  <path d="m15 6 3.4-3.4a2.1 2.1 0 1 1 3 3L18 9l.4.4a2.1 2.1 0 0 1 0 3l-1.4 1.4a2.1 2.1 0 0 1-3 0l-4.4-4.4a2.1 2.1 0 0 1 0-3l1.4-1.4a2.1 2.1 0 0 1 3 0Z"/>
+</svg>''',
+    'tablet': '''<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+  <rect width="18" height="18" x="3" y="3" rx="2"/>
+  <line x1="8" y1="21" x2="16" y2="21"/>
+  <line x1="12" y1="17" x2="12.01" y2="17"/>
+</svg>''',
+    'check': '''<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+  <polyline points="20 6 9 17 4 12"/>
+</svg>''',
   };
 
   const SvgIcon({

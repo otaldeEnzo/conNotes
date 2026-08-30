@@ -11,14 +11,17 @@ import '../widgets/canvas_card_widget.dart';
 class SelectionInputHandler {
   final ValueNotifier<int> selectionUpdateNotifier;
   final VoidCallback onInteracting;
+  final VoidCallback? onStrokesCommitted;
+  final SelectedStrokesPictureCache dragPictureCache;
 
   Offset? selectionStartCanvasPoint;
-  final SelectedStrokesPictureCache dragPictureCache = SelectedStrokesPictureCache();
 
   SelectionInputHandler({
     required this.selectionUpdateNotifier,
     required this.onInteracting,
-  });
+    this.onStrokesCommitted,
+    SelectedStrokesPictureCache? dragPictureCache,
+  }) : dragPictureCache = dragPictureCache ?? SelectedStrokesPictureCache();
 
   static double getCardEffectiveHeight(CanvasCardModel c) {
     if (c.isCollapsed) return 36.0;
@@ -167,7 +170,7 @@ class SelectionInputHandler {
       final newBounds = selectionState.transformBounds!;
       final scaleX = originalBounds.width > 0 ? (newBounds.width / originalBounds.width) : 1.0;
       final scaleY = originalBounds.height > 0 ? (newBounds.height / originalBounds.height) : 1.0;
-      final geomScale = (scaleX + scaleY) / 2.0;
+      final geomScale = math.sqrt(scaleX.abs() * scaleY.abs());
 
       final updatedStrokes = <InkStroke>[];
       for (final id in selectionState.selectedStrokeIds) {
@@ -202,6 +205,7 @@ class SelectionInputHandler {
             strokeWidth: newStrokeWidth,
             toolType: s.toolType,
             enablePressure: s.enablePressure,
+            transform: Offset.zero,
             boundingBox: SelectionGeometry.computePointsBounds(newPoints, newStrokeWidth),
             cachedPath: newCachedPath,
           );
@@ -212,6 +216,7 @@ class SelectionInputHandler {
 
       if (updatedStrokes.isNotEmpty) {
         currentNote.updateAllStrokes(updatedStrokes);
+        onStrokesCommitted?.call();
       }
 
       for (final cardId in selectionState.selectedCardIds) {
@@ -253,9 +258,33 @@ class SelectionInputHandler {
       for (final id in selectionState.selectedStrokeIds) {
         final s = currentNote.getStroke(id);
         if (s != null) {
-          final shifted = s.copyWith(
-            transform: s.transform + offset,
-            boundingBox: s.boundingBox?.shift(offset),
+          final newPoints = s.points.map((p) => StrokePoint(
+            point: p.point + s.transform + offset,
+            pressure: p.pressure,
+            tilt: p.tilt,
+          )).toList();
+
+          final Path newCachedPath;
+          if (s.toolType == InkToolType.fountain || s.enablePressure) {
+            newCachedPath = FreehandOutlineRenderer.generateOutlinePath(
+              newPoints,
+              baseWidth: s.strokeWidth,
+              isTapered: s.toolType == InkToolType.fountain,
+            );
+          } else {
+            newCachedPath = InkStroke.buildCatmullRomPath(newPoints);
+          }
+
+          final shifted = InkStroke(
+            id: s.id,
+            points: newPoints,
+            color: s.color,
+            strokeWidth: s.strokeWidth,
+            toolType: s.toolType,
+            enablePressure: s.enablePressure,
+            transform: Offset.zero,
+            boundingBox: SelectionGeometry.computePointsBounds(newPoints, s.strokeWidth),
+            cachedPath: newCachedPath,
           );
           updatedStrokes.add(shifted);
         }
@@ -263,6 +292,7 @@ class SelectionInputHandler {
 
       if (updatedStrokes.isNotEmpty) {
         currentNote.updateAllStrokes(updatedStrokes);
+        onStrokesCommitted?.call();
       }
 
       for (final cardId in selectionState.selectedCardIds) {

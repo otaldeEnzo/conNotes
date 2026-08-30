@@ -8,6 +8,7 @@ import 'card_format_floating_pill.dart';
 import 'markdown_latex_block_view.dart';
 import 'svg_icon.dart';
 import 'card_resizable_frame.dart';
+import '../services/cards_telemetry_controller.dart';
 
 /// Widget Completo do Card no Canvas Infinito (100% Moscaro Glass + Regiões Dinâmicas de Redimensionamento).
 class CanvasCardWidget extends StatefulWidget {
@@ -97,15 +98,18 @@ class _CanvasCardWidgetState extends State<CanvasCardWidget> {
     _initialCardX = widget.card.x;
     _initialCardY = widget.card.y;
     _dragOffsetNotifier.value = Offset.zero;
+    CardsTelemetryController.instance.startCardDrag(cardId: widget.card.id);
   }
 
   void _onHeaderPanUpdate(DragUpdateDetails details) {
     if (_isEditingTitle || widget.card.isPinned || _dragStartPos == null) return;
     final delta = (details.globalPosition - _dragStartPos!) / _currentZoom;
     _dragOffsetNotifier.value = delta;
+    CardsTelemetryController.instance.updateCardDragDelta(delta);
   }
 
   void _onHeaderPanEnd(DragEndDetails details) {
+    CardsTelemetryController.instance.endCardDrag();
     if (_isEditingTitle || widget.card.isPinned || _dragStartPos == null) return;
     final finalDelta = _dragOffsetNotifier.value;
     _dragOffsetNotifier.value = Offset.zero;
@@ -119,6 +123,7 @@ class _CanvasCardWidgetState extends State<CanvasCardWidget> {
   }
 
   void _onHeaderPanCancel() {
+    CardsTelemetryController.instance.endCardDrag();
     _dragOffsetNotifier.value = Offset.zero;
     _dragStartPos = null;
   }
@@ -178,49 +183,16 @@ class _CanvasCardWidgetState extends State<CanvasCardWidget> {
               return Stack(
                 clipBehavior: Clip.none,
                 children: [
-                  // 1. O Card Principal em Vidro Líquido Moscaro
-                  Positioned.fill(
-                    child: TapRegion(
-                      groupId: 'card_block_editor_${widget.card.id}',
-                      onTapOutside: (_) {
-                        if (_blockViewKey.currentState?.isEditing == true) {
-                          _blockViewKey.currentState?.commitBlockEdit();
-                        }
-                      },
-                      child: GestureDetector(
-                        key: _cardContainerKey,
-                        behavior: HitTestBehavior.opaque,
-                        onTap: () => widget.onSelectCard(widget.card.id),
-                        child: ClipRRect(
-                          borderRadius: BorderRadius.circular(14),
-                          child: RepaintBoundary(
-                            child: _buildCardContainer(
-                              isSelected: isSelected,
-                              themeAccent: themeAccent,
-                              isLight: isLight,
-                              glassTint: glassTint,
-                              textPrimary: textPrimary,
-                              textSecondary: textSecondary,
-                              isCollapsed: isCollapsed,
-                              currentSize: currentSize,
-                              child: cardBody,
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-
-                  // 2. Pílula Flutuante Superior (Exibida SOMENTE durante a edição ativa de um bloco)
+                  // 1. Pílula Flutuante Superior (Exibida SOMENTE durante a edição ativa de um bloco, Y = 6..52)
                   if (showFloatingPill)
                     Positioned(
-                      top: -50.0,
+                      top: 6.0,
                       left: 0,
-                      right: 12.0,
+                      right: 0,
                       child: Center(
                         child: CardFormatFloatingPill(
                           card: widget.card,
-                          cardWidth: widget.card.width,
+                          cardWidth: currentSize.width,
                           activeStyles: _activeStyles,
                           onUpdateCard: widget.onUpdateCard,
                           onInsertSnippet: (snippet) {
@@ -258,6 +230,39 @@ class _CanvasCardWidgetState extends State<CanvasCardWidget> {
                         ),
                       ),
                     ),
+
+                  // 2. O Card Principal em Vidro Líquido Moscaro (Y = 60.0)
+                  Positioned(
+                    top: 60.0,
+                    left: 0,
+                    width: currentSize.width,
+                    height: currentSize.height,
+                    child: TapRegion(
+                      groupId: 'card_block_editor_${widget.card.id}',
+                      onTapOutside: (_) {
+                        if (_blockViewKey.currentState?.isEditing == true) {
+                          _blockViewKey.currentState?.commitBlockEdit();
+                        }
+                      },
+                      child: ClipRRect(
+                        key: _cardContainerKey,
+                        borderRadius: BorderRadius.circular(14),
+                        child: RepaintBoundary(
+                          child: _buildCardContainer(
+                            isSelected: isSelected,
+                            themeAccent: themeAccent,
+                            isLight: isLight,
+                            glassTint: glassTint,
+                            textPrimary: textPrimary,
+                            textSecondary: textSecondary,
+                            isCollapsed: isCollapsed,
+                            currentSize: currentSize,
+                            child: cardBody,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
                 ],
               );
             },

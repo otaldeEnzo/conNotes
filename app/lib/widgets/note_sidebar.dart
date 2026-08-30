@@ -157,20 +157,25 @@ class _NoteSidebarState extends State<NoteSidebar> {
                       Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
-                          Row(
-                            children: [
-                              SvgIcon(name: 'book', size: 19, color: themeAccent),
-                              const SizedBox(width: 8),
-                              Text(
-                                'Cadernos & Notas',
-                                style: TextStyle(
-                                  color: textPrimary,
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 15.5,
-                                  letterSpacing: 0.2,
+                          Expanded(
+                            child: Row(
+                              children: [
+                                SvgIcon(name: 'book', size: 19, color: themeAccent),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  child: Text(
+                                    'Cadernos & Notas',
+                                    style: TextStyle(
+                                      color: textPrimary,
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 15.5,
+                                      letterSpacing: 0.2,
+                                    ),
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
                                 ),
-                              ),
-                            ],
+                              ],
+                            ),
                           ),
                           Row(
                             mainAxisSize: MainAxisSize.min,

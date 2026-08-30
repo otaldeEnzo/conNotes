@@ -154,12 +154,19 @@ class CanvasLayerStack extends StatelessWidget {
         // Camada 2: Traços Confirmados
         if (!isSettingsOpen && note != null)
           ListenableBuilder(
-            listenable: Listenable.merge([panNotifier, zoomNotifier, committedStrokesNotifier, isInteractingNotifier]),
+            listenable: Listenable.merge([
+              panNotifier,
+              zoomNotifier,
+              committedStrokesNotifier,
+              isInteractingNotifier,
+              selectionUpdateNotifier,
+            ]),
             builder: (context, _) {
               final pan = panNotifier.value;
               final zoom = zoomNotifier.value;
               final isInteracting = isInteractingNotifier.value;
-              final hideSelected = selectionState.isDraggingSelection || selectionState.isTransforming;
+              final activeSel = getSelectionState?.call() ?? selectionState;
+              final hideSelected = activeSel.isDraggingSelection || activeSel.isTransforming;
 
               return RepaintBoundary(
                 child: CustomPaint(
@@ -170,7 +177,7 @@ class CanvasLayerStack extends StatelessWidget {
                     strokes: note!.strokes,
                     strokesCount: note!.strokes.length,
                     strokesVersion: committedStrokesNotifier.value,
-                    hiddenStrokeIds: hideSelected ? selectionState.selectedStrokeIds : null,
+                    hiddenStrokeIds: hideSelected ? activeSel.selectedStrokeIds : null,
                     panOffset: pan,
                     zoomScale: zoom,
                     pictureCache: note!.pictureCache,

@@ -199,9 +199,13 @@ class SelectionOverlayPainter extends CustomPainter {
     final inflated = bounds.inflate(6.0 / zoomScale);
     final rrect = RRect.fromRectAndRadius(inflated, Radius.circular(8.0 / zoomScale));
 
-    // Halo Glow de Seleção Ciano
+    // Halo Glow de Seleção Adaptado ao Tema Ativo
+    final themeAccent = StemInkThemeAdapter.adaptStrokeColor(
+      MoscaroTokens.auroraBlue,
+      isLightTheme: MoscaroTokens.isLight,
+    );
     final glowPaint = Paint()
-      ..color = MoscaroTokens.auroraBlue.withValues(alpha: 0.25)
+      ..color = themeAccent.withValues(alpha: MoscaroTokens.isLight ? 0.35 : 0.25)
       ..strokeWidth = 3.0 / zoomScale
       ..style = PaintingStyle.stroke
       ..maskFilter = MaskFilter.blur(BlurStyle.normal, 6.0 / zoomScale);
@@ -209,38 +213,11 @@ class SelectionOverlayPainter extends CustomPainter {
 
     // Borda Neon Principal
     final borderPaint = Paint()
-      ..color = MoscaroTokens.auroraBlue
+      ..color = themeAccent
       ..strokeWidth = 1.6 / zoomScale
       ..style = PaintingStyle.stroke;
     canvas.drawRRect(rrect, borderPaint);
 
-    // 8 Alças de Redimensionamento (4 cantos + 4 lados)
-    final handlePaint = Paint()
-      ..color = MoscaroTokens.auroraBlue
-      ..style = PaintingStyle.fill;
-    final handleBorder = Paint()
-      ..color = Colors.white
-      ..strokeWidth = 1.2 / zoomScale
-      ..style = PaintingStyle.stroke;
-
-    final cornerRadius = 5.0 / zoomScale;
-    final edgeRadius = 4.0 / zoomScale;
-
-    final handlePositions = {
-      inflated.topLeft: cornerRadius,
-      Offset(inflated.center.dx, inflated.top): edgeRadius,
-      inflated.topRight: cornerRadius,
-      Offset(inflated.left, inflated.center.dy): edgeRadius,
-      Offset(inflated.right, inflated.center.dy): edgeRadius,
-      inflated.bottomLeft: cornerRadius,
-      Offset(inflated.center.dx, inflated.bottom): edgeRadius,
-      inflated.bottomRight: cornerRadius,
-    };
-
-    for (final entry in handlePositions.entries) {
-      canvas.drawCircle(entry.key, entry.value, handlePaint);
-      canvas.drawCircle(entry.key, entry.value, handleBorder);
-    }
 
     // HUD Moscaro de Graus em Rotação (Exibido no topo da seleção durante rotação ativa)
     if (rotation != 0.0 || activeHandle == SelectionHandleType.rotation) {
@@ -297,6 +274,25 @@ class SelectionOverlayPainter extends CustomPainter {
 
     try {
       final adapted = StemInkThemeAdapter.adaptStrokeColor(stroke.color, isLightTheme: MoscaroTokens.isLight);
+      
+      if ((stroke.toolType == InkToolType.fountain || stroke.enablePressure) && !stroke.isShape) {
+        reusablePaint
+          ..color = adapted
+          ..style = PaintingStyle.fill;
+
+        if (stroke.cachedPath != null) {
+          canvas.drawPath(stroke.cachedPath!, reusablePaint);
+        } else {
+          final path = FreehandOutlineRenderer.generateOutlinePath(
+            stroke.points,
+            baseWidth: stroke.strokeWidth,
+            isTapered: stroke.toolType == InkToolType.fountain,
+          );
+          canvas.drawPath(path, reusablePaint);
+        }
+        return;
+      }
+
       final color = stroke.toolType == InkToolType.highlighter
           ? adapted.withValues(alpha: 0.35)
           : (stroke.toolType == InkToolType.pencil ? adapted.withValues(alpha: 0.65) : adapted);

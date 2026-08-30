@@ -195,6 +195,11 @@ class MoscaroRichTextController extends TextEditingController {
     final oldText = text;
     final newText = newValue.text;
 
+    // Se o usuário mudou o cursor de posição manualmente sem digitar, reseta o typingStyle
+    if (oldText == newText && value.selection != newValue.selection) {
+      hasActiveTypingStyle = false;
+    }
+
     // Delta tracking automático de inserção/deleção
     if (oldText != newText) {
       _applyTextDelta(oldText, newText);
@@ -248,8 +253,11 @@ class MoscaroRichTextController extends TextEditingController {
           final removedInSpan = overlapEnd - overlapStart;
           span.end = math.max(span.start, e - removedInSpan);
         }
-        if (insertedCount > 0 && changeIndex >= s && changeIndex <= e) {
-          span.end += insertedCount;
+        // Só expande o span se NÃO houver typingStyle ativo que sobrescreva este estilo
+        if (insertedCount > 0 && !hasActiveTypingStyle) {
+          if (changeIndex >= s && changeIndex <= e) {
+            span.end += insertedCount;
+          }
         }
         span.start = span.start.clamp(0, newText.length);
         span.end = span.end.clamp(span.start, newText.length);
@@ -261,21 +269,23 @@ class MoscaroRichTextController extends TextEditingController {
 
     // Se novos caracteres foram digitados com estilo de digitação ativo (typingStyle)
     if (insertedCount > 0 && hasActiveTypingStyle) {
-      updatedSpans.add(RichStyleSpan(
-        start: changeIndex,
-        end: changeIndex + insertedCount,
-        isBold: typingStyle.isBold,
-        isItalic: typingStyle.isItalic,
-        isUnderline: typingStyle.isUnderline,
-        isStrikethrough: typingStyle.isStrikethrough,
-        isSubscript: typingStyle.isSubscript,
-        isSuperscript: typingStyle.isSuperscript,
-        isCode: typingStyle.isCode,
-        isLatex: typingStyle.isLatex,
-        textColor: typingStyle.textColor,
-        highlightColor: typingStyle.highlightColor,
-        fontSize: typingStyle.fontSize,
-      ));
+      if (!typingStyle.isEmptyStyle) {
+        updatedSpans.add(RichStyleSpan(
+          start: changeIndex,
+          end: changeIndex + insertedCount,
+          isBold: typingStyle.isBold,
+          isItalic: typingStyle.isItalic,
+          isUnderline: typingStyle.isUnderline,
+          isStrikethrough: typingStyle.isStrikethrough,
+          isSubscript: typingStyle.isSubscript,
+          isSuperscript: typingStyle.isSuperscript,
+          isCode: typingStyle.isCode,
+          isLatex: typingStyle.isLatex,
+          textColor: typingStyle.textColor,
+          highlightColor: typingStyle.highlightColor,
+          fontSize: typingStyle.fontSize,
+        ));
+      }
     }
 
     styleSpans
@@ -504,6 +514,52 @@ class MoscaroRichTextController extends TextEditingController {
     return sb.toString();
   }
 
+  /// Retorna o estilo ativo na seleção ou no cursor atual
+  RichStyleSpan getActiveStyleAtCurrentSelection() {
+    if (hasActiveTypingStyle && (!selection.isValid || selection.isCollapsed)) {
+      return typingStyle;
+    }
+
+    final sel = selection;
+    if (!sel.isValid || sel.start < 0) {
+      return RichStyleSpan(start: 0, end: 0);
+    }
+
+    final start = math.min(sel.start, sel.end);
+    final end = math.max(sel.start, sel.end);
+
+    if (start == end) {
+      if (start > 0) {
+        final leftSpan = styleSpans.where((s) => s.start <= start - 1 && s.end >= start).firstOrNull;
+        if (leftSpan != null) {
+          return leftSpan;
+        }
+      }
+      return RichStyleSpan(start: start, end: end);
+    }
+
+    final matchingSpans = styleSpans.where((s) => s.start < end && s.end > start).toList();
+    if (matchingSpans.isEmpty) {
+      return RichStyleSpan(start: start, end: end);
+    }
+
+    return RichStyleSpan(
+      start: start,
+      end: end,
+      isBold: matchingSpans.any((s) => s.isBold),
+      isItalic: matchingSpans.any((s) => s.isItalic),
+      isUnderline: matchingSpans.any((s) => s.isUnderline),
+      isStrikethrough: matchingSpans.any((s) => s.isStrikethrough),
+      isSubscript: matchingSpans.any((s) => s.isSubscript),
+      isSuperscript: matchingSpans.any((s) => s.isSuperscript),
+      isCode: matchingSpans.any((s) => s.isCode),
+      isLatex: matchingSpans.any((s) => s.isLatex),
+      textColor: matchingSpans.where((s) => s.textColor != null).firstOrNull?.textColor,
+      highlightColor: matchingSpans.where((s) => s.highlightColor != null).firstOrNull?.highlightColor,
+      fontSize: matchingSpans.where((s) => s.fontSize != null).firstOrNull?.fontSize,
+    );
+  }
+
   /// Aplica ou remove formatação no intervalo selecionado ou ativa estilo para digitação subsequente
   void toggleFormatting({
     bool? toggleBold,
@@ -523,6 +579,10 @@ class MoscaroRichTextController extends TextEditingController {
 
     // 1. Caso o cursor esteja colapsado ou não haja seleção de caracteres (ativa estilo para o próximo texto digitado)
     if (!hasSelection) {
+      if (!hasActiveTypingStyle) {
+        typingStyle = getActiveStyleAtCurrentSelection().copyWith();
+      }
+
       if (toggleBold == true) typingStyle.isBold = !typingStyle.isBold;
       if (toggleItalic == true) typingStyle.isItalic = !typingStyle.isItalic;
       if (toggleUnderline == true) typingStyle.isUnderline = !typingStyle.isUnderline;
@@ -541,7 +601,7 @@ class MoscaroRichTextController extends TextEditingController {
       if (setHighlightColor != null) typingStyle.highlightColor = setHighlightColor;
       if (setFontSize != null) typingStyle.fontSize = setFontSize;
 
-      hasActiveTypingStyle = !typingStyle.isEmptyStyle;
+      hasActiveTypingStyle = true;
       notifyListeners();
       return;
     }

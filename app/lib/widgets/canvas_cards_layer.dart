@@ -104,12 +104,10 @@ class _CanvasCardsLayerState extends State<CanvasCardsLayer> {
         final bool isDragging = isSelected && currentSelectionState.isDraggingSelection;
         final Offset offset = isDragging ? currentSelectionState.dragOffset : Offset.zero;
         return Positioned(
-          key: ValueKey('pos_${card.id}_${card.x}_${card.y}'),
+          key: ValueKey('pos_${card.id}'),
           left: card.x + offset.dx,
-          top: card.y + offset.dy,
-          child: RepaintBoundary(
-            key: ValueKey('card_${card.id}'),
-            child: CanvasCardWidget(
+          top: card.y + offset.dy - 60.0,
+          child: CanvasCardWidget(
               card: card,
               isSelected: isSelected,
               zoomNotifier: widget.zoomNotifier,
@@ -118,7 +116,6 @@ class _CanvasCardsLayerState extends State<CanvasCardsLayer> {
               onDeleteCard: widget.onDeleteCard,
               onDuplicateCard: widget.onDuplicateCard,
             ),
-          ),
         );
       }).toList(),
     );

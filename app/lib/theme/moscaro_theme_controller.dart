@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../models/theme_models.dart';
+import '../services/settings_service.dart';
 import 'moscaro_v2_tokens.dart';
 
 /// Controlador Central de Temas e Customização Visual do conNotes (Moscaro v2 Pro Max).
@@ -32,6 +33,24 @@ class MoscaroThemeController extends ChangeNotifier {
   List<ThemeDefinition> get customThemes => List.unmodifiable(_customThemes);
   ThemeDefinition get currentTheme => _currentTheme;
 
+  void _persistThemesToSettings() {
+    try {
+      final current = SettingsService.instance.currentSettings;
+      final updated = current.copyWith(
+        activeThemeId: _activeThemeId,
+        customBgMode: _backgroundMode.id,
+        customBgColorHex: '#${_customSolidColor.toARGB32().toRadixString(16).padLeft(8, '0')}',
+        customGradStartHex: '#${_customGradientStart.toARGB32().toRadixString(16).padLeft(8, '0')}',
+        customGradEndHex: '#${_customGradientEnd.toARGB32().toRadixString(16).padLeft(8, '0')}',
+        customTextureType: _textureType.id,
+        customImagePath: _customImagePath,
+        customImageOpacity: _customImageOpacity,
+        customThemes: List<ThemeDefinition>.from(_customThemes),
+      );
+      SettingsService.instance.saveSettings(updated);
+    } catch (_) {}
+  }
+
   /// Inicializa o controlador com as configurações salvas
   void initialize({
     required String themeId,
@@ -44,7 +63,7 @@ class MoscaroThemeController extends ChangeNotifier {
     double? imageOpacity,
     List<ThemeDefinition>? customThemes,
   }) {
-    if (customThemes != null) {
+    if (customThemes != null && customThemes.isNotEmpty) {
       _customThemes = List<ThemeDefinition>.from(customThemes);
     }
     _activeThemeId = themeId;
@@ -81,6 +100,7 @@ class MoscaroThemeController extends ChangeNotifier {
     _backgroundMode = CanvasBackgroundMode.preset;
     _updateCurrentThemeDefinition();
     notifyListeners();
+    _persistThemesToSettings();
   }
 
   /// Seleciona um tema personalizado
@@ -98,12 +118,14 @@ class MoscaroThemeController extends ChangeNotifier {
     }
     MoscaroTokens.applyTheme(_currentTheme);
     notifyListeners();
+    _persistThemesToSettings();
   }
 
   /// Adiciona um novo tema personalizado
   void addCustomTheme(ThemeDefinition theme) {
     _customThemes.add(theme);
     selectCustomTheme(theme);
+    _persistThemesToSettings();
   }
 
   /// Atualiza um tema personalizado existente
@@ -116,6 +138,7 @@ class MoscaroThemeController extends ChangeNotifier {
       } else {
         notifyListeners();
       }
+      _persistThemesToSettings();
     }
   }
 
@@ -127,6 +150,7 @@ class MoscaroThemeController extends ChangeNotifier {
     } else {
       notifyListeners();
     }
+    _persistThemesToSettings();
   }
 
   /// Duplica um tema existente (oficial ou customizado)
@@ -146,6 +170,7 @@ class MoscaroThemeController extends ChangeNotifier {
     _backgroundMode = mode;
     _updateCurrentThemeDefinition();
     notifyListeners();
+    _persistThemesToSettings();
   }
 
   /// Define a cor sólida customizada
@@ -154,6 +179,7 @@ class MoscaroThemeController extends ChangeNotifier {
     _backgroundMode = CanvasBackgroundMode.solidColor;
     _updateCurrentThemeDefinition();
     notifyListeners();
+    _persistThemesToSettings();
   }
 
   /// Define o gradiente customizado
@@ -163,12 +189,14 @@ class MoscaroThemeController extends ChangeNotifier {
     _backgroundMode = CanvasBackgroundMode.gradient;
     _updateCurrentThemeDefinition();
     notifyListeners();
+    _persistThemesToSettings();
   }
 
   /// Define a textura STEM
   void setTextureType(CanvasTextureType type) {
     _textureType = type;
     notifyListeners();
+    _persistThemesToSettings();
   }
 
   /// Define a imagem customizada de fundo
@@ -178,6 +206,7 @@ class MoscaroThemeController extends ChangeNotifier {
     _backgroundMode = path != null ? CanvasBackgroundMode.customImage : CanvasBackgroundMode.preset;
     _updateCurrentThemeDefinition();
     notifyListeners();
+    _persistThemesToSettings();
   }
 
   ThemeDefinition? _themeBeforePreview;

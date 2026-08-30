@@ -265,13 +265,14 @@ class _CardFormatFloatingPillState extends State<CardFormatFloatingPill> {
                       if (pointerSignal is PointerScrollEvent && _pillScrollController.hasClients) {
                         GestureBinding.instance.pointerSignalResolver.register(pointerSignal, (event) {
                           if (event is PointerScrollEvent && _pillScrollController.hasClients) {
-                            final target = (_pillScrollController.offset + event.scrollDelta.dy * 1.3).clamp(
+                            final delta = event.scrollDelta.dx != 0 ? event.scrollDelta.dx : event.scrollDelta.dy;
+                            final target = (_pillScrollController.offset + delta * 1.3).clamp(
                               0.0,
                               _pillScrollController.position.maxScrollExtent,
                             );
                             _pillScrollController.animateTo(
                               target,
-                              duration: const Duration(milliseconds: 140),
+                              duration: const Duration(milliseconds: 120),
                               curve: Curves.easeOutCubic,
                             );
                           }

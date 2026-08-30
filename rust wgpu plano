@@ -1,0 +1,88 @@
+# Plano de Implementação: Pipeline de Renderização Nativa & Shaders (Rust + Wgpu)
+
+## 1. Visão Geral
+Este plano detalha a arquitetura e os passos técnicos para implementar a **Camada Nativa de Renderização na GPU** em Rust com `wgpu` (DirectX 12 no Windows, Vulkan/Metal multiplataforma), descarregando o processamento gráfico de tinta, triangulação de malhas de alta precisão e efeitos visuais pesados (*aurora glow* e *dot grid*) diretamente na GPU.
+
+A interface de usuário (menus, botões, modais Moscaro V2, cards) continua 100% no Flutter, enquanto a superfície do canvas infinito é renderizada via **Texture Bridge Zero-Copy**.
+
+---
+
+## 2. Arquitetura do Sistema
+
+```
+┌────────────────────────────────────────────────────────┐
+│               FLUTTER UI (Moscaro V2)                  │
+│   Painéis de Ferramentas, Sidebar, Cards e Diálogos    │
+└───────────────────────────┬────────────────────────────┘
+                            │ Pointer Events / Gestos
+                            ▼
+┌────────────────────────────────────────────────────────┐
+│           BRIDGE FFI & TEXTURE SWAPCHAIN               │
+│  - Eventos de Caneta (Pressão, Tilt, Velocidade)       │
+│  - Texture Widget (ID3D11Texture2D / DirectX 12)       │
+└───────────────────────────┬────────────────────────────┘
+                            │ Zero-Copy Shared Handle
+                            ▼
+┌────────────────────────────────────────────────────────┐
+│            RUST GPU ENGINE (connotes_core)             │
+│  ┌─────────────────────────┐ ┌──────────────────────┐  │
+│  │ Pipeline de Tinta Wgpu  │ │ Shader WGSL Dot Grid │  │
+│  │ (Tessellation na GPU)   │ │ (Aurora Glow Reativo)│  │
+│  └─────────────────────────┘ └──────────────────────┘  │
+└────────────────────────────────────────────────────────┘
+```
+
+---
+
+## 3. Fases de Execução
+
+### Fase 5.1: Adição das Dependências Gráficas no `connotes_core`
+- Adicionar `wgpu` (v22+), `bytemuck`, `lyon_tessellation` e `raw-window-handle` ao `Cargo.toml`.
+- Configurar o backend gráfico nativo para Windows (`dx12` e `vulkan`).
+
+### Fase 5.2: Pipeline de Triangulação e Shaders de Traço (Ink Pipeline)
+- Criar módulo `connotes_core/src/renderer/ink_pipeline.rs`:
+  - Algoritmo de suavização Catmull-Rom / Bezier de alta taxa na GPU.
+  - Geração de malhas dinâmicas de triângulos (*tessellation*) com espessura variável sensível à pressão e inclinação (*tilt*).
+  - Shaders WGSL (`stroke.wgsl`) para desenho anti-aliasing com suporte a ponta técnica, marcador fluorescente (translucidez) e caneta tinteiro com chanfro.
+
+### Fase 5.3: Shader de Fundo Dot Grid Reativo (`dot_grid.wgsl`)
+- Criar módulo `connotes_core/src/renderer/grid_pipeline.rs`:
+  - Fragment Shader WGSL que calcula o grid de pontos e a distância radial do cursor para o efeito de *aurora glow* diretamente na GPU.
+  - Renderização instantânea independente do zoom do canvas, com custo 0% de CPU.
+
+### Fase 5.4: Shared Texture & Plugin Nativo Flutter
+- Implementar o compartilhamento de textura nativa no Windows:
+  - Criar um `TextureId` via `flutter_texture_registrar`.
+  - Compartilhar o handle de textura do DirectX 12 (`HANDLE`) com o compositing engine do Flutter (Impeller).
+  - Permitir que o Flutter renderize a textura do Rust como um widget `Texture(textureId: id)` no fundo do canvas.
+
+### Fase 5.5: Fallback Gracioso e Toggle de Configurações
+- Se a GPU não estiver disponível ou ocorrer falha de inicialização, o conNotes faz fallback automático para o `CustomPainter` atual do Flutter.
+- Adicionar opção nas configurações em [settings_page_view.dart](file:///c:/Users/Enzo/Documents/conNotes/app/lib/widgets/settings_page_view.dart) para alternar entre "Renderizador Nativo (Wgpu GPU)" e "Renderizador Padrão (Flutter Impeller)".
+
+---
+
+## 4. Plano de Mudanças nos Arquivos
+
+### [MODIFICAR] [Cargo.toml](file:///c:/Users/Enzo/Documents/conNotes/connotes_core/Cargo.toml)
+- Inclusão de `wgpu`, `bytemuck` e `lyon_tessellation`.
+
+### [NOVO] `connotes_core/src/renderer/mod.rs` & `ink_pipeline.rs`
+- Inicialização da instância `wgpu::Device`, `wgpu::Queue` e render pass de traços.
+
+### [NOVO] `connotes_core/src/renderer/shaders/stroke.wgsl` & `dot_grid.wgsl`
+- Shaders WGSL de traço e grid com efeito aurora.
+
+### [MODIFICAR] [native_bridge.dart](file:///c:/Users/Enzo/Documents/conNotes/app/lib/ffi/native_bridge.dart)
+- Exposição das chamadas C-ABI para inicialização da textura, envio de eventos de desenho e render tick.
+
+### [MODIFICAR] [canvas_layers.dart](file:///c:/Users/Enzo/Documents/conNotes/app/lib/widgets/canvas_layers.dart)
+- Integração do `TextureWidget` nativo na camada de fundo e traços do canvas.
+
+---
+
+## 5. Verificação & Métricas de Sucesso
+1. **Latência de Traço**: Medição da latência de ponta a ponta com Stylus (< 5ms).
+2. **Taxa de Quadros**: Manutenção de 120 FPS estáveis com mais de 50.000 traços ativos no canvas durante pan/zoom rápido.
+3. **Uso de CPU**: Consumo de CPU abaixo de 5% durante escrita contínua.

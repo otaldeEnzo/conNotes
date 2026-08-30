@@ -49,6 +49,101 @@ enum SettingsCategory {
   }
 }
 
+/// Ações configuráveis para o botão lateral (Barrel Button) da Caneta / Stylus
+enum StylusBarrelAction {
+  strokeEraser,
+  pixelEraser,
+  selectionLasso,
+  selectionRect,
+  colorPicker,
+  pan,
+  disabled;
+
+  String get label {
+    switch (this) {
+      case StylusBarrelAction.strokeEraser:
+        return 'Borracha de Traço';
+      case StylusBarrelAction.pixelEraser:
+        return 'Borracha de Pixel';
+      case StylusBarrelAction.selectionLasso:
+        return 'Seleção (Laço)';
+      case StylusBarrelAction.selectionRect:
+        return 'Seleção (Área)';
+      case StylusBarrelAction.colorPicker:
+        return 'Conta-gotas';
+      case StylusBarrelAction.pan:
+        return 'Mover / Pan';
+      case StylusBarrelAction.disabled:
+        return 'Desativado';
+    }
+  }
+
+  String get iconName {
+    switch (this) {
+      case StylusBarrelAction.strokeEraser:
+        return 'eraser';
+      case StylusBarrelAction.pixelEraser:
+        return 'eraser';
+      case StylusBarrelAction.selectionLasso:
+        return 'lasso';
+      case StylusBarrelAction.selectionRect:
+        return 'select';
+      case StylusBarrelAction.colorPicker:
+        return 'eyedropper';
+      case StylusBarrelAction.pan:
+        return 'hand';
+      case StylusBarrelAction.disabled:
+        return 'lock';
+    }
+  }
+
+  String get description {
+    switch (this) {
+      case StylusBarrelAction.strokeEraser:
+        return 'Apaga o traço vetorial inteiro ao tocar.';
+      case StylusBarrelAction.pixelEraser:
+        return 'Apaga precisamente as partes tocadas do traço.';
+      case StylusBarrelAction.selectionLasso:
+        return 'Desenha um laço livre para selecionar elementos.';
+      case StylusBarrelAction.selectionRect:
+        return 'Arrasta um retângulo para selecionar elementos na área.';
+      case StylusBarrelAction.colorPicker:
+        return 'Captura a cor de qualquer elemento no canvas.';
+      case StylusBarrelAction.pan:
+        return 'Move a visualização do canvas sem desenhar.';
+      case StylusBarrelAction.disabled:
+        return 'Ignora o botão lateral da caneta.';
+    }
+  }
+}
+
+/// Modo de acionamento do botão do Stylus (Hold vs Toggle)
+enum StylusTriggerMode {
+  hold,
+  toggle;
+
+  String get label {
+    switch (this) {
+      case StylusTriggerMode.hold:
+        return 'Segurar (Hold)';
+      case StylusTriggerMode.toggle:
+        return 'Alternar (Toggle)';
+    }
+  }
+
+  String get description {
+    switch (this) {
+      case StylusTriggerMode.hold:
+        return 'A ação fica ativa somente enquanto o botão lateral estiver pressionado.';
+      case StylusTriggerMode.toggle:
+        return 'Pressione uma vez para ativar e pressione novamente para desativar.';
+    }
+  }
+}
+
+/// Apelido para interoperabilidade de modelo
+typedef AppSettingsData = AppSettingsState;
+
 /// Estado global e imutável de preferências do conNotes
 class AppSettingsState {
   // 0. Temas & Estilo STEM
@@ -67,16 +162,30 @@ class AppSettingsState {
   final double blurSigma;
   final bool enableAuroraBorders;
   final bool showTelemetryHud;
+  final bool enableNativeRendering;
 
   // 2. Canvas & Grid STEM
   final double gridSpacing;
   final bool enableMouseGlow;
   final double mouseGlowRadius;
 
-  // 3. Caneta & Stylus
+  // 3. Caneta & Stylus / Mesa Digitalizadora
   final double rdpSmoothingTolerance;
   final double pressureSensitivity;
   final int drawAndHoldDurationMs;
+  final StylusBarrelAction stylusPrimaryBarrelAction;
+  final StylusTriggerMode stylusPrimaryTriggerMode;
+  final StylusBarrelAction stylusSecondaryBarrelAction;
+  final StylusTriggerMode stylusSecondaryTriggerMode;
+  final bool enableStylusHoverPreview;
+  final bool enablePalmRejection;
+
+  // Getters auxiliares
+  StylusBarrelAction get primaryBarrelAction => stylusPrimaryBarrelAction;
+  StylusTriggerMode get primaryBarrelTriggerMode => stylusPrimaryTriggerMode;
+  StylusTriggerMode get stylusTriggerMode => stylusPrimaryTriggerMode;
+  StylusBarrelAction get secondaryBarrelAction => stylusSecondaryBarrelAction;
+  StylusTriggerMode get secondaryBarrelTriggerMode => stylusSecondaryTriggerMode;
 
   // 4. Instrumentos de Medição (Régua & Transferidor)
   final double angleSnapStepDegrees;
@@ -114,12 +223,19 @@ class AppSettingsState {
     this.blurSigma = 35.0,
     this.enableAuroraBorders = true,
     this.showTelemetryHud = true,
+    this.enableNativeRendering = true,
     this.gridSpacing = 28.0,
     this.enableMouseGlow = true,
     this.mouseGlowRadius = 120.0,
     this.rdpSmoothingTolerance = 0.35,
     this.pressureSensitivity = 1.0,
     this.drawAndHoldDurationMs = 400,
+    this.stylusPrimaryBarrelAction = StylusBarrelAction.strokeEraser,
+    this.stylusPrimaryTriggerMode = StylusTriggerMode.hold,
+    this.stylusSecondaryBarrelAction = StylusBarrelAction.selectionLasso,
+    this.stylusSecondaryTriggerMode = StylusTriggerMode.hold,
+    this.enableStylusHoverPreview = true,
+    this.enablePalmRejection = true,
     this.angleSnapStepDegrees = 15.0,
     this.inkSnapTolerance = 24.0,
     this.geminiApiKey = '',
@@ -155,12 +271,19 @@ class AppSettingsState {
     double? blurSigma,
     bool? enableAuroraBorders,
     bool? showTelemetryHud,
+    bool? enableNativeRendering,
     double? gridSpacing,
     bool? enableMouseGlow,
     double? mouseGlowRadius,
     double? rdpSmoothingTolerance,
     double? pressureSensitivity,
     int? drawAndHoldDurationMs,
+    StylusBarrelAction? stylusPrimaryBarrelAction,
+    StylusTriggerMode? stylusPrimaryTriggerMode,
+    StylusBarrelAction? stylusSecondaryBarrelAction,
+    StylusTriggerMode? stylusSecondaryTriggerMode,
+    bool? enableStylusHoverPreview,
+    bool? enablePalmRejection,
     double? angleSnapStepDegrees,
     double? inkSnapTolerance,
     String? geminiApiKey,
@@ -193,12 +316,19 @@ class AppSettingsState {
       blurSigma: (blurSigma ?? this.blurSigma).clamp(10.0, 50.0),
       enableAuroraBorders: enableAuroraBorders ?? this.enableAuroraBorders,
       showTelemetryHud: showTelemetryHud ?? this.showTelemetryHud,
+      enableNativeRendering: enableNativeRendering ?? this.enableNativeRendering,
       gridSpacing: (gridSpacing ?? this.gridSpacing).clamp(16.0, 48.0),
       enableMouseGlow: enableMouseGlow ?? this.enableMouseGlow,
       mouseGlowRadius: (mouseGlowRadius ?? this.mouseGlowRadius).clamp(60.0, 240.0),
       rdpSmoothingTolerance: (rdpSmoothingTolerance ?? this.rdpSmoothingTolerance).clamp(0.1, 0.8),
       pressureSensitivity: (pressureSensitivity ?? this.pressureSensitivity).clamp(0.5, 2.0),
       drawAndHoldDurationMs: (drawAndHoldDurationMs ?? this.drawAndHoldDurationMs).clamp(250, 750),
+      stylusPrimaryBarrelAction: stylusPrimaryBarrelAction ?? this.stylusPrimaryBarrelAction,
+      stylusPrimaryTriggerMode: stylusPrimaryTriggerMode ?? this.stylusPrimaryTriggerMode,
+      stylusSecondaryBarrelAction: stylusSecondaryBarrelAction ?? this.stylusSecondaryBarrelAction,
+      stylusSecondaryTriggerMode: stylusSecondaryTriggerMode ?? this.stylusSecondaryTriggerMode,
+      enableStylusHoverPreview: enableStylusHoverPreview ?? this.enableStylusHoverPreview,
+      enablePalmRejection: enablePalmRejection ?? this.enablePalmRejection,
       angleSnapStepDegrees: angleSnapStepDegrees ?? this.angleSnapStepDegrees,
       inkSnapTolerance: (inkSnapTolerance ?? this.inkSnapTolerance).clamp(12.0, 40.0),
       geminiApiKey: geminiApiKey ?? this.geminiApiKey,
@@ -234,12 +364,19 @@ class AppSettingsState {
       'blurSigma': blurSigma,
       'enableAuroraBorders': enableAuroraBorders,
       'showTelemetryHud': showTelemetryHud,
+      'enableNativeRendering': enableNativeRendering,
       'gridSpacing': gridSpacing,
       'enableMouseGlow': enableMouseGlow,
       'mouseGlowRadius': mouseGlowRadius,
       'rdpSmoothingTolerance': rdpSmoothingTolerance,
       'pressureSensitivity': pressureSensitivity,
       'drawAndHoldDurationMs': drawAndHoldDurationMs,
+      'stylusPrimaryBarrelAction': stylusPrimaryBarrelAction.name,
+      'stylusPrimaryTriggerMode': stylusPrimaryTriggerMode.name,
+      'stylusSecondaryBarrelAction': stylusSecondaryBarrelAction.name,
+      'stylusSecondaryTriggerMode': stylusSecondaryTriggerMode.name,
+      'enableStylusHoverPreview': enableStylusHoverPreview,
+      'enablePalmRejection': enablePalmRejection,
       'angleSnapStepDegrees': angleSnapStepDegrees,
       'inkSnapTolerance': inkSnapTolerance,
       'geminiApiKey': geminiApiKey,
@@ -262,12 +399,45 @@ class AppSettingsState {
 
   factory AppSettingsState.fromJson(Map<String, dynamic> json) {
     final rawThemes = json['customThemes'] as List<dynamic>?;
-    final List<ThemeDefinition> parsedThemes = rawThemes != null
-        ? rawThemes
-            .whereType<Map<String, dynamic>>()
-            .map((item) => ThemeDefinition.fromJson(item))
-            .toList()
-        : [];
+    final List<ThemeDefinition> parsedThemes = <ThemeDefinition>[];
+    if (rawThemes != null) {
+      for (final item in rawThemes) {
+        if (item is Map) {
+          try {
+            final map = Map<String, dynamic>.from(item);
+            parsedThemes.add(ThemeDefinition.fromJson(map));
+          } catch (_) {}
+        }
+      }
+    }
+
+    final primaryActionStr = json['stylusPrimaryBarrelAction'] as String? ?? json['primaryBarrelAction'] as String?;
+    final primaryBarrelAction = primaryActionStr == 'selection'
+        ? StylusBarrelAction.selectionLasso
+        : StylusBarrelAction.values.firstWhere(
+            (e) => e.name == primaryActionStr,
+            orElse: () => StylusBarrelAction.strokeEraser,
+          );
+
+    final primaryTriggerStr = json['stylusPrimaryTriggerMode'] as String? ?? json['stylusTriggerMode'] as String?;
+    final primaryTriggerMode = StylusTriggerMode.values.firstWhere(
+      (e) => e.name == primaryTriggerStr,
+      orElse: () => StylusTriggerMode.hold,
+    );
+
+    final secondaryActionStr = json['stylusSecondaryBarrelAction'] as String? ?? json['secondaryBarrelAction'] as String?;
+    final secondaryBarrelAction = secondaryActionStr == 'selection'
+        ? StylusBarrelAction.selectionLasso
+        : StylusBarrelAction.values.firstWhere(
+            (e) => e.name == secondaryActionStr,
+            orElse: () => StylusBarrelAction.selectionLasso,
+          );
+
+    final secondaryTriggerStr = json['stylusSecondaryTriggerMode'] as String? ?? json['secondaryBarrelTriggerMode'] as String?;
+    final secondaryTriggerMode = StylusTriggerMode.values.firstWhere(
+      (e) => e.name == secondaryTriggerStr,
+      orElse: () => StylusTriggerMode.hold,
+    );
 
     return AppSettingsState(
       activeThemeId: json['activeThemeId'] as String? ?? 'moscaro_cyan',
@@ -283,12 +453,19 @@ class AppSettingsState {
       blurSigma: (json['blurSigma'] as num?)?.toDouble() ?? 35.0,
       enableAuroraBorders: json['enableAuroraBorders'] as bool? ?? true,
       showTelemetryHud: json['showTelemetryHud'] as bool? ?? true,
+      enableNativeRendering: json['enableNativeRendering'] as bool? ?? true,
       gridSpacing: (json['gridSpacing'] as num?)?.toDouble() ?? 28.0,
       enableMouseGlow: json['enableMouseGlow'] as bool? ?? true,
       mouseGlowRadius: (json['mouseGlowRadius'] as num?)?.toDouble() ?? 120.0,
       rdpSmoothingTolerance: (json['rdpSmoothingTolerance'] as num?)?.toDouble() ?? 0.35,
       pressureSensitivity: (json['pressureSensitivity'] as num?)?.toDouble() ?? 1.0,
       drawAndHoldDurationMs: json['drawAndHoldDurationMs'] as int? ?? 400,
+      stylusPrimaryBarrelAction: primaryBarrelAction,
+      stylusPrimaryTriggerMode: primaryTriggerMode,
+      stylusSecondaryBarrelAction: secondaryBarrelAction,
+      stylusSecondaryTriggerMode: secondaryTriggerMode,
+      enableStylusHoverPreview: json['enableStylusHoverPreview'] as bool? ?? true,
+      enablePalmRejection: json['enablePalmRejection'] as bool? ?? true,
       angleSnapStepDegrees: (json['angleSnapStepDegrees'] as num?)?.toDouble() ?? 15.0,
       inkSnapTolerance: (json['inkSnapTolerance'] as num?)?.toDouble() ?? 24.0,
       geminiApiKey: json['geminiApiKey'] as String? ?? '',

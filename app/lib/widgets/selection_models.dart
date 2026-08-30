@@ -19,7 +19,13 @@ enum SelectionHandleType {
   bottomCenter,
   bottomLeft,
   centerLeft,
-  rotation,
+  rotation;
+
+  static const SelectionHandleType topEdge = SelectionHandleType.topCenter;
+  static const SelectionHandleType rightEdge = SelectionHandleType.centerRight;
+  static const SelectionHandleType bottomEdge = SelectionHandleType.bottomCenter;
+  static const SelectionHandleType leftEdge = SelectionHandleType.centerLeft;
+  static const SelectionHandleType corner = SelectionHandleType.bottomRight;
 }
 
 /// Estado imutável ou reativo da Seleção no Canvas
@@ -326,17 +332,78 @@ class SelectionGeometry {
     };
   }
 
-  /// Detecta se o ponto clicado atingiu um dos manipuladores da seleção
-  static SelectionHandleType getHandleAtPoint(Offset point, Rect bounds, double zoomScale, {double rotation = 0.0, Offset? pivot}) {
-    final handles = getHandlePositions(bounds, zoomScale, rotation: rotation, pivot: pivot);
-    final hitTolerance = 18.0 / zoomScale;
-    final hitToleranceSq = hitTolerance * hitTolerance;
+  /// Detecta se o ponto clicado atingiu um dos manipuladores da seleção (arestas ou cantos)
+  static SelectionHandleType getHandleAtPoint(
+    Offset point,
+    Rect bounds,
+    double zoomScale, {
+    double rotation = 0.0,
+    Offset? pivot,
+  }) {
+    final center = pivot ?? bounds.center;
+    final inflated = bounds.inflate(6.0 / zoomScale);
 
-    for (final entry in handles.entries) {
-      if ((point - entry.value).distanceSquared <= hitToleranceSq) {
-        return entry.key;
-      }
+    // Converte o ponto para o espaço não-rotacionado
+    final Offset unrotatedPoint;
+    if (rotation != 0.0) {
+      final dx = point.dx - center.dx;
+      final dy = point.dy - center.dy;
+      final cosA = math.cos(-rotation);
+      final sinA = math.sin(-rotation);
+      unrotatedPoint = Offset(center.dx + dx * cosA - dy * sinA, center.dy + dx * sinA + dy * cosA);
+    } else {
+      unrotatedPoint = point;
     }
+
+    final cornerTolerance = 18.0 / zoomScale;
+    final cornerToleranceSq = cornerTolerance * cornerTolerance;
+
+    // 1. Hit testing prioritário dos 4 cantos
+    if ((unrotatedPoint - inflated.topLeft).distanceSquared <= cornerToleranceSq) {
+      return SelectionHandleType.topLeft;
+    }
+    if ((unrotatedPoint - inflated.topRight).distanceSquared <= cornerToleranceSq) {
+      return SelectionHandleType.topRight;
+    }
+    if ((unrotatedPoint - inflated.bottomLeft).distanceSquared <= cornerToleranceSq) {
+      return SelectionHandleType.bottomLeft;
+    }
+    if ((unrotatedPoint - inflated.bottomRight).distanceSquared <= cornerToleranceSq) {
+      return SelectionHandleType.bottomRight;
+    }
+
+    // 2. Hit testing das 4 arestas completas (espessura de ~14px)
+    final edgeThickness = 14.0 / zoomScale;
+    final halfThick = edgeThickness / 2.0;
+
+    // Aresta Superior (Top Edge)
+    if (unrotatedPoint.dx >= inflated.left - halfThick &&
+        unrotatedPoint.dx <= inflated.right + halfThick &&
+        (unrotatedPoint.dy - inflated.top).abs() <= halfThick) {
+      return SelectionHandleType.topCenter;
+    }
+
+    // Aresta Inferior (Bottom Edge)
+    if (unrotatedPoint.dx >= inflated.left - halfThick &&
+        unrotatedPoint.dx <= inflated.right + halfThick &&
+        (unrotatedPoint.dy - inflated.bottom).abs() <= halfThick) {
+      return SelectionHandleType.bottomCenter;
+    }
+
+    // Aresta Esquerda (Left Edge)
+    if (unrotatedPoint.dy >= inflated.top - halfThick &&
+        unrotatedPoint.dy <= inflated.bottom + halfThick &&
+        (unrotatedPoint.dx - inflated.left).abs() <= halfThick) {
+      return SelectionHandleType.centerLeft;
+    }
+
+    // Aresta Direita (Right Edge)
+    if (unrotatedPoint.dy >= inflated.top - halfThick &&
+        unrotatedPoint.dy <= inflated.bottom + halfThick &&
+        (unrotatedPoint.dx - inflated.right).abs() <= halfThick) {
+      return SelectionHandleType.centerRight;
+    }
+
     return SelectionHandleType.none;
   }
 

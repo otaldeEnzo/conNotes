@@ -1027,3 +1027,28 @@ class ActiveStrokePainter extends CustomPainter {
     return oldDelegate.panOffset != panOffset || oldDelegate.zoomScale != zoomScale;
   }
 }
+
+/// Camada de Renderização Nativa via Wgpu/DirectX 12.
+/// Substitui os CustomPainters quando o backend GPU de alta performance está ativo.
+class NativeCanvasTextureLayer extends StatelessWidget {
+  final int textureId;
+  final Offset panOffset;
+  final double zoomScale;
+
+  const NativeCanvasTextureLayer({
+    super.key,
+    required this.textureId,
+    required this.panOffset,
+    required this.zoomScale,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Transform(
+      transform: Matrix4.identity()
+        ..translate(panOffset.dx, panOffset.dy)
+        ..scale(zoomScale),
+      child: Texture(textureId: textureId),
+    );
+  }
+}
