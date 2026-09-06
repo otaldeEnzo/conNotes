@@ -3,6 +3,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../widgets/ink_models.dart';
+import '../widgets/canvas_layers.dart';
 import '../widgets/smart_shapes.dart';
 import '../widgets/stem_ruler_model.dart';
 import '../widgets/stem_protractor_model.dart';
@@ -213,8 +214,37 @@ class InkInputHandler {
     final lastPoint = activeStroke!.points.last.point;
     if ((effectivePoint - lastPoint).distanceSquared >= 2.25) {
       activeStroke!.points.add(StrokePoint(point: effectivePoint, pressure: pressure));
-      activeStroke!.cachedRawPoints = null;
-      activeStroke!.cachedPath = null;
+      
+      final pts = activeStroke!.points;
+      final len = pts.length;
+      if (len >= 4) {
+        activeStroke!.cachedPath ??= Path();
+        if ((activeStroke!.toolType == InkToolType.fountain || activeStroke!.enablePressure) && !activeStroke!.isShape) {
+          if (len >= 5) {
+            final segment = FreehandOutlineRenderer.generateOutlinePath(
+              pts.sublist(len - 5, len - 2),
+              baseWidth: activeStroke!.strokeWidth,
+              isTapered: activeStroke!.toolType == InkToolType.fountain,
+            );
+            activeStroke!.cachedPath!.addPath(segment, Offset.zero);
+          }
+        } else {
+          final p0 = pts[len - 4].point;
+          final p1 = pts[len - 3].point;
+          final mid = Offset((p0.dx + p1.dx) / 2, (p0.dy + p1.dy) / 2);
+          if (len == 4) {
+            final first = pts[0].point;
+            final second = pts[1].point;
+            final mid0 = Offset((first.dx + second.dx) / 2, (first.dy + second.dy) / 2);
+            activeStroke!.cachedPath!.moveTo(first.dx, first.dy);
+            activeStroke!.cachedPath!.quadraticBezierTo(first.dx, first.dy, mid0.dx, mid0.dy);
+            activeStroke!.cachedPath!.quadraticBezierTo(second.dx, second.dy, mid.dx, mid.dy);
+          } else {
+            activeStroke!.cachedPath!.quadraticBezierTo(p0.dx, p0.dy, mid.dx, mid.dy);
+          }
+        }
+      }
+
       activeStrokeUpdateNotifier.value++;
 
       // Reinicia o timer Draw & Hold enquanto a caneta estiver em movimento

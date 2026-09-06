@@ -1,5 +1,7 @@
+import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import '../theme/moscaro_theme_controller.dart';
+import '../theme/moscaro_v2_tokens.dart';
 
 /// Componente de Alternância (Switch / Toggle) estilizado no padrão Moscaro v2 Pro Max.
 class SettingsToggleTile extends StatefulWidget {
@@ -33,34 +35,42 @@ class _SettingsToggleTileState extends State<SettingsToggleTile> {
       onExit: (_) => setState(() => _isHovered = false),
       child: GestureDetector(
         onTap: () => widget.onChanged(!widget.value),
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 200),
-          curve: Curves.easeOutCubic,
-          margin: const EdgeInsets.only(bottom: 12),
-          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
-          decoration: BoxDecoration(
-            color: _isHovered
-                ? theme.backgroundSurface.withValues(alpha: 0.65)
-                : theme.backgroundSurface.withValues(alpha: 0.45),
+        child: Padding(
+          padding: const EdgeInsets.only(bottom: 12),
+          child: ClipRRect(
             borderRadius: BorderRadius.circular(16),
-            border: Border.all(
-              color: _isHovered
-                  ? accent.withValues(alpha: 0.45)
-                  : Colors.white.withValues(alpha: 0.08),
-              width: 1.1,
-            ),
-            boxShadow: _isHovered
-                ? [
-                    BoxShadow(
-                      color: accent.withValues(alpha: 0.12),
-                      blurRadius: 16,
-                      offset: const Offset(0, 4),
-                    ),
-                  ]
-                : [],
-          ),
-          child: Row(
-            children: [
+            child: BackdropFilter(
+              filter: ui.ImageFilter.blur(
+                sigmaX: MoscaroTokens.blurSigma,
+                sigmaY: MoscaroTokens.blurSigma,
+              ),
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 200),
+                curve: Curves.easeOutCubic,
+                padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
+                decoration: BoxDecoration(
+                  color: _isHovered
+                      ? theme.backgroundSurface.withValues(alpha: 0.65)
+                      : theme.backgroundSurface.withValues(alpha: 0.45),
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(
+                    color: _isHovered
+                        ? accent.withValues(alpha: 0.45)
+                        : Colors.white.withValues(alpha: 0.08),
+                    width: 1.1,
+                  ),
+                  boxShadow: _isHovered
+                      ? [
+                          BoxShadow(
+                            color: accent.withValues(alpha: 0.12),
+                            blurRadius: 16,
+                            offset: const Offset(0, 4),
+                          ),
+                        ]
+                      : [],
+                ),
+                child: Row(
+                  children: [
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -139,6 +149,8 @@ class _SettingsToggleTileState extends State<SettingsToggleTile> {
           ),
         ),
       ),
-    );
+    ),
+  ),
+));
   }
 }

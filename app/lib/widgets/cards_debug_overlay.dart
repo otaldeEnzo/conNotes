@@ -329,6 +329,8 @@ class _CardsTelemetryHudPanel extends StatelessWidget {
         return const Color(0x4400FF66);
       case CardHoverZone.corner:
         return const Color(0x440055FF);
+      case CardHoverZone.rotationHandle:
+        return const Color(0x44FFB300);
     }
   }
 
@@ -346,6 +348,8 @@ class _CardsTelemetryHudPanel extends StatelessWidget {
         return const Color(0xFF00FF66);
       case CardHoverZone.corner:
         return const Color(0xFF0055FF);
+      case CardHoverZone.rotationHandle:
+        return const Color(0xFFFFB300);
     }
   }
 
@@ -363,6 +367,8 @@ class _CardsTelemetryHudPanel extends StatelessWidget {
         return const Color(0xFF39FF14);
       case CardHoverZone.corner:
         return const Color(0xFF66AAFF);
+      case CardHoverZone.rotationHandle:
+        return const Color(0xFFFFCC00);
     }
   }
 }
@@ -527,39 +533,21 @@ class _CardsDebugPainter extends CustomPainter {
       tp.paint(canvas, Offset(card.x, card.y - tp.height - 4 / zoomScale));
     }
 
-    // 5. Retículo STEM de Alta Precisão Moscaro
+    // 5. Retículo Minimalista Moscaro (Precision Micro-Dot)
     if (rawCanvasPoint != null) {
       final center = rawCanvasPoint!;
       final s = 1.0 / zoomScale;
 
-      final glowPaint = Paint()
-        ..color = const Color(0x6600E1FF)
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 2.0 * s
-        ..maskFilter = MaskFilter.blur(BlurStyle.normal, 2.5 * s);
-      canvas.drawCircle(center, 6.0 * s, glowPaint);
-
       final ringPaint = Paint()
-        ..color = const Color(0xCC00E1FF)
+        ..color = const Color(0x9900E1FF)
         ..style = PaintingStyle.stroke
-        ..strokeWidth = 1.0 * s;
-      canvas.drawCircle(center, 6.0 * s, ringPaint);
-
-      final tickPaint = Paint()
-        ..color = const Color(0xFF00E1FF)
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 1.2 * s;
-      const tickStart = 8.0;
-      const tickEnd = 12.0;
-      canvas.drawLine(Offset(center.dx - tickEnd * s, center.dy), Offset(center.dx - tickStart * s, center.dy), tickPaint);
-      canvas.drawLine(Offset(center.dx + tickStart * s, center.dy), Offset(center.dx + tickEnd * s, center.dy), tickPaint);
-      canvas.drawLine(Offset(center.dx, center.dy - tickEnd * s), Offset(center.dx, center.dy - tickStart * s), tickPaint);
-      canvas.drawLine(Offset(center.dx, center.dy + tickStart * s), Offset(center.dx, center.dy + tickEnd * s), tickPaint);
+        ..strokeWidth = 0.9 * s;
+      canvas.drawCircle(center, 4.5 * s, ringPaint);
 
       final corePaint = Paint()
         ..color = Colors.white
         ..style = PaintingStyle.fill;
-      canvas.drawCircle(center, 1.2 * s, corePaint);
+      canvas.drawCircle(center, 1.0 * s, corePaint);
     }
 
     canvas.restore();

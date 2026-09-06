@@ -15,6 +15,7 @@ class NoteTabBar extends StatefulWidget {
   final VoidCallback onAddNote;
   final VoidCallback onToggleSidebar;
   final VoidCallback onOpenSettings;
+  final VoidCallback? onBackToHome;
   final bool isSidebarOpen;
 
   const NoteTabBar({
@@ -27,6 +28,7 @@ class NoteTabBar extends StatefulWidget {
     required this.onAddNote,
     required this.onToggleSidebar,
     required this.onOpenSettings,
+    this.onBackToHome,
     this.isSidebarOpen = false,
   });
 
@@ -113,7 +115,20 @@ class _NoteTabBarState extends State<NoteTabBar> {
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                const SizedBox(width: 8),
+                if (widget.onBackToHome != null) ...[
+                  IconButton(
+                    icon: SvgIcon(
+                      name: 'home',
+                      size: 16,
+                      color: iconColor,
+                    ),
+                    onPressed: widget.onBackToHome,
+                    tooltip: 'Página Inicial (Home)',
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints(),
+                  ),
+                  const SizedBox(width: 8),
+                ],
                 IconButton(
                   icon: SvgIcon(
                     assetName: 'grid',
@@ -164,20 +179,31 @@ class _NoteTabBarState extends State<NoteTabBar> {
                                     },
                                     child: GestureDetector(
                                       onTap: () => widget.onSelectNote(noteId),
-                                      child: Container(
+                                      child: AnimatedContainer(
+                                        duration: const Duration(milliseconds: 200),
+                                        curve: Curves.easeOutCubic,
                                         margin: const EdgeInsets.only(right: 6),
                                         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                                         decoration: BoxDecoration(
                                           color: isSelected
-                                              ? (isLight ? MoscaroTokens.auroraBlue.withValues(alpha: 0.15) : Colors.white.withValues(alpha: 0.12))
+                                              ? (isLight ? MoscaroTokens.auroraBlue.withValues(alpha: 0.18) : Colors.white.withValues(alpha: 0.14))
                                               : Colors.transparent,
                                           borderRadius: BorderRadius.circular(MoscaroTokens.radiusButton),
                                           border: Border.all(
                                             color: isSelected
-                                                ? (isLight ? MoscaroTokens.auroraBlue.withValues(alpha: 0.4) : MoscaroTokens.borderGlow)
+                                                ? (isLight ? MoscaroTokens.auroraBlue.withValues(alpha: 0.6) : MoscaroTokens.borderGlow)
                                                 : Colors.transparent,
                                             width: 1.0,
                                           ),
+                                          boxShadow: isSelected
+                                              ? [
+                                                  BoxShadow(
+                                                    color: MoscaroTokens.auroraBlue.withValues(alpha: 0.2),
+                                                    blurRadius: 8,
+                                                    spreadRadius: 0,
+                                                  ),
+                                                ]
+                                              : null,
                                         ),
                                         child: Row(
                                           mainAxisSize: MainAxisSize.min,

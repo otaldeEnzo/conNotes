@@ -10,7 +10,8 @@ enum CardHoverZone {
   header,
   rightEdge,
   bottomEdge,
-  corner;
+  corner,
+  rotationHandle;
 
   String get label {
     switch (this) {
@@ -26,6 +27,8 @@ enum CardHoverZone {
         return 'BOTTOM_EDGE';
       case CardHoverZone.corner:
         return 'CORNER';
+      case CardHoverZone.rotationHandle:
+        return 'ROTATION_HANDLE';
     }
   }
 }
@@ -150,20 +153,33 @@ class CardsTelemetryController extends ChangeNotifier {
         final double minH = selected.calculateMinHeight();
         final double cardH = selected.isCollapsed ? 36.0 : math.max(selected.height, minH);
 
-        // Barra Flutuante Superior (quando selecionado)
+        // Alca de Rotacao (~24px acima do topo central do card quando selecionado)
+        if (!selected.isPinned) {
+          final rotationHandleRect = Rect.fromCenter(
+            center: Offset(selected.x + selected.width / 2.0, selected.y - 24.0),
+            width: 28.0,
+            height: 28.0,
+          );
+          if (rotationHandleRect.contains(canvasPoint)) {
+            return (zone: CardHoverZone.rotationHandle, card: selected);
+          }
+        }
+
+        // Barra Flutuante Superior e Subbarras Popover (quando selecionado)
+        // Ocupa o topo do card de y - 160.0 até y (com padding horizontal generoso para acomodar pílula e subbarras)
         final floatingPillRect = Rect.fromLTWH(
-          selected.x - 30.0,
-          selected.y - 70.0,
-          math.max(selected.width, 360.0) + 60.0,
-          70.0,
+          selected.x - 100.0,
+          selected.y - 160.0,
+          math.max(selected.width, 500.0) + 200.0,
+          160.0,
         );
         if (floatingPillRect.contains(canvasPoint)) {
           return (zone: CardHoverZone.body, card: selected);
         }
 
-        // Alças ativas apenas se não fixado e não recolhido
+        // Alcas ativas apenas se nao fixado e nao recolhido
         if (!selected.isPinned && !selected.isCollapsed) {
-          // Vértice Inferior Direito (Diagonal)
+          // Vertice Inferior Direito (Diagonal)
           final cornerRect = Rect.fromLTWH(
             selected.x + selected.width - cornerSize,
             selected.y + cardH - cornerSize,
@@ -185,19 +201,19 @@ class CardsTelemetryController extends ChangeNotifier {
             return (zone: CardHoverZone.rightEdge, card: selected);
           }
 
-          // Aresta Inferior (Horizontal)
+          // Aresta Inferior (Horizontal) - Borda generosa para redimensionamento limpo
           final bottomEdgeRect = Rect.fromLTWH(
             selected.x,
-            selected.y + cardH - edgeThickness / 2,
+            selected.y + cardH - 12.0,
             selected.width - cornerSize,
-            edgeThickness,
+            24.0,
           );
           if (bottomEdgeRect.contains(canvasPoint)) {
             return (zone: CardHoverZone.bottomEdge, card: selected);
           }
         }
 
-        // Cabeçalho de Arraste
+        // Cabeçalho de Arraste (Mídia ou Bloco de Texto, em y até y + 36.0)
         final headerRect = Rect.fromLTWH(selected.x, selected.y, selected.width, 36.0);
         if (headerRect.contains(canvasPoint)) {
           return (zone: CardHoverZone.header, card: selected);
@@ -217,13 +233,12 @@ class CardsTelemetryController extends ChangeNotifier {
       final double minH = card.calculateMinHeight();
       final double cardH = card.isCollapsed ? 36.0 : math.max(card.height, minH);
 
-      final headerRect = Rect.fromLTWH(card.x, card.y, card.width, 36.0);
-      if (headerRect.contains(canvasPoint)) {
-        return (zone: CardHoverZone.header, card: card);
-      }
-
-      final cardRect = Rect.fromLTWH(card.x, card.y, card.width, cardH);
-      if (cardRect.contains(canvasPoint)) {
+      final totalCardRect = Rect.fromLTWH(card.x, card.y - 60.0, card.width, cardH + 60.0);
+      if (totalCardRect.contains(canvasPoint)) {
+        final headerRect = Rect.fromLTWH(card.x, card.y, card.width, 36.0);
+        if (headerRect.contains(canvasPoint)) {
+          return (zone: CardHoverZone.header, card: card);
+        }
         return (zone: CardHoverZone.body, card: card);
       }
     }

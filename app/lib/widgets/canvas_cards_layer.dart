@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import '../models/canvas_card_model.dart';
 import 'canvas_card_widget.dart';
 import 'selection_models.dart';
+import 'infinite_hit_test_stack.dart';
+export 'infinite_hit_test_stack.dart';
 
 /// Camada de Renderização e Viewport Culling dos Cards no Canvas Infinito.
 /// 
@@ -23,6 +25,9 @@ class CanvasCardsLayer extends StatefulWidget {
   final ValueChanged<String?> onSelectCard;
   final ValueChanged<String> onDeleteCard;
   final ValueChanged<CanvasCardModel> onDuplicateCard;
+  final double gridSpacing;
+  final ValueChanged<CanvasCardModel>? onSolveWithAi;
+  final ValueChanged<CanvasCardModel>? onExtractLatex;
 
   const CanvasCardsLayer({
     super.key,
@@ -37,6 +42,9 @@ class CanvasCardsLayer extends StatefulWidget {
     required this.onSelectCard,
     required this.onDeleteCard,
     required this.onDuplicateCard,
+    this.gridSpacing = 28.0,
+    this.onSolveWithAi,
+    this.onExtractLatex,
   });
 
   @override
@@ -96,8 +104,9 @@ class _CanvasCardsLayerState extends State<CanvasCardsLayer> {
     }
     final sortedCards = [...unselectedCards, ...selectedCards];
 
-    return Stack(
+    return InfiniteHitTestStack(
       clipBehavior: Clip.none,
+      unconstrainedPositionedLayout: true,
       children: sortedCards.map((card) {
         final isSelected = widget.selectedCardId == card.id ||
             currentSelectionState.selectedCardIds.contains(card.id);
@@ -115,6 +124,10 @@ class _CanvasCardsLayerState extends State<CanvasCardsLayer> {
               onSelectCard: widget.onSelectCard,
               onDeleteCard: widget.onDeleteCard,
               onDuplicateCard: widget.onDuplicateCard,
+              allCards: widget.cards,
+              gridSpacing: widget.gridSpacing,
+              onSolveWithAi: widget.onSolveWithAi != null ? () => widget.onSolveWithAi!(card) : null,
+              onExtractLatex: widget.onExtractLatex != null ? () => widget.onExtractLatex!(card) : null,
             ),
         );
       }).toList(),

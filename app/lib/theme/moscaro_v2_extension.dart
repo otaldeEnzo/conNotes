@@ -1,30 +1,21 @@
 import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
+import '../services/diagnostics_override_controller.dart';
 import 'moscaro_v2_tokens.dart';
 
 /// Gerenciador Singleton de Shaders GLSL de Alta Performance (Dual Kawase Blur).
-class KawaseShaderManager {
-  static final KawaseShaderManager instance = KawaseShaderManager._();
-  KawaseShaderManager._() {
-    _initShader();
-  }
+/// Shader Manager Singleton para carregar o Dual Kawase Shader em GPUs suportadas.
+class MoscaroBlurShaderManager {
+  static final MoscaroBlurShaderManager instance = MoscaroBlurShaderManager._();
+  MoscaroBlurShaderManager._();
 
   ui.FragmentProgram? _program;
-  bool _isLoading = false;
-  bool _hasError = false;
 
-  bool get isReady => _program != null;
-  bool get hasError => _hasError;
-
-  Future<void> _initShader() async {
-    if (_isLoading || _program != null) return;
-    _isLoading = true;
+  Future<void> init() async {
     try {
-      _program = await ui.FragmentProgram.fromAsset('shaders/kawase_blur.frag');
+      _program = await ui.FragmentProgram.fromAsset('shaders/dual_kawase_blur.frag');
     } catch (_) {
-      _hasError = true;
-    } finally {
-      _isLoading = false;
+      // Fallback gracioso para ImageFilter.blur nativo caso a plataforma não suporte shaders de fragmento
     }
   }
 
@@ -47,8 +38,9 @@ extension MoscaroV2Extension on Widget {
     EdgeInsetsGeometry? padding,
     List<BoxShadow>? customShadows,
   }) {
+    final bool bypass = DiagnosticsOverrideController.instance.bypassBackdropFilter;
     final effectiveBlurSigma = blurSigma ?? MoscaroTokens.blurSigma;
-    final double computedBlur = (enableBlur && effectiveBlurSigma > 0) ? effectiveBlurSigma : 0.0;
+    final double computedBlur = (!bypass && enableBlur && effectiveBlurSigma > 0) ? effectiveBlurSigma : 0.0;
     final isLight = MoscaroTokens.isLight;
 
     final effectiveBgColor = backgroundColor ?? MoscaroTokens.glassTint;
@@ -65,7 +57,7 @@ extension MoscaroV2Extension on Widget {
       ),
     ];
 
-    Widget container = Container(
+    Widget styledBox = Container(
       padding: padding ?? const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       decoration: BoxDecoration(
         color: effectiveBgColor,
@@ -80,15 +72,18 @@ extension MoscaroV2Extension on Widget {
     );
 
     if (computedBlur > 0) {
-      container = BackdropFilter(
-        filter: ui.ImageFilter.blur(sigmaX: computedBlur, sigmaY: computedBlur),
-        child: container,
+      return ClipRRect(
+        borderRadius: BorderRadius.circular(borderRadius),
+        child: BackdropFilter(
+          filter: ui.ImageFilter.blur(sigmaX: computedBlur, sigmaY: computedBlur),
+          child: styledBox,
+        ),
       );
     }
 
     return ClipRRect(
       borderRadius: BorderRadius.circular(borderRadius),
-      child: container,
+      child: styledBox,
     );
   }
 }

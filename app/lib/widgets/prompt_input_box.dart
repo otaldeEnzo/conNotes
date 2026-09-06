@@ -1,7 +1,5 @@
 import 'dart:convert';
 import 'dart:io';
-import 'dart:typed_data';
-import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:file_picker/file_picker.dart';
@@ -13,30 +11,45 @@ import '../theme/moscaro_theme_controller.dart';
 import 'aurora_border_painter.dart';
 import 'svg_icon.dart';
 
-/// Caixa de Prompt de IA com suporte a Anexo de Imagens, Menções @notas, Borda Aurora e Moscaro v2
+/// Caixa de Prompt de IA com suporte a Anexo de Imagens, Seleção de Área do Canvas, Menções @notas, Borda Aurora e Moscaro v2
 class PromptInputBox extends StatefulWidget {
   final void Function(String prompt, String? attachedImageBase64) onSubmit;
+  final VoidCallback? onSelectCanvasArea;
   final List<String> availableNoteTitles;
   final double width;
 
   const PromptInputBox({
     super.key,
     required this.onSubmit,
+    this.onSelectCanvasArea,
     this.availableNoteTitles = const [],
     this.width = 540,
   });
 
   @override
-  State<PromptInputBox> createState() => _PromptInputBoxState();
+  State<PromptInputBox> createState() => PromptInputBoxState();
 }
 
-class _PromptInputBoxState extends State<PromptInputBox> with SingleTickerProviderStateMixin {
+class PromptInputBoxState extends State<PromptInputBox> with SingleTickerProviderStateMixin {
   late AnimationController _auroraController;
   final TextEditingController _textController = TextEditingController();
   final FocusNode _focusNode = FocusNode();
 
   String? _attachedImageBase64;
   Uint8List? _attachedImageBytes;
+
+  /// Permite que chamadores externos (ex: Captura de Área do Canvas ou Card de Mídia)
+  /// anexem uma imagem diretamente ao prompt box com foco.
+  void attachImage({required Uint8List bytes, required String base64, String? defaultPrompt}) {
+    setState(() {
+      _attachedImageBytes = bytes;
+      _attachedImageBase64 = base64;
+      if (defaultPrompt != null && _textController.text.trim().isEmpty) {
+        _textController.text = defaultPrompt;
+      }
+    });
+    _focusNode.requestFocus();
+  }
 
   // Estado do menu de menções @
   bool _showMentionMenu = false;
@@ -138,7 +151,7 @@ class _PromptInputBoxState extends State<PromptInputBox> with SingleTickerProvid
         allowedExtensions: ['png', 'jpg', 'jpeg', 'webp', 'bmp'],
       );
 
-      if (result != null && result.isNotEmpty) {
+      if (result.isNotEmpty) {
         final path = result.first.path;
         if (path != null) {
           final file = File(path);
@@ -268,7 +281,8 @@ class _PromptInputBoxState extends State<PromptInputBox> with SingleTickerProvid
                   ),
                 ),
                 IconButton(
-                  icon: Icon(Icons.close, color: MoscaroTokens.textMuted, size: 16),
+                  tooltip: 'Remover imagem',
+                  icon: SvgIcon(assetName: 'close', color: MoscaroTokens.textMuted, size: 14),
                   onPressed: () {
                     setState(() {
                       _attachedImageBase64 = null;
@@ -286,53 +300,80 @@ class _PromptInputBoxState extends State<PromptInputBox> with SingleTickerProvid
             ),
           ),
 
-        // Campo Principal do Prompt com Borda Aurora
-        AnimatedBuilder(
-          animation: _auroraController,
-          builder: (context, child) {
-            return CustomPaint(
-              painter: AuroraBorderPainter(
-                animationValue: _auroraController.value,
-                borderRadius: MoscaroTokens.radiusInput,
-                borderWidth: MoscaroTokens.borderWidthAurora,
-              ),
-              child: SizedBox(
-                width: widget.width,
-                child: Row(
-                  children: [
-                    // Botão de Anexo de Imagem (SVG Icon)
-                    IconButton(
-                      tooltip: 'Anexar Imagem',
-                      icon: SvgIcon(assetName: 'brush', color: accent, size: 16),
-                      onPressed: _pickImage,
-                    ),
-                    Expanded(
-                      child: TextField(
-                        controller: _textController,
-                        focusNode: _focusNode,
-                        style: const TextStyle(color: Colors.white, fontSize: 13),
-                        decoration: const InputDecoration(
-                          hintText: 'Pergunte à IA (use @ para citar notas)...',
-                          hintStyle: TextStyle(color: Colors.white54, fontSize: 12),
-                          border: InputBorder.none,
-                          contentPadding: EdgeInsets.symmetric(horizontal: 4, vertical: 10),
-                        ),
-                        onSubmitted: (_) => _handleSend(),
+        // Campo Principal do Prompt com Borda Aurora e Seleção Externa
+        SizedBox(
+          width: widget.width,
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              Expanded(
+                child: AnimatedBuilder(
+                  animation: _auroraController,
+                  builder: (context, child) {
+                    return CustomPaint(
+                      painter: AuroraBorderPainter(
+                        animationValue: _auroraController.value,
+                        borderRadius: MoscaroTokens.radiusInput,
+                        borderWidth: MoscaroTokens.borderWidthAurora,
                       ),
-                    ),
-                    IconButton(
-                      icon: Icon(Icons.arrow_upward, color: accent, size: 20),
-                      onPressed: _handleSend,
-                    ),
-                  ],
+                      child: Row(
+                        children: [
+                          // Botão de Anexo de Imagem (SVG Icon) - À ESQUERDA
+                          IconButton(
+                            tooltip: 'Anexar Imagem',
+                            icon: SvgIcon(assetName: 'image', color: accent, size: 16),
+                            hoverColor: accent.withValues(alpha: 0.15),
+                            onPressed: _pickImage,
+                          ),
+                          Expanded(
+                            child: TextField(
+                              controller: _textController,
+                              focusNode: _focusNode,
+                              style: const TextStyle(color: Colors.white, fontSize: 13),
+                              decoration: const InputDecoration(
+                                hintText: 'Pergunte à IA (use @ para citar notas)...',
+                                hintStyle: TextStyle(color: Colors.white54, fontSize: 12),
+                                border: InputBorder.none,
+                                contentPadding: EdgeInsets.symmetric(horizontal: 4, vertical: 10),
+                              ),
+                              onSubmitted: (_) => _handleSend(),
+                            ),
+                          ),
+                          // Botão de Enviar (SVG Icon) - DENTRO À DIREITA
+                          IconButton(
+                            tooltip: 'Enviar (Enter)',
+                            icon: SvgIcon(assetName: 'send', color: accent, size: 16),
+                            hoverColor: accent.withValues(alpha: 0.15),
+                            onPressed: _handleSend,
+                          ),
+                        ],
+                      ).moscaroV2(
+                        borderRadius: MoscaroTokens.radiusInput,
+                        borderWidth: 0,
+                        padding: EdgeInsets.zero,
+                      ),
+                    );
+                  },
                 ),
-              ).moscaroV2(
-                borderRadius: MoscaroTokens.radiusInput,
-                borderWidth: 0,
-                padding: EdgeInsets.zero,
               ),
-            );
-          },
+              // Botão de Seleção de Área do Canvas (SVG Icon) - FORA À DIREITA
+              if (widget.onSelectCanvasArea != null) ...[
+                const SizedBox(width: 8),
+                IconButton(
+                  tooltip: 'Selecionar Área do Canvas para IA',
+                  icon: SvgIcon(assetName: 'crop', color: accent, size: 18),
+                  hoverColor: accent.withValues(alpha: 0.15),
+                  onPressed: widget.onSelectCanvasArea,
+                ).moscaroV2(
+                  backgroundColor: theme.backgroundSurface.withValues(alpha: 0.35),
+                  borderColor: accent.withValues(alpha: 0.45),
+                  borderRadius: MoscaroTokens.radiusInput,
+                  padding: EdgeInsets.zero,
+                  enableBlur: true,
+                ),
+              ],
+            ],
+          ),
         ),
       ],
     );

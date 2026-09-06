@@ -13,6 +13,8 @@ FlutterWindow::~FlutterWindow() {}
 #include <vector>
 #include <cstring>
 #include "flutter/binary_messenger.h"
+#include "flutter/method_channel.h"
+#include "flutter/standard_method_codec.h"
 #pragma comment(lib, "comctl32.lib")
 
 #ifndef WM_TABLET_QUERYSYSTEMGESTURESTATUS
@@ -191,6 +193,43 @@ bool FlutterWindow::OnCreate() {
   // Registra o messenger para envio de eventos de stylus ao Dart
   g_messenger = flutter_controller_->engine()->messenger();
 
+  // Registra o canal de controle nativo de janela (Minimizar, Maximizar, Fechar, Drag)
+  auto window_channel = std::make_unique<flutter::MethodChannel<flutter::EncodableValue>>(
+      flutter_controller_->engine()->messenger(), "connotes/window_controls",
+      &flutter::StandardMethodCodec::GetInstance());
+
+  HWND top_hwnd = GetHandle();
+  window_channel->SetMethodCallHandler(
+      [top_hwnd](const flutter::MethodCall<flutter::EncodableValue>& call,
+                 std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>> result) {
+        if (!top_hwnd) {
+          result->Error("NO_WINDOW", "HWND not found");
+          return;
+        }
+        if (call.method_name() == "minimize") {
+          ShowWindow(top_hwnd, SW_MINIMIZE);
+          result->Success(flutter::EncodableValue(true));
+        } else if (call.method_name() == "maximize_or_restore") {
+          if (IsZoomed(top_hwnd)) {
+            ShowWindow(top_hwnd, SW_RESTORE);
+          } else {
+            ShowWindow(top_hwnd, SW_MAXIMIZE);
+          }
+          result->Success(flutter::EncodableValue(IsZoomed(top_hwnd) != FALSE));
+        } else if (call.method_name() == "close") {
+          PostMessage(top_hwnd, WM_CLOSE, 0, 0);
+          result->Success(flutter::EncodableValue(true));
+        } else if (call.method_name() == "start_drag") {
+          ReleaseCapture();
+          SendMessage(top_hwnd, WM_NCLBUTTONDOWN, HTCAPTION, 0);
+          result->Success(flutter::EncodableValue(true));
+        } else if (call.method_name() == "is_maximized") {
+          result->Success(flutter::EncodableValue(IsZoomed(top_hwnd) != FALSE));
+        } else {
+          result->NotImplemented();
+        }
+      });
+
   HWND child_window = flutter_controller_->view()->GetNativeWindow();
   SetChildContent(child_window);
 
@@ -201,7 +240,6 @@ bool FlutterWindow::OnCreate() {
 
   // Permanently disable touch/pen visual feedback circles, bubbles, and delays
   BOOL feedback_disabled = FALSE;
-  HWND top_hwnd = GetHandle();
   if (top_hwnd) {
     for (int i = 1; i <= 11; i++) {
       SetWindowFeedbackSetting(top_hwnd, (FEEDBACK_TYPE)i, 0, sizeof(BOOL), &feedback_disabled);

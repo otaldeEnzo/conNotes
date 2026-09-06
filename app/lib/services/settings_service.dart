@@ -12,6 +12,7 @@ class SettingsService extends ChangeNotifier {
   AppSettingsState _settings = const AppSettingsState();
   AppSettingsState get settings => _settings;
   AppSettingsState get currentSettings => _settings;
+  ChangeNotifier get settingsNotifier => this;
 
   File _getSettingsFile() {
     try {

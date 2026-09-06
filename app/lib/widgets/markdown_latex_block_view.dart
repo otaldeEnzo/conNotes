@@ -1030,23 +1030,29 @@ class MarkdownLatexBlockViewState extends State<MarkdownLatexBlockView> {
     if (mathStr.endsWith(r'$$')) mathStr = mathStr.substring(0, mathStr.length - 2);
     mathStr = mathStr.trim();
 
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-      alignment: Alignment.center,
-      decoration: BoxDecoration(
-        color: isLight ? Colors.black.withValues(alpha: 0.03) : Colors.white.withValues(alpha: 0.04),
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: themeAccent.withValues(alpha: 0.3), width: 0.8),
-      ),
-      child: Math.tex(
-        mathStr,
-        textStyle: TextStyle(
-          color: textPrimary,
-          fontSize: fontSize * 1.15,
+    return RepaintBoundary(
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          color: isLight ? Colors.black.withValues(alpha: 0.03) : Colors.white.withValues(alpha: 0.04),
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: themeAccent.withValues(alpha: 0.3), width: 0.8),
         ),
-        onErrorFallback: (err) => Text(
-          raw,
-          style: TextStyle(color: const Color(0xFFFF007A), fontSize: fontSize),
+        child: SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          physics: const BouncingScrollPhysics(),
+          child: Math.tex(
+            mathStr,
+            textStyle: TextStyle(
+              color: textPrimary,
+              fontSize: fontSize * 1.15,
+            ),
+            onErrorFallback: (err) => Text(
+              raw,
+              style: TextStyle(color: const Color(0xFFFF007A), fontSize: fontSize),
+            ),
+          ),
         ),
       ),
     );

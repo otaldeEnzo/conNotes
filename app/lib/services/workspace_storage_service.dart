@@ -11,6 +11,12 @@ class WorkspaceStorageService extends ChangeNotifier {
 
   WorkspaceStorageService._internal();
 
+  final ChangeNotifier notesListNotifier = ChangeNotifier();
+
+  void notifyNotesListChanged() {
+    notesListNotifier.notifyListeners();
+  }
+
   String _workspacePath = '';
   String get workspacePath => _workspacePath;
 
@@ -68,6 +74,7 @@ class WorkspaceStorageService extends ChangeNotifier {
     _startFileSystemWatcher();
     _isInitialized = true;
     notifyListeners();
+    notesListNotifier.notifyListeners();
   }
 
   /// Garante a existência das pastas essenciais: Cadernos/ e .trash/
@@ -92,12 +99,22 @@ class WorkspaceStorageService extends ChangeNotifier {
   void _startFileSystemWatcher() {
     _watcherSubscription?.cancel();
     try {
-      final dir = Directory(_workspacePath);
+      final dir = Directory('$_workspacePath/Cadernos');
       if (dir.existsSync()) {
         _watcherSubscription = dir.watch(recursive: true).listen((event) {
+          final p = event.path;
+          // Ignorar arquivos temporários ou de sistema
+          if (p.contains(r'\.') || p.contains('/.')) {
+            return;
+          }
+          // Apenas reagir se for arquivo .cncanvas ou alteração de pasta
+          if (!p.endsWith('.cncanvas') && !FileSystemEntity.isDirectorySync(p)) {
+            return;
+          }
+
           // Debounce para evitar varreduras repetitivas em operações de escrita rápida
           _watcherDebounceTimer?.cancel();
-          _watcherDebounceTimer = Timer(const Duration(milliseconds: 600), () {
+          _watcherDebounceTimer = Timer(const Duration(milliseconds: 1200), () {
             scanWorkspace();
           });
         });
@@ -279,6 +296,7 @@ class WorkspaceStorageService extends ChangeNotifier {
 
     _notebooks.add(folder);
     notifyListeners();
+    notesListNotifier.notifyListeners();
     return folder;
   }
 
@@ -303,6 +321,7 @@ class WorkspaceStorageService extends ChangeNotifier {
 
     await CncanvasFileService.saveToCnCanvasFile(doc, filePath);
     await scanWorkspace();
+    notesListNotifier.notifyListeners();
     return doc;
   }
 
@@ -335,6 +354,7 @@ class WorkspaceStorageService extends ChangeNotifier {
     }
     await scanWorkspace();
     notifyListeners();
+    notesListNotifier.notifyListeners();
   }
 
   /// Aninha uma nota arrastada como subnota (filha) de outra nota
@@ -357,6 +377,7 @@ class WorkspaceStorageService extends ChangeNotifier {
     }
     await scanWorkspace();
     notifyListeners();
+    notesListNotifier.notifyListeners();
   }
 
   /// Reordena uma nota arrastada para antes ou depois de uma nota de destino
@@ -385,6 +406,7 @@ class WorkspaceStorageService extends ChangeNotifier {
     }
 
     notifyListeners();
+    notesListNotifier.notifyListeners();
   }
 
   bool _removeNoteFromList(List<NoteDocument> list, String noteId) {
@@ -425,6 +447,7 @@ class WorkspaceStorageService extends ChangeNotifier {
       }
       note.filePath = newPath;
       await scanWorkspace();
+      notesListNotifier.notifyListeners();
     }
   }
 
@@ -462,6 +485,7 @@ class WorkspaceStorageService extends ChangeNotifier {
       }
     }
     await scanWorkspace();
+    notesListNotifier.notifyListeners();
   }
 
   /// Lixeira Etapa 2: Restaura uma nota da .trash/ de volta para a pasta de Cadernos
@@ -484,6 +508,7 @@ class WorkspaceStorageService extends ChangeNotifier {
       }
     }
     await scanWorkspace();
+    notesListNotifier.notifyListeners();
   }
 
   /// Lixeira Etapa 3: Esvazia definitivamente todos os arquivos de .trash/
@@ -504,6 +529,7 @@ class WorkspaceStorageService extends ChangeNotifier {
       }
     }
     await scanWorkspace();
+    notesListNotifier.notifyListeners();
   }
 
   /// Altera o diretório do Workspace com migração assistida de arquivos
@@ -531,6 +557,7 @@ class WorkspaceStorageService extends ChangeNotifier {
     _startFileSystemWatcher();
     await scanWorkspace();
     notifyListeners();
+    notesListNotifier.notifyListeners();
   }
 
   static Future<void> _copyDirectoryRecursively(Directory source, Directory destination) async {

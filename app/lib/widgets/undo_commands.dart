@@ -230,6 +230,11 @@ class AppUndoManager {
     command.execute(note);
     _undoStacks.putIfAbsent(note.id, () => []).add(command);
   }
+
+  void clear() {
+    _undoStacks.clear();
+    _redoStacks.clear();
+  }
 }
 
 /// Comando em lote para executar múltiplos comandos como um único passo

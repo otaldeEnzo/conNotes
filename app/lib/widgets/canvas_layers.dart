@@ -923,12 +923,19 @@ class ActiveStrokePainter extends CustomPainter {
           ..color = _getStrokeColor(stroke)
           ..style = PaintingStyle.fill;
 
-        final path = stroke.cachedPath ?? FreehandOutlineRenderer.generateOutlinePath(
-          stroke.points,
-          baseWidth: stroke.strokeWidth,
-          isTapered: stroke.toolType == InkToolType.fountain,
-        );
-        canvas.drawPath(path, _reusablePaint);
+        if (stroke.cachedPath != null) {
+          canvas.drawPath(stroke.cachedPath!, _reusablePaint);
+        }
+
+        final tailLen = math.min(stroke.points.length, 4);
+        if (tailLen > 0) {
+          final tailPath = FreehandOutlineRenderer.generateOutlinePath(
+            stroke.points.sublist(stroke.points.length - tailLen),
+            baseWidth: stroke.strokeWidth,
+            isTapered: stroke.toolType == InkToolType.fountain,
+          );
+          canvas.drawPath(tailPath, _reusablePaint);
+        }
         return;
       }
 
@@ -941,7 +948,14 @@ class ActiveStrokePainter extends CustomPainter {
           ..strokeJoin = StrokeJoin.miter
           ..style = PaintingStyle.stroke;
 
-        final path = stroke.cachedPath ?? _buildSmoothCatmullRomPath(stroke.points);
+        final path = Path();
+        if (stroke.cachedPath != null) {
+          path.addPath(stroke.cachedPath!, Offset.zero);
+        }
+        final tailLen = math.min(stroke.points.length, 4);
+        if (tailLen > 1) {
+          path.addPath(_buildSmoothCatmullRomPath(stroke.points.sublist(stroke.points.length - tailLen)), Offset.zero);
+        }
         canvas.drawPath(path, _reusablePaint);
         return;
       }
@@ -955,7 +969,14 @@ class ActiveStrokePainter extends CustomPainter {
           ..strokeJoin = StrokeJoin.round
           ..style = PaintingStyle.stroke;
 
-        final path = stroke.cachedPath ?? _buildSmoothCatmullRomPath(stroke.points);
+        final path = Path();
+        if (stroke.cachedPath != null) {
+          path.addPath(stroke.cachedPath!, Offset.zero);
+        }
+        final tailLen = math.min(stroke.points.length, 4);
+        if (tailLen > 1) {
+          path.addPath(_buildSmoothCatmullRomPath(stroke.points.sublist(stroke.points.length - tailLen)), Offset.zero);
+        }
         canvas.drawPath(path, _reusablePaint);
         return;
       }
@@ -968,12 +989,15 @@ class ActiveStrokePainter extends CustomPainter {
         ..strokeJoin = StrokeJoin.round
         ..style = PaintingStyle.stroke;
 
+      final path = Path();
       if (stroke.cachedPath != null) {
-        canvas.drawPath(stroke.cachedPath!, _reusablePaint);
-      } else {
-        final path = _buildSmoothCatmullRomPath(stroke.points);
-        canvas.drawPath(path, _reusablePaint);
+        path.addPath(stroke.cachedPath!, Offset.zero);
       }
+      final tailLen = math.min(stroke.points.length, 4);
+      if (tailLen > 1) {
+        path.addPath(_buildSmoothCatmullRomPath(stroke.points.sublist(stroke.points.length - tailLen)), Offset.zero);
+      }
+      canvas.drawPath(path, _reusablePaint);
     } finally {
       if (hasTransform) {
         canvas.restore();

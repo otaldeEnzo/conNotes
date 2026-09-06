@@ -1,3 +1,4 @@
+import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'dart:typed_data';
 
@@ -68,6 +69,29 @@ class StrokePoint {
       tilt: (json['tilt'] as num?)?.toDouble() ?? 0.0,
     );
   }
+
+  StrokePoint translate(double dx, double dy) {
+    return StrokePoint(
+      point: point.translate(dx, dy),
+      pressure: pressure,
+      tilt: tilt,
+    );
+  }
+
+  StrokePoint rotateAround(Offset center, double angle) {
+    final cosA = math.cos(angle);
+    final sinA = math.sin(angle);
+    final dx = point.dx - center.dx;
+    final dy = point.dy - center.dy;
+    return StrokePoint(
+      point: Offset(
+        center.dx + (dx * cosA - dy * sinA),
+        center.dy + (dx * sinA + dy * cosA),
+      ),
+      pressure: pressure,
+      tilt: tilt,
+    );
+  }
 }
 
 /// Modelo de Dados do Traço desenhado
@@ -80,6 +104,7 @@ class InkStroke {
   final bool enablePressure;
   final bool isShape; // Flag para formas geométricas (devem ser renderizadas como stroke, não fill)
   final Offset transform; // Usado para Flyweight pattern (compartilha a geometria realocando apenas a posição visual)
+  final String? parentCardId; // ID do card associado (modo anotação sobre mídia)
   Rect? boundingBox; // Para Viewport Culling (BoundingBox final JÁ INCLUI o transform)
   Path? cachedPath; // Caminho pré-calculado (no espaço local, SEM transform) para renderização instantânea durante Pan/Zoom
   Float32List? cachedRawPoints; // Geometria compacta para drawRawPoints sem alocação no paint
@@ -93,6 +118,7 @@ class InkStroke {
     this.enablePressure = false,
     this.isShape = false,
     this.transform = Offset.zero,
+    this.parentCardId,
     this.boundingBox,
     this.cachedPath,
     this.cachedRawPoints,
@@ -107,6 +133,7 @@ class InkStroke {
     bool? enablePressure,
     bool? isShape,
     Offset? transform,
+    String? parentCardId,
     Rect? boundingBox,
     Path? cachedPath,
     Float32List? cachedRawPoints,
@@ -120,6 +147,7 @@ class InkStroke {
       enablePressure: enablePressure ?? this.enablePressure,
       isShape: isShape ?? this.isShape,
       transform: transform ?? this.transform,
+      parentCardId: parentCardId ?? this.parentCardId,
       boundingBox: boundingBox ?? this.boundingBox,
       cachedPath: cachedPath ?? this.cachedPath,
       cachedRawPoints: cachedRawPoints ?? this.cachedRawPoints,
@@ -134,6 +162,7 @@ class InkStroke {
       'toolType': toolType.name,
       'enablePressure': enablePressure,
       'isShape': isShape,
+      'parentCardId': parentCardId,
       'transform': {'x': transform.dx, 'y': transform.dy},
       'points': points.map((p) => p.toJson()).toList(),
     };
@@ -176,6 +205,7 @@ class InkStroke {
       enablePressure: json['enablePressure'] as bool? ?? false,
       isShape: json['isShape'] as bool? ?? false,
       transform: trans,
+      parentCardId: json['parentCardId'] as String?,
     );
   }
 

@@ -1,5 +1,4 @@
 import 'dart:io';
-import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'note_models.dart';
 import '../models/canvas_card_model.dart';
@@ -17,6 +16,8 @@ import 'laser_pointer.dart';
 import '../theme/moscaro_theme_controller.dart';
 import 'settings_models.dart';
 import '../models/theme_models.dart';
+import '../theme/moscaro_v2_tokens.dart';
+import 'interactive_dot_grid_glow_painter.dart';
 
 class CanvasLayerStack extends StatelessWidget {
   final NoteDocument? note;
@@ -53,6 +54,8 @@ class CanvasLayerStack extends StatelessWidget {
   final ValueChanged<StemProtractorState> onProtractorStateChanged;
   final VoidCallback onCloseRuler;
   final VoidCallback onCloseProtractor;
+  final ValueChanged<CanvasCardModel>? onSolveWithAi;
+  final ValueChanged<CanvasCardModel>? onExtractLatex;
 
   const CanvasLayerStack({
     super.key,
@@ -90,6 +93,8 @@ class CanvasLayerStack extends StatelessWidget {
     required this.onProtractorStateChanged,
     required this.onCloseRuler,
     required this.onCloseProtractor,
+    this.onSolveWithAi,
+    this.onExtractLatex,
   });
 
   @override
@@ -121,11 +126,10 @@ class CanvasLayerStack extends StatelessWidget {
 
         // Camada 1: Fundo (DotGrid / Linhas / Branco) com suporte a Temas e Texturas STEM
         ListenableBuilder(
-          listenable: Listenable.merge([panNotifier, zoomNotifier, mousePosNotifier, MoscaroThemeController.instance]),
+          listenable: Listenable.merge([panNotifier, zoomNotifier, MoscaroThemeController.instance]),
           builder: (context, _) {
             final pan = panNotifier.value;
             final zoom = zoomNotifier.value;
-            final mousePos = mousePosNotifier.value;
             final themeCtrl = MoscaroThemeController.instance;
 
             return RepaintBoundary(
@@ -134,10 +138,10 @@ class CanvasLayerStack extends StatelessWidget {
                 painter: CanvasDotGridPainter(
                   panOffset: pan,
                   zoomScale: zoom,
-                  mousePosition: mousePos,
-                  backgroundType: isSettingsOpen ? CanvasBackgroundType.emBranco : backgroundType,
+                  mousePosition: null, // Passado null para desativar o CPU loop lento
+                  backgroundType: backgroundType,
                   gridSpacing: settings?.gridSpacing ?? 28.0,
-                  enableMouseGlow: settings?.enableMouseGlow ?? true,
+                  enableMouseGlow: false,
                   mouseGlowRadius: settings?.mouseGlowRadius ?? 120.0,
                   theme: themeCtrl.currentTheme,
                   backgroundMode: themeCtrl.backgroundMode,
@@ -150,6 +154,38 @@ class CanvasLayerStack extends StatelessWidget {
             );
           },
         ),
+
+        // Camada 1.5: Efeito de Brilho Orgânico e Vivo dos Pontos do Dot Grid (O(K) acelerado)
+        if (settings?.enableMouseGlow ?? true)
+          ValueListenableBuilder<Offset?>(
+            valueListenable: mousePosNotifier,
+            builder: (context, mousePos, _) {
+              if (mousePos == null) return const SizedBox.shrink();
+              final themeCtrl = MoscaroThemeController.instance;
+              final glowColor = themeCtrl.currentTheme.mouseGlowColor;
+              final radius = settings?.mouseGlowRadius ?? 140.0;
+
+              return Positioned.fill(
+                child: IgnorePointer(
+                  child: RepaintBoundary(
+                    child: CustomPaint(
+                      painter: InteractiveDotGridGlowPainter(
+                        mousePosition: mousePos,
+                        panOffset: panNotifier.value,
+                        zoomScale: zoomNotifier.value,
+                        gridSpacing: settings?.gridSpacing ?? 28.0,
+                        glowRadius: radius,
+                        glowColor: glowColor,
+                        backgroundType: backgroundType,
+                        isDark: !MoscaroTokens.isLight,
+                      ),
+                    ),
+                  ),
+                ),
+              );
+            },
+          ),
+
 
         // Camada 2: Traços Confirmados
         if (!isSettingsOpen && note != null)
@@ -168,21 +204,23 @@ class CanvasLayerStack extends StatelessWidget {
               final activeSel = getSelectionState?.call() ?? selectionState;
               final hideSelected = activeSel.isDraggingSelection || activeSel.isTransforming;
 
-              return RepaintBoundary(
-                child: CustomPaint(
-                  size: Size.infinite,
-                  isComplex: true,
-                  willChange: false,
-                  painter: CommittedStrokesPainter(
-                    strokes: note!.strokes,
-                    strokesCount: note!.strokes.length,
-                    strokesVersion: committedStrokesNotifier.value,
-                    hiddenStrokeIds: hideSelected ? activeSel.selectedStrokeIds : null,
-                    panOffset: pan,
-                    zoomScale: zoom,
-                    pictureCache: note!.pictureCache,
-                    isInteracting: isInteracting,
-                    repaint: committedStrokesNotifier,
+              return IgnorePointer(
+                child: RepaintBoundary(
+                  child: CustomPaint(
+                    size: Size.infinite,
+                    isComplex: true,
+                    willChange: false,
+                    painter: CommittedStrokesPainter(
+                      strokes: note!.strokes,
+                      strokesCount: note!.strokes.length,
+                      strokesVersion: committedStrokesNotifier.value,
+                      hiddenStrokeIds: hideSelected ? activeSel.selectedStrokeIds : null,
+                      panOffset: pan,
+                      zoomScale: zoom,
+                      pictureCache: note!.pictureCache,
+                      isInteracting: isInteracting,
+                      repaint: committedStrokesNotifier,
+                    ),
                   ),
                 ),
               );
@@ -196,14 +234,16 @@ class CanvasLayerStack extends StatelessWidget {
             builder: (context, _) {
               final pan = panNotifier.value;
               final zoom = zoomNotifier.value;
-              return RepaintBoundary(
-                child: CustomPaint(
-                  size: Size.infinite,
-                  painter: TransientStrokesPainter(
-                    cache: transientPictureCache,
-                    panOffset: pan,
-                    zoomScale: zoom,
-                    updateNotifier: transientUpdateNotifier,
+              return IgnorePointer(
+                child: RepaintBoundary(
+                  child: CustomPaint(
+                    size: Size.infinite,
+                    painter: TransientStrokesPainter(
+                      cache: transientPictureCache,
+                      panOffset: pan,
+                      zoomScale: zoom,
+                      updateNotifier: transientUpdateNotifier,
+                    ),
                   ),
                 ),
               );
@@ -217,14 +257,16 @@ class CanvasLayerStack extends StatelessWidget {
             builder: (context, _) {
               final pan = panNotifier.value;
               final zoom = zoomNotifier.value;
-              return RepaintBoundary(
-                child: CustomPaint(
-                  size: Size.infinite,
-                  painter: ActiveStrokePainter(
-                    activeStroke: getActiveStroke?.call() ?? activeStroke,
-                    updateNotifier: activeStrokeUpdateNotifier,
-                    panOffset: pan,
-                    zoomScale: zoom,
+              return IgnorePointer(
+                child: RepaintBoundary(
+                  child: CustomPaint(
+                    size: Size.infinite,
+                    painter: ActiveStrokePainter(
+                      activeStroke: getActiveStroke?.call() ?? activeStroke,
+                      updateNotifier: activeStrokeUpdateNotifier,
+                      panOffset: pan,
+                      zoomScale: zoom,
+                    ),
                   ),
                 ),
               );
@@ -238,17 +280,19 @@ class CanvasLayerStack extends StatelessWidget {
             builder: (context, _) {
               final pan = panNotifier.value;
               final zoom = zoomNotifier.value;
-              return RepaintBoundary(
-                child: CustomPaint(
-                  size: Size.infinite,
-                  painter: SelectionOverlayPainter(
-                    selectionState: selectionState,
-                    getSelectionState: getSelectionState ?? (() => selectionState),
-                    note: note!,
-                    panOffset: pan,
-                    zoomScale: zoom,
-                    repaintNotifier: selectionUpdateNotifier,
-                    dragCache: dragPictureCache,
+              return IgnorePointer(
+                child: RepaintBoundary(
+                  child: CustomPaint(
+                    size: Size.infinite,
+                    painter: SelectionOverlayPainter(
+                      selectionState: selectionState,
+                      getSelectionState: getSelectionState ?? (() => selectionState),
+                      note: note!,
+                      panOffset: pan,
+                      zoomScale: zoom,
+                      repaintNotifier: selectionUpdateNotifier,
+                      dragCache: dragPictureCache,
+                    ),
                   ),
                 ),
               );
@@ -262,12 +306,14 @@ class CanvasLayerStack extends StatelessWidget {
             builder: (context, _) {
               final mousePos = mousePosNotifier.value;
               if (mousePos == null) return const SizedBox.shrink();
-              return RepaintBoundary(
-                child: CustomPaint(
-                  size: Size.infinite,
-                  painter: _EraserHaloPainter(
-                    mousePosition: mousePos,
-                    radius: eraserRadius,
+              return IgnorePointer(
+                child: RepaintBoundary(
+                  child: CustomPaint(
+                    size: Size.infinite,
+                    painter: _EraserHaloPainter(
+                      mousePosition: mousePos,
+                      radius: eraserRadius,
+                    ),
                   ),
                 ),
               );
@@ -276,13 +322,15 @@ class CanvasLayerStack extends StatelessWidget {
 
         // Camada 6: Laser Pointer
         if (!isSettingsOpen)
-          RepaintBoundary(
-            child: CustomPaint(
-              size: Size.infinite,
-              painter: LaserPointerPainter(
-                engine: laserEngine,
-                panOffset: panNotifier.value,
-                zoomScale: zoomNotifier.value,
+          IgnorePointer(
+            child: RepaintBoundary(
+              child: CustomPaint(
+                size: Size.infinite,
+                painter: LaserPointerPainter(
+                  engine: laserEngine,
+                  panOffset: panNotifier.value,
+                  zoomScale: zoomNotifier.value,
+                ),
               ),
             ),
           ),
@@ -321,7 +369,7 @@ class CanvasLayerStack extends StatelessWidget {
             },
           ),
 
-        // Camada 8: Cards Interativos no Canvas
+        // Camada 8: Cards Interativos no Canvas (Topo do Stack para Hit-Testing Prioritário)
         if (!isSettingsOpen && note != null)
           CanvasCardsLayer(
             cards: note!.cards,
@@ -335,6 +383,8 @@ class CanvasLayerStack extends StatelessWidget {
             onSelectCard: onSelectCard,
             onDeleteCard: onDeleteCard,
             onDuplicateCard: onDuplicateCard,
+            onSolveWithAi: onSolveWithAi,
+            onExtractLatex: onExtractLatex,
           ),
       ],
     );

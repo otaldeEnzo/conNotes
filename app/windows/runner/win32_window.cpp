@@ -146,6 +146,10 @@ bool Win32Window::Create(const std::wstring& title,
 
   UpdateTheme(window);
 
+  MARGINS margins = { 0, 0, 1, 0 };
+  DwmExtendFrameIntoClientArea(window, &margins);
+  SetWindowPos(window, nullptr, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED);
+
   BOOL feedback_disabled = FALSE;
   for (int i = 1; i <= 11; i++) {
     SetWindowFeedbackSetting(window, (FEEDBACK_TYPE)i, 0, sizeof(BOOL), &feedback_disabled);
@@ -224,6 +228,21 @@ Win32Window::MessageHandler(HWND hwnd,
   switch (message) {
     case WM_TABLET_QUERYSYSTEMGESTURESTATUS:
       return TABLET_FLAGS_ALL_DISABLED;
+
+    case WM_NCCALCSIZE: {
+      if (wparam == TRUE) {
+        auto* params = reinterpret_cast<NCCALCSIZE_PARAMS*>(lparam);
+        if (IsZoomed(hwnd)) {
+          HMONITOR monitor = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
+          MONITORINFO mi = { sizeof(mi) };
+          if (GetMonitorInfo(monitor, &mi)) {
+            params->rgrc[0] = mi.rcWork;
+          }
+        }
+        return 0;
+      }
+      return DefWindowProc(hwnd, message, wparam, lparam);
+    }
 
     case WM_DESTROY:
       window_handle_ = nullptr;

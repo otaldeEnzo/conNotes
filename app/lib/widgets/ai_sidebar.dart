@@ -1,4 +1,5 @@
 import 'dart:ui';
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import '../models/ai_message_model.dart';
 import '../models/ai_provider_models.dart';
@@ -28,6 +29,7 @@ class AiSidebar extends StatefulWidget {
   final VoidCallback onClearChat;
   final ValueChanged<AiMessage> onInsertIntoCanvas;
   final VoidCallback onOpenSettings;
+  final VoidCallback? onSelectCanvasArea;
 
   const AiSidebar({
     super.key,
@@ -44,16 +46,27 @@ class AiSidebar extends StatefulWidget {
     required this.onClearChat,
     required this.onInsertIntoCanvas,
     required this.onOpenSettings,
+    this.onSelectCanvasArea,
   });
 
   @override
-  State<AiSidebar> createState() => _AiSidebarState();
+  State<AiSidebar> createState() => AiSidebarState();
 }
 
-class _AiSidebarState extends State<AiSidebar> {
+class AiSidebarState extends State<AiSidebar> {
   final ScrollController _scrollController = ScrollController();
+  final GlobalKey<PromptInputBoxState> promptInputKey = GlobalKey<PromptInputBoxState>();
   bool _isModelMenuOpen = false;
   bool _isScopeMenuOpen = false;
+
+  /// Permite anexar imagem externamente (captura do canvas ou card de mídia)
+  void attachImage({required Uint8List bytes, required String base64, String? defaultPrompt}) {
+    promptInputKey.currentState?.attachImage(
+      bytes: bytes,
+      base64: base64,
+      defaultPrompt: defaultPrompt,
+    );
+  }
 
   @override
   void didUpdateWidget(covariant AiSidebar oldWidget) {
@@ -82,7 +95,7 @@ class _AiSidebarState extends State<AiSidebar> {
       duration: const Duration(milliseconds: 300),
       curve: Curves.easeInOutCubic,
       right: widget.isOpen ? 24 : -420,
-      top: 24,
+      top: 48,
       bottom: 24,
       child: ListenableBuilder(
         listenable: MoscaroThemeController.instance,
@@ -202,6 +215,8 @@ class _AiSidebarState extends State<AiSidebar> {
 
               // 4. Caixa de Entrada de Prompt com Anexos e Menções @notas
               PromptInputBox(
+                key: promptInputKey,
+                onSelectCanvasArea: widget.onSelectCanvasArea,
                 availableNoteTitles: widget.availableNoteTitles,
                 onSubmit: (prompt, attachedImage) {
                   setState(() {

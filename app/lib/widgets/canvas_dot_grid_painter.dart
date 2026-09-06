@@ -307,35 +307,17 @@ class CanvasDotGridPainter extends CustomPainter {
       ..strokeCap = StrokeCap.round;
 
     final points = <Offset>[];
-    final glowPoints = <Offset>[];
-    final glowRadiusSq = (mouseGlowRadius / zoomScale) * (mouseGlowRadius / zoomScale);
-    final worldMouse = mousePosition != null
-        ? Offset((mousePosition!.dx - panOffset.dx) / zoomScale, (mousePosition!.dy - panOffset.dy) / zoomScale)
-        : null;
 
     for (double x = startX; x <= right + spacing; x += spacing) {
       if (x < 0) continue; // Confinado ao 4º quadrante (x >= 0)
       for (double y = startY; y <= bottom + spacing; y += spacing) {
         if (y < 0) continue; // Confinado ao 4º quadrante (y >= 0)
-        final pt = Offset(x, y);
-        if (enableMouseGlow && worldMouse != null && !isDrawing && (pt - worldMouse).distanceSquared < glowRadiusSq) {
-          glowPoints.add(pt);
-        } else {
-          points.add(pt);
-        }
+        points.add(Offset(x, y));
       }
     }
 
     if (points.isNotEmpty) {
       canvas.drawPoints(ui.PointMode.points, points, dotPaint);
-    }
-
-    if (glowPoints.isNotEmpty) {
-      final Paint glowPaint = Paint()
-        ..color = theme.mouseGlowColor.withValues(alpha: 0.8)
-        ..strokeWidth = dotRadius * 2.8
-        ..strokeCap = StrokeCap.round;
-      canvas.drawPoints(ui.PointMode.points, glowPoints, glowPaint);
     }
   }
 

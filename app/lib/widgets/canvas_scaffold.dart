@@ -2,9 +2,13 @@ import 'dart:math' as math;
 import 'dart:async';
 import 'dart:convert';
 import 'dart:ui' as ui;
+import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart' show RenderRepaintBoundary;
 import 'package:flutter/services.dart';
 import 'package:flutter/scheduler.dart';
+import '../main.dart' show rootKeyNotifier;
+import 'moscaro_window_title_bar.dart';
 import '../controllers/canvas_input_context.dart';
 import '../controllers/canvas_workspace_state.dart';
 import 'canvas_input_router.dart';
@@ -48,9 +52,23 @@ import '../models/ai_provider_models.dart';
 import '../services/ai_service_bridge.dart';
 import 'cards_debug_overlay.dart';
 import '../services/cards_telemetry_controller.dart';
+import 'package:pasteboard/pasteboard.dart';
+import 'package:file_picker/file_picker.dart';
+import '../services/media_compression_service.dart';
+import 'canvas_area_selection_overlay.dart';
+import 'debug/performance_debug_hud.dart';
+import '../services/diagnostics_override_controller.dart';
+import '../services/vm_service_client.dart';
 
 class CanvasHomeScreen extends StatefulWidget {
-  const CanvasHomeScreen({super.key});
+  final NoteDocument? initialNote;
+  final VoidCallback? onBackToHome;
+
+  const CanvasHomeScreen({
+    super.key,
+    this.initialNote,
+    this.onBackToHome,
+  });
 
   @override
   State<CanvasHomeScreen> createState() => _CanvasHomeScreenState();
@@ -61,7 +79,9 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
   final List<NoteDocument> _notes = [];
   final List<String> _activeNoteIds = [];
   String? _selectedNoteId;
-  bool _isSidebarOpen = false;
+  final ValueNotifier<bool> _isSidebarOpenNotifier = ValueNotifier(false);
+  bool get _isSidebarOpen => _isSidebarOpenNotifier.value;
+  set _isSidebarOpen(bool val) => _isSidebarOpenNotifier.value = val;
 
   // Motor do Ponteiro Laser
   final LaserPointerEngine _laserEngine = LaserPointerEngine();
@@ -81,8 +101,12 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
   Timer? _scrollBounceTimer;
 
   // Estado de Ferramentas & Sub-Barra de Canetas Vivas
-  String _activeTool = 'pen';
-  bool _isPenSubBarVisible = true;
+  final ValueNotifier<String> _activeToolNotifier = ValueNotifier('pen');
+  String get _activeTool => _activeToolNotifier.value;
+  set _activeTool(String val) => _activeToolNotifier.value = val;
+  final ValueNotifier<bool> _isPenSubBarVisibleNotifier = ValueNotifier(true);
+  bool get _isPenSubBarVisible => _isPenSubBarVisibleNotifier.value;
+  set _isPenSubBarVisible(bool val) => _isPenSubBarVisibleNotifier.value = val;
 
   final List<PenSlotPreset> _penSlots = [
     const PenSlotPreset(id: '1', name: 'Branco Técnico', color: Colors.white, strokeWidth: 2.5, toolType: InkToolType.technical, enablePressure: true),
@@ -97,12 +121,17 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
   final AppUndoManager _undoManager = AppUndoManager();
   int _strokesVersion = 0;
 
-  bool _isAIOpen = false;
+  final ValueNotifier<bool> _isAIOpenNotifier = ValueNotifier(false);
+  bool get _isAIOpen => _isAIOpenNotifier.value;
+  set _isAIOpen(bool val) => _isAIOpenNotifier.value = val;
   final List<AiMessage> _aiMessages = [];
   bool _isAiStreaming = false;
   AiModelDefinition _activeAiModel = AiModelDefinition.allModels.first;
   AiScopeType _activeAiScope = AiScopeType.activeNote;
   bool _isDebugCardsOverlayVisible = true;
+  final GlobalKey<AiSidebarState> _aiSidebarKey = GlobalKey<AiSidebarState>();
+  final GlobalKey _canvasRepaintBoundaryKey = GlobalKey();
+  bool _isSelectingAreaForAi = false;
 
   // Desenhos / Escrita Manual do traço ativo
   InkStroke? _activeStroke;
@@ -115,6 +144,8 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
   SelectionState _selectionState = SelectionState.empty();
   final ValueNotifier<int> _selectionUpdateNotifier = ValueNotifier(0);
   final ValueNotifier<int> _committedStrokesNotifier = ValueNotifier(0);
+  ValueNotifier<int> get _strokeUpdateNotifier => _committedStrokesNotifier;
+  final ValueNotifier<int> _canvasUpdateNotifier = ValueNotifier(0);
   Offset? _selectionStartCanvasPoint;
   final SelectedStrokesPictureCache _dragPictureCache = SelectedStrokesPictureCache();
   final TransientStrokesPictureCache _transientPictureCache = TransientStrokesPictureCache();
@@ -131,7 +162,9 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
   Offset? _smartShapeCenter;
   // Estado das Ferramentas de Medição STEM (Régua e Transferidor - Fase 5.2)
   MeasurementToolType _activeMeasurementTool = MeasurementToolType.ruler;
-  bool _isMeasurementSubBarVisible = false;
+  final ValueNotifier<bool> _isMeasurementSubBarVisibleNotifier = ValueNotifier(false);
+  bool get _isMeasurementSubBarVisible => _isMeasurementSubBarVisibleNotifier.value;
+  set _isMeasurementSubBarVisible(bool val) => _isMeasurementSubBarVisibleNotifier.value = val;
   StemRulerState _rulerState = const StemRulerState(isVisible: false);
   StemProtractorState _protractorState = const StemProtractorState(isVisible: false);
   final ValueNotifier<int> _rulerUpdateNotifier = ValueNotifier(0);
@@ -144,11 +177,17 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
   Offset? _protractorDragStart;
   StemProtractorState? _protractorInitialState;
 
-  bool _isGridMenuOpen = false;
+  final ValueNotifier<bool> _isGridMenuOpenNotifier = ValueNotifier(false);
+  bool get _isGridMenuOpen => _isGridMenuOpenNotifier.value;
+  set _isGridMenuOpen(bool val) => _isGridMenuOpenNotifier.value = val;
   // Estado dos Cards do Canvas (Fase 11)
-  bool _isCardsSubBarVisible = false;
+  final ValueNotifier<bool> _isCardsSubBarVisibleNotifier = ValueNotifier(false);
+  bool get _isCardsSubBarVisible => _isCardsSubBarVisibleNotifier.value;
+  set _isCardsSubBarVisible(bool val) => _isCardsSubBarVisibleNotifier.value = val;
   CardTypePreset? _activeCardPreset;
-  String? _selectedCardId;
+  final ValueNotifier<String?> _selectedCardIdNotifier = ValueNotifier(null);
+  String? get _selectedCardId => _selectedCardIdNotifier.value;
+  set _selectedCardId(String? val) => _selectedCardIdNotifier.value = val;
   double _smoothedPressure = 0.6;
   int _lastPointerTimestampMs = 0;
   Offset? _lastPointerCanvasPoint;
@@ -252,11 +291,9 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
   @override
   void hideUIElementsOnInteraction() {
     if (_isCardsSubBarVisible || _isGridMenuOpen || _isSettingsOpen) {
-      setState(() {
-        _isCardsSubBarVisible = false;
+      _isCardsSubBarVisible = false;
         _isGridMenuOpen = false;
         _isSettingsOpen = false;
-      });
     }
   }
   // -----------------------------------------
@@ -278,8 +315,12 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
 
   // Estado das Configurações do conNotes (Fase 6)
   AppSettingsState _settings = AppSettingsState.defaults();
-  bool _isSettingsOpen = false;
-  SettingsCategory _activeSettingsCategory = SettingsCategory.visual;
+  final ValueNotifier<bool> _isSettingsOpenNotifier = ValueNotifier(false);
+  bool get _isSettingsOpen => _isSettingsOpenNotifier.value;
+  set _isSettingsOpen(bool val) => _isSettingsOpenNotifier.value = val;
+  final ValueNotifier<SettingsCategory> _activeSettingsCategoryNotifier = ValueNotifier(SettingsCategory.visual);
+  SettingsCategory get _activeSettingsCategory => _activeSettingsCategoryNotifier.value;
+  set _activeSettingsCategory(SettingsCategory val) => _activeSettingsCategoryNotifier.value = val;
 
   void _loadSavedSettings() async {
     final loaded = await SettingsService.instance.loadSettings();
@@ -307,26 +348,29 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
       allNotes.addAll(nb.notes);
     }
 
-    if (allNotes.isNotEmpty) {
-      _notes.clear();
-      _notes.addAll(allNotes);
-      final first = allNotes.first;
-      _activeNoteIds.clear();
-      _activeNoteIds.add(first.id);
-      _selectedNoteId = first.id;
-      _panNotifier.value = Offset(first.panX, first.panY);
-      _zoomNotifier.value = first.zoomScale;
-    } else {
-      final defaultNote = await WorkspaceStorageService.instance.createNote(title: 'Anotações STEM');
-      _notes.clear();
-      _notes.add(defaultNote);
-      _activeNoteIds.clear();
-      _activeNoteIds.add(defaultNote.id);
-      _selectedNoteId = defaultNote.id;
+    NoteDocument? defaultNote;
+    if (allNotes.isEmpty) {
+      defaultNote = await WorkspaceStorageService.instance.createNote(title: 'Anotações STEM');
     }
 
     if (mounted) {
       setState(() {
+        if (allNotes.isNotEmpty) {
+          _notes.clear();
+          _notes.addAll(allNotes);
+          final target = widget.initialNote ?? allNotes.first;
+          _activeNoteIds.clear();
+          _activeNoteIds.add(target.id);
+          _selectedNoteId = target.id;
+          _panNotifier.value = Offset(target.panX, target.panY);
+          _zoomNotifier.value = target.zoomScale;
+        } else if (defaultNote != null) {
+          _notes.clear();
+          _notes.add(defaultNote);
+          _activeNoteIds.clear();
+          _activeNoteIds.add(defaultNote.id);
+          _selectedNoteId = defaultNote.id;
+        }
         _settings = loaded;
       });
     }
@@ -418,24 +462,7 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
   void initState() {
     super.initState();
     _loadSavedSettings();
-    WorkspaceStorageService.instance.initialize().then((_) {
-      if (mounted) {
-        setState(() {
-          final allNotes = WorkspaceStorageService.instance.allNotes;
-          for (final n in allNotes) {
-            if (!_notes.any((existing) => existing.id == n.id)) {
-              _notes.add(n);
-            }
-          }
-          if (_selectedNoteId == null && _notes.isNotEmpty) {
-            _selectedNoteId = _notes.first.id;
-            if (!_activeNoteIds.contains(_selectedNoteId!)) {
-              _activeNoteIds.add(_selectedNoteId!);
-            }
-          }
-        });
-      }
-    });
+
     _laserEngine.init(this);
     _activeSlotId = _penSlots.first.id;
     HardwareKeyboard.instance.addHandler(_handleKeyEvent);
@@ -478,16 +505,47 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
 
     // Observador Dinâmico de Temas para atualização em 0ms de traços e UI
     MoscaroThemeController.instance.addListener(_handleThemeChanged);
+    SettingsService.instance.settingsNotifier.addListener(_handleThemeChanged);
+  }
+
+  void _switchToNote(NoteDocument targetNote) {
+    if (!_notes.any((n) => n.id == targetNote.id)) {
+      _notes.add(targetNote);
+    }
+    if (!_activeNoteIds.contains(targetNote.id)) {
+      _activeNoteIds.add(targetNote.id);
+    }
+    _selectedNoteId = targetNote.id;
+    _selectedCardId = null;
+    _selectionState = SelectionState.empty();
+    _activeStroke = null;
+    _panNotifier.value = Offset(targetNote.panX, targetNote.panY);
+    _zoomNotifier.value = targetNote.zoomScale;
+    _strokesVersion++;
+    _committedStrokesNotifier.value++;
+    _selectionUpdateNotifier.value++;
+    _undoManager.clear();
+  }
+
+  @override
+  void didUpdateWidget(covariant CanvasHomeScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.initialNote != null && widget.initialNote?.id != _selectedNoteId) {
+      setState(() {
+        _switchToNote(widget.initialNote!);
+      });
+    }
   }
 
   void _handleThemeChanged() {
-    for (final note in _notes) {
-      note.pictureCache.invalidatePictures();
-    }
+    _currentNote?.pictureCache.invalidatePictures();
     _strokesVersion++;
     _committedStrokesNotifier.value++;
     _activeStrokeUpdateNotifier.value++;
-    if (mounted) setState(() {});
+    _canvasUpdateNotifier.value++;
+    if (mounted) {
+      setState(() {});
+    }
   }
 
   void _checkAndAnimatePanToSafeZone() {
@@ -648,6 +706,7 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
   @override
   void dispose() {
     MoscaroThemeController.instance.removeListener(_handleThemeChanged);
+    SettingsService.instance.settingsNotifier.removeListener(_handleThemeChanged);
     _laserEngine.dispose();
     _bounceController.dispose();
     _telemetrySyncTimer?.cancel();
@@ -680,14 +739,10 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
       // Se a tela de configurações estiver aberta, não intercepta atalhos de canvas (Ctrl+V, Ctrl+C, etc.), exceto Escape e Ctrl+,
       if (_isSettingsOpen) {
         if (event.logicalKey == LogicalKeyboardKey.escape) {
-          setState(() {
-            _isSettingsOpen = false;
-          });
+          _isSettingsOpen = false;
           return true;
         } else if (event.logicalKey == LogicalKeyboardKey.comma && HardwareKeyboard.instance.isControlPressed) {
-          setState(() {
-            _isSettingsOpen = false;
-          });
+          _isSettingsOpen = false;
           return true;
         }
         return false;
@@ -735,9 +790,7 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
           _redo();
           return true;
         } else if (event.logicalKey == LogicalKeyboardKey.comma) {
-          setState(() {
-            _isSettingsOpen = !_isSettingsOpen;
-          });
+          _isSettingsOpen = !_isSettingsOpen;
           return true;
         } else if (event.logicalKey == LogicalKeyboardKey.keyC) {
           _copy();
@@ -861,15 +914,81 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
     _clipboardCards = List<CanvasCardModel>.from(selectedCards);
     _clipboardStrokes = List<InkStroke>.from(selectedStrokes);
 
+    // Se um card de mídia estiver selecionado, copia a imagem para a área de transferência do sistema
+    if (_selectedCardId != null) {
+      final c = note.cards.cast<CanvasCardModel?>().firstWhere((card) => card?.id == _selectedCardId, orElse: () => null);
+      if (c != null && c.cardType == CardType.media && c.mediaData != null && c.mediaData!.isNotEmpty) {
+        try {
+          String raw = c.mediaData!;
+          if (raw.startsWith('data:') && raw.contains(',')) {
+            raw = raw.split(',').last;
+          }
+          final bytes = base64Decode(raw);
+          Pasteboard.writeImage(bytes);
+        } catch (_) {}
+      }
+    }
+
     DevHubServer.instance.logAction('Copiar (${_clipboardCards.length} cards, ${_clipboardStrokes.length} traços)');
   }
 
-  void _paste() {
+  Future<void> _paste() async {
     final note = _currentNote;
-    if (note == null || (_clipboardCards.isEmpty && _clipboardStrokes.isEmpty)) return;
+    if (note == null) return;
 
     final mousePos = _mousePosNotifier.value ?? const Offset(400, 300);
     final canvasMousePos = (mousePos - _panOffset) / _zoomScale;
+
+    // 1. Verificar se a área de transferência do sistema contém uma imagem
+    try {
+      final clipboardImage = await Pasteboard.image;
+      if (clipboardImage != null && clipboardImage.isNotEmpty) {
+        final compressed = await MediaCompressionService.compressImageBytes(clipboardImage);
+        if (compressed != null) {
+          final nowMicro = DateTime.now().microsecondsSinceEpoch;
+          final newId = 'card_media_${nowMicro}_${_globalCounter++}';
+
+          // Dimensionamento dinâmico baseado no zoom do canvas (_zoomScale)
+          final visualDesiredWidth = 420.0;
+          final zoomScaledWidth = visualDesiredWidth / (_zoomScale > 0 ? _zoomScale : 1.0);
+          final targetWidth = zoomScaledWidth.clamp(160.0, 1400.0);
+          final targetHeight = compressed.aspectRatio > 0
+              ? (targetWidth / compressed.aspectRatio)
+              : 220.0;
+
+          final newCard = CanvasCardModel(
+            id: newId,
+            cardType: CardType.media,
+            title: 'Mídia',
+            mediaData: compressed.dataUri,
+            originalAspectRatio: compressed.aspectRatio,
+            lockAspectRatio: true,
+            x: canvasMousePos.dx - (targetWidth / 2),
+            y: canvasMousePos.dy - (targetHeight / 2),
+            width: targetWidth,
+            height: targetHeight,
+          );
+
+          _undoManager.pushCommand(
+            AddCardCommand(newCard),
+            execute: true,
+            note: note,
+          );
+
+          setState(() {
+            _selectedCardId = newCard.id;
+            _activeTool = 'select';
+          });
+          WorkspaceStorageService.instance.scheduleAutoSave(note);
+          DevHubServer.instance.logAction('Colar Mídia (${compressed.byteSize ~/ 1024} KB)');
+          return;
+        }
+      }
+    } catch (e) {
+      debugPrint('[_paste] Erro ao obter imagem da área de transferência: $e');
+    }
+
+    if (_clipboardCards.isEmpty && _clipboardStrokes.isEmpty) return;
 
     // Calcular bounding box combinado da área copiada
     double minX = double.infinity, minY = double.infinity;
@@ -1296,9 +1415,60 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
     _panNotifier.value = Offset(math.min(0.0, rawPan.dx), math.min(0.0, rawPan.dy));
   }
 
-  void _insertCardAtPosition(Offset canvasPoint, {CardTypePreset? preset}) {
+  Future<void> _insertCardAtPosition(Offset canvasPoint, {CardTypePreset? preset}) async {
     final note = _currentNote;
     if (note == null) return;
+
+    if (preset == CardTypePreset.media) {
+      try {
+        final result = await FilePickerPlatform.instance.pickFiles(
+          type: FileType.custom,
+          allowedExtensions: ['png', 'jpg', 'jpeg', 'webp', 'gif'],
+        );
+        if (result != null && result.isNotEmpty) {
+          final path = result.first.path;
+          if (path != null) {
+            final bytes = await File(path).readAsBytes();
+            final compressed = await MediaCompressionService.compressImageBytes(bytes);
+            if (compressed != null) {
+              final id = 'card_media_${DateTime.now().millisecondsSinceEpoch}';
+              final visualDesiredWidth = 420.0;
+              final zoomScaledWidth = visualDesiredWidth / (_zoomScale > 0 ? _zoomScale : 1.0);
+              final targetWidth = zoomScaledWidth.clamp(160.0, 1400.0);
+              final targetHeight = compressed.aspectRatio > 0 ? (targetWidth / compressed.aspectRatio) : 220.0;
+              final newCard = CanvasCardModel(
+                id: id,
+                cardType: CardType.media,
+                title: 'Mídia',
+                mediaData: compressed.dataUri,
+                originalAspectRatio: compressed.aspectRatio,
+                lockAspectRatio: true,
+                x: canvasPoint.dx,
+                y: canvasPoint.dy,
+                width: targetWidth,
+                height: targetHeight,
+              );
+              _undoManager.pushCommand(
+                AddCardCommand(newCard),
+                execute: true,
+                note: note,
+              );
+              setState(() {
+                _selectedCardId = newCard.id;
+                _activeTool = 'select';
+                _activeCardPreset = null;
+                _isCardsSubBarVisible = false;
+              });
+              WorkspaceStorageService.instance.scheduleAutoSave(note);
+              DevHubServer.instance.logAction('Novo Card de Mídia (${compressed.byteSize ~/ 1024} KB)');
+            }
+          }
+        }
+      } catch (e) {
+        debugPrint('[_insertCardAtPosition] Erro ao selecionar mídia: $e');
+      }
+      return;
+    }
 
     final id = 'card_${DateTime.now().millisecondsSinceEpoch}';
     const title = 'Card STEM';
@@ -1346,15 +1516,11 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
     return CallbackShortcuts(
       bindings: {
         const SingleActivator(LogicalKeyboardKey.comma, control: true): () {
-          setState(() {
-            _isSettingsOpen = !_isSettingsOpen;
-          });
+          _isSettingsOpen = !_isSettingsOpen;
         },
         const SingleActivator(LogicalKeyboardKey.escape): () {
           if (_isSettingsOpen) {
-            setState(() {
-              _isSettingsOpen = false;
-            });
+            _isSettingsOpen = false;
           } else {
             _deselect();
           }
@@ -1399,8 +1565,10 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
             builder: (context, candidateData, rejectedData) {
               return Stack(
                 children: [
-              // 1. Fundo do Canvas Infinito & Traços
-              MouseRegion(
+              // 1. Fundo do Canvas Infinito & Traços (Isolado com RepaintBoundary)
+              RepaintBoundary(
+                key: _canvasRepaintBoundaryKey,
+                child: MouseRegion(
                 cursor: _activeTool == 'laser' ? SystemMouseCursors.none : MouseCursor.defer,
                 onHover: (event) {
                   _mousePosNotifier.value = event.localPosition;
@@ -1427,14 +1595,42 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
                     onCommitStroke: (newStroke) {
                       final n = _currentNote;
                       if (n != null) {
-                        n.addStroke(newStroke);
+                        InkStroke strokeToAdd = newStroke;
+                        // Se houver um card de mídia em modo de anotação na posição do traço, vincula o traço ao card
+                        final strokeBounds = newStroke.points.fold<Rect?>(
+                          null,
+                          (acc, p) => acc == null
+                              ? Rect.fromLTWH(p.point.dx, p.point.dy, 0, 0)
+                              : acc.expandToInclude(Rect.fromLTWH(p.point.dx, p.point.dy, 0, 0)),
+                        );
+
+                        if (strokeBounds != null) {
+                          for (final card in n.cards) {
+                            if (card.cardType == CardType.media && card.isDrawOverMode) {
+                              final cardRect = Rect.fromLTWH(card.x, card.y, card.width, card.height);
+                              if (cardRect.overlaps(strokeBounds)) {
+                                strokeToAdd = newStroke.copyWith(parentCardId: card.id);
+                                if (!card.attachedStrokeIds.contains(newStroke.id)) {
+                                  final cardIdx = n.cards.indexOf(card);
+                                  n.cards[cardIdx] = card.copyWith(
+                                    attachedStrokeIds: [...card.attachedStrokeIds, newStroke.id],
+                                  );
+                                }
+                                break;
+                              }
+                            }
+                          }
+                        }
+
+                        n.addStroke(strokeToAdd);
                         _undoManager.pushCommand(
-                          AddStrokeCommand(newStroke),
+                          AddStrokeCommand(strokeToAdd),
                           execute: false,
                           note: n,
                         );
                         _strokesVersion++;
-                        _committedStrokesNotifier.value++;
+                        _strokeUpdateNotifier.value++;
+                        _canvasUpdateNotifier.value++;
                         WorkspaceStorageService.instance.scheduleAutoSave(n);
                       }
                     },
@@ -1470,6 +1666,69 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
                           final idx = n.cards.indexWhere((c) => c.id == updated.id);
                           if (idx != -1) {
                             final prev = n.cards[idx];
+                            final deltaX = updated.x - prev.x;
+                            final deltaY = updated.y - prev.y;
+                            final angleDelta = updated.rotation - prev.rotation;
+                            final attachedIds = {...prev.attachedStrokeIds, ...updated.attachedStrokeIds};
+
+                            bool strokesChanged = false;
+                            final newStrokes = List.of(n.strokes);
+
+                            // Se o card mudou de posição, translada também todos os traços filhos ou anexados
+                            if (deltaX != 0 || deltaY != 0) {
+                              final deltaOffset = Offset(deltaX, deltaY);
+                              for (int i = 0; i < newStrokes.length; i++) {
+                                final s = newStrokes[i];
+                                if (s.parentCardId == updated.id) {
+                                  final newTrans = s.transform + deltaOffset;
+                                  newStrokes[i] = s.copyWith(
+                                    transform: newTrans,
+                                    boundingBox: s.boundingBox?.shift(deltaOffset),
+                                  );
+                                  strokesChanged = true;
+                                } else if (attachedIds.contains(s.id)) {
+                                  final updatedPoints = s.points.map((p) => p.translate(deltaOffset.dx, deltaOffset.dy)).toList();
+                                  newStrokes[i] = s.copyWith(
+                                    points: updatedPoints,
+                                    boundingBox: s.boundingBox?.shift(deltaOffset),
+                                  );
+                                  strokesChanged = true;
+                                }
+                              }
+                            }
+
+                            // Rotação: se o card rotacionou, rotaciona traços anexados ao redor de card.center
+                            if (angleDelta != 0 && attachedIds.isNotEmpty) {
+                              final center = updated.center;
+                              for (int i = 0; i < newStrokes.length; i++) {
+                                final s = newStrokes[i];
+                                if (attachedIds.contains(s.id)) {
+                                  final updatedPoints = s.points.map((p) => p.rotateAround(center, angleDelta)).toList();
+                                  double minX = double.infinity, minY = double.infinity;
+                                  double maxX = -double.infinity, maxY = -double.infinity;
+                                  for (final p in updatedPoints) {
+                                    if (p.point.dx < minX) minX = p.point.dx;
+                                    if (p.point.dx > maxX) maxX = p.point.dx;
+                                    if (p.point.dy < minY) minY = p.point.dy;
+                                    if (p.point.dy > maxY) maxY = p.point.dy;
+                                  }
+                                  final newBounds = minX.isFinite ? Rect.fromLTRB(minX, minY, maxX, maxY) : null;
+                                  newStrokes[i] = s.copyWith(
+                                    points: updatedPoints,
+                                    boundingBox: newBounds,
+                                  );
+                                  strokesChanged = true;
+                                }
+                              }
+                            }
+
+                            if (strokesChanged) {
+                              n.updateAllStrokes(newStrokes);
+                              _strokesVersion++;
+                              _strokeUpdateNotifier.value++;
+                              _canvasUpdateNotifier.value++;
+                            }
+
                             _undoManager.pushCommand(
                               UpdateCardCommand(cardId: updated.id, previousCard: prev, newCard: updated),
                               execute: true,
@@ -1547,38 +1806,68 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
                         });
                         _rulerUpdateNotifier.value++;
                       },
+                      onSolveWithAi: _handleSolveCardWithAi,
+                      onExtractLatex: _handleExtractLatexFromCard,
                     ),
                   ),
                 ),
+              ),
 
-              // 2. Barra de Ações Rápidas da Seleção (Flutuante sobre a Bounding Box)
-              if (_selectionState.hasSelection && _currentNote != null)
-                Positioned(
-                  top: math.max(16, _selectionState.bounds!.top * _zoomScale + _panOffset.dy - 50),
-                  left: math.max(16, (_selectionState.bounds!.center.dx * _zoomScale + _panOffset.dx) - 95),
-                  child: SelectionActionBar(
-                    availableColors: _penSlots.map((s) => s.color).toSet().toList(),
-                    onDuplicate: _duplicateSelectedStrokes,
-                    onChangeColor: _changeSelectedStrokesColor,
-                    onRotate90: () => _rotateSelectedStrokesBy(math.pi / 2.0),
-                    onRotatePanStart: _onRotatePanStart,
-                    onRotatePanUpdate: _onRotatePanUpdate,
-                    onRotatePanEnd: _onRotatePanEnd,
-                    onDelete: _deleteSelection,
-                    onDeselect: _deselect,
-                    onAskAi: _settings.enableAiSelectionActions
-                        ? () {
-                            setState(() {
+              // 2. Barra de Ações Rápidas da Seleção (Flutuante sobre a Bounding Box - Reativa a _selectionUpdateNotifier)
+              ListenableBuilder(
+                listenable: _selectionUpdateNotifier,
+                builder: (context, _) {
+                  if (!_selectionState.hasSelection || _currentNote == null || _selectionState.bounds == null) {
+                    return const SizedBox.shrink();
+                  }
+                  final effectiveBounds = _selectionState.transformBounds ??
+                      (_selectionState.isDraggingSelection
+                          ? _selectionState.bounds!.shift(_selectionState.dragOffset)
+                          : _selectionState.bounds!);
+
+                  return Positioned(
+                    top: math.max(16, effectiveBounds.top * _zoomScale + _panOffset.dy - 50),
+                    left: math.max(16, (effectiveBounds.center.dx * _zoomScale + _panOffset.dx) - 95),
+                    child: SelectionActionBar(
+                      availableColors: _penSlots.map((s) => s.color).toSet().toList(),
+                      onDuplicate: _duplicateSelectedStrokes,
+                      onChangeColor: _changeSelectedStrokesColor,
+                      onRotate90: () => _rotateSelectedStrokesBy(math.pi / 2.0),
+                      onRotatePanStart: _onRotatePanStart,
+                      onRotatePanUpdate: _onRotatePanUpdate,
+                      onRotatePanEnd: _onRotatePanEnd,
+                      onDelete: _deleteSelection,
+                      onDeselect: _deselect,
+                      onAskAi: _settings.enableAiSelectionActions
+                          ? () {
                               _isAIOpen = true;
-                            });
-                            _handleSubmitAiPrompt('O que significa ou como resolver o conteúdo selecionado?');
-                          }
-                        : null,
-                  ),
-                ),
+                              _handleSubmitAiPrompt('O que significa ou como resolver o conteúdo selecionado?');
+                            }
+                          : null,
+                    ),
+                  );
+                },
+              ),
 
-              // 3. Visualização de Configurações (SettingsPageView no Canvas com Fundo Unificado)
-              if (_isSettingsOpen)
+              // --- UI Overlays Isolados (Zero Rebuild do Canvas) ---
+              Positioned.fill(
+                child: ListenableBuilder(
+                  listenable: Listenable.merge([
+                    _isAIOpenNotifier,
+                    _isSidebarOpenNotifier,
+                    _isSettingsOpenNotifier,
+                    _isGridMenuOpenNotifier,
+                    _isCardsSubBarVisibleNotifier,
+                    _isPenSubBarVisibleNotifier,
+                    _activeToolNotifier,
+                    _selectedCardIdNotifier,
+                    _activeSettingsCategoryNotifier,
+                  ]),
+                  builder: (context, _) {
+                    return Stack(
+                      children: [
+                        // 3. Visualização de Configurações (SettingsPageView no Canvas com Fundo Unificado)
+                        if (_isSettingsOpen)
                 Positioned.fill(
                   top: 0,
                   left: _isSidebarOpen ? 348 : 0,
@@ -1594,7 +1883,7 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
 
               // 4. TabBar Superior (Alternância fluida entre Abas de Notas e Abas de Configurações)
               Positioned(
-                top: 24,
+                top: 48,
                 left: _isSidebarOpen ? 348 : 0,
                 right: 140,
                 child: Center(
@@ -1607,14 +1896,10 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
                             key: const ValueKey('settings_tab_bar'),
                             activeCategory: _activeSettingsCategory,
                             onSelectCategory: (cat) {
-                              setState(() {
-                                _activeSettingsCategory = cat;
-                              });
+                              _activeSettingsCategory = cat;
                             },
                             onBackToNotes: () {
-                              setState(() {
-                                _isSettingsOpen = false;
-                              });
+                              _isSettingsOpen = false;
                             },
                           )
                         : NoteTabBar(
@@ -1623,22 +1908,33 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
                             noteTitles: noteTitles,
                             selectedNoteId: _selectedNoteId,
                             isSidebarOpen: _isSidebarOpen,
+                            onBackToHome: widget.onBackToHome,
                             onOpenSettings: () {
-                              setState(() {
-                                _isSettingsOpen = true;
-                              });
+                              _isSettingsOpen = true;
                             },
                             onSelectNote: (noteId) {
-                              setState(() {
-                                _selectedNoteId = noteId;
-                                _selectionState = SelectionState.empty();
-                              });
+                              final note = _findNoteById(_notes, noteId) ?? _findNoteById(WorkspaceStorageService.instance.allNotes, noteId);
+                              if (note != null) {
+                                setState(() {
+                                  _switchToNote(note);
+                                });
+                              }
                             },
                             onCloseNote: (noteId) {
                               setState(() {
                                 _activeNoteIds.remove(noteId);
                                 if (_selectedNoteId == noteId) {
-                                  _selectedNoteId = _activeNoteIds.isNotEmpty ? _activeNoteIds.last : null;
+                                  final newSelectedId = _activeNoteIds.isNotEmpty ? _activeNoteIds.last : null;
+                                  if (newSelectedId != null) {
+                                    final note = _findNoteById(_notes, newSelectedId) ?? _findNoteById(WorkspaceStorageService.instance.allNotes, newSelectedId);
+                                    if (note != null) {
+                                      _switchToNote(note);
+                                    } else {
+                                      _selectedNoteId = null;
+                                    }
+                                  } else {
+                                    _selectedNoteId = null;
+                                  }
                                 }
                                 _selectionState = SelectionState.empty();
                               });
@@ -1647,9 +1943,7 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
                               _addNewNote("Nova Nota ${_notes.length + 1}");
                             },
                             onToggleSidebar: () {
-                              setState(() {
-                                _isSidebarOpen = !_isSidebarOpen;
-                              });
+                              _isSidebarOpen = !_isSidebarOpen;
                             },
                           ),
                   ),
@@ -1659,7 +1953,7 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
               // 4.1 HUD de Zoom no Topo Superior Direito
               if (!_isSettingsOpen)
                 Positioned(
-                  top: 24,
+                  top: 48,
                   right: 24,
                   child: ValueListenableBuilder<double>(
                     valueListenable: _zoomNotifier,
@@ -1688,29 +1982,43 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
                   child: GestureDetector(
                     behavior: HitTestBehavior.translucent,
                     onTap: () {
-                      setState(() {
-                        _isGridMenuOpen = false;
-                      });
+                      _isGridMenuOpen = false;
                     },
                     child: Container(color: Colors.transparent),
                   ),
                 ),
 
-              // 5. Sub-Barras Flutuantes e Menu do Grid Unificados em Row com AnimatedSize (Zero Sobreposição Garantida)
-              if (!_isSettingsOpen &&
-                  ((_activeTool == 'pen' && _isPenSubBarVisible) ||
-                      _activeTool == 'select' ||
-                      _activeTool == 'eraser' ||
-                      _activeTool == 'shapes' ||
-                      _isMeasurementSubBarVisible ||
-                      _rulerState.isVisible ||
-                      _protractorState.isVisible ||
-                      _isCardsSubBarVisible ||
-                      _isGridMenuOpen))
-                Positioned(
-                  bottom: 96,
-                  left: _isSidebarOpen ? 348 : 0,
-                  right: 0,
+              // 5 e 7. Sub-Barras Flutuantes e ToolbarPill encapsuladas para 144Hz Zero-Rebuild
+              Positioned.fill(
+                child: ListenableBuilder(
+                  listenable: Listenable.merge([
+                    _activeToolNotifier,
+                    _isPenSubBarVisibleNotifier,
+                    _isGridMenuOpenNotifier,
+                    _isCardsSubBarVisibleNotifier,
+                    _isMeasurementSubBarVisibleNotifier,
+                    _selectionUpdateNotifier,
+                    _rulerUpdateNotifier,
+                    _isSidebarOpenNotifier,
+                  ]),
+                  builder: (context, _) {
+                    return Stack(
+                      children: [
+                        // 5. Sub-Barras Flutuantes e Menu do Grid
+                        if (!_isSettingsOpen &&
+                            ((_activeTool == 'pen' && _isPenSubBarVisible) ||
+                                _activeTool == 'select' ||
+                                _activeTool == 'eraser' ||
+                                _activeTool == 'shapes' ||
+                                _isMeasurementSubBarVisible ||
+                                _rulerState.isVisible ||
+                                _protractorState.isVisible ||
+                                _isCardsSubBarVisible ||
+                                _isGridMenuOpen))
+                          Positioned(
+                            bottom: 96,
+                            left: _isSidebarOpen ? 348 : 0,
+                            right: 0,
                   child: Center(
                     child: AnimatedSize(
                       duration: const Duration(milliseconds: 250),
@@ -1945,13 +2253,11 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
                     isRulerActive: _isMeasurementSubBarVisible || _rulerState.isVisible || _protractorState.isVisible,
                     isCardsActive: _isCardsSubBarVisible || _activeCardPreset != null,
                     onToggleCards: () {
-                      setState(() {
-                        _isCardsSubBarVisible = !_isCardsSubBarVisible;
-                        if (!_isCardsSubBarVisible) _activeCardPreset = null;
-                        _isPenSubBarVisible = false;
-                        _isGridMenuOpen = false;
-                        _isMeasurementSubBarVisible = false;
-                      });
+                      _isCardsSubBarVisible = !_isCardsSubBarVisible;
+                      if (!_isCardsSubBarVisible) _activeCardPreset = null;
+                      _isPenSubBarVisible = false;
+                      _isGridMenuOpen = false;
+                      _isMeasurementSubBarVisible = false;
                     },
                     selectionType: _selectionType,
                     activePenPreset: _activePenPreset,
@@ -1961,20 +2267,16 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
                     onRedo: _redo,
                     isGridMenuOpen: _isGridMenuOpen,
                     onToggleGridMenu: () {
-                      setState(() {
-                        _isGridMenuOpen = !_isGridMenuOpen;
-                      });
+                      _isGridMenuOpen = !_isGridMenuOpen;
                     },
                     onToggleRuler: () {
                       setState(() {
                         final bool isAnyMeasurementActive = _rulerState.isVisible || _protractorState.isVisible;
                         if (isAnyMeasurementActive) {
-                          // Se já está ativo, clicar na toolbar fecha as ferramentas e a subbarra
                           _isMeasurementSubBarVisible = false;
                           _rulerState = _rulerState.copyWith(isVisible: false);
                           _protractorState = _protractorState.copyWith(isVisible: false);
                         } else {
-                          // Se está fechado, abre a subbarra e exibe a ferramenta ativa atual
                           _isMeasurementSubBarVisible = true;
                           _isPenSubBarVisible = false;
                           _isCardsSubBarVisible = false;
@@ -1982,16 +2284,10 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
                           final viewportCenter = (-_panOffset + Offset(MediaQuery.of(context).size.width / 2, MediaQuery.of(context).size.height / 2)) / _zoomScale;
                           if (_activeMeasurementTool == MeasurementToolType.ruler) {
                             _protractorState = _protractorState.copyWith(isVisible: false);
-                            _rulerState = _rulerState.copyWith(
-                              isVisible: true,
-                              center: viewportCenter,
-                            );
+                            _rulerState = _rulerState.copyWith(isVisible: true, center: viewportCenter);
                           } else {
                             _rulerState = _rulerState.copyWith(isVisible: false);
-                            _protractorState = _protractorState.copyWith(
-                              isVisible: true,
-                              center: viewportCenter,
-                            );
+                            _protractorState = _protractorState.copyWith(isVisible: true, center: viewportCenter);
                           }
                         }
                       });
@@ -2008,6 +2304,7 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
                         _isPenSubBarVisible = true;
                         _selectionState = SelectionState.empty();
                       });
+                      _selectionUpdateNotifier.value++;
                     },
                     onSelectEraser: () {
                       setState(() {
@@ -2015,6 +2312,7 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
                         _isPenSubBarVisible = false;
                         _selectionState = SelectionState.empty();
                       });
+                      _selectionUpdateNotifier.value++;
                     },
                     onSelectShapes: () {
                       setState(() {
@@ -2022,12 +2320,15 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
                         _isPenSubBarVisible = false;
                         _selectionState = SelectionState.empty();
                       });
+                      _selectionUpdateNotifier.value++;
                     },
                     onSelectTool: () {
                       setState(() {
                         _activeTool = 'select';
                         _isPenSubBarVisible = false;
+                        _selectionState = SelectionState.empty();
                       });
+                      _selectionUpdateNotifier.value++;
                     },
                     onSelectLaser: () {
                       setState(() {
@@ -2035,16 +2336,20 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
                         _isPenSubBarVisible = false;
                         _selectionState = SelectionState.empty();
                       });
+                      _selectionUpdateNotifier.value++;
                     },
                     onToggleAI: () {
-                      setState(() {
-                        _isAIOpen = !_isAIOpen;
-                      });
+                      _isAIOpen = !_isAIOpen;
                     },
                   ).moscaroV2(
                     borderRadius: MoscaroTokens.radiusPill,
                     padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
                   ),
+                ),
+              ),
+                      ],
+                    );
+                  },
                 ),
               ),
 
@@ -2054,17 +2359,7 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
                 selectedNoteId: _selectedNoteId,
                 onSelectNote: (selectedNote) {
                   setState(() {
-                    if (!_notes.any((n) => n.id == selectedNote.id)) {
-                      _notes.add(selectedNote);
-                    }
-                    if (!_activeNoteIds.contains(selectedNote.id)) {
-                      _activeNoteIds.add(selectedNote.id);
-                    }
-                    _selectedNoteId = selectedNote.id;
-                    _panNotifier.value = Offset(selectedNote.panX, selectedNote.panY);
-                    _zoomNotifier.value = selectedNote.zoomScale;
-                    _strokesVersion++;
-                    _committedStrokesNotifier.value++;
+                    _switchToNote(selectedNote);
                   });
                 },
                 onAddNote: () async {
@@ -2081,11 +2376,10 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
 
               // 7. Painel Lateral Direito da IA
               AiSidebar(
+                key: _aiSidebarKey,
                 isOpen: _isAIOpen,
                 onClose: () {
-                  setState(() {
-                    _isAIOpen = false;
-                  });
+                  _isAIOpen = false;
                 },
                 messages: _aiMessages,
                 isStreaming: _isAiStreaming,
@@ -2117,14 +2411,68 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
                     _activeSettingsCategory = SettingsCategory.ai;
                   });
                 },
+                onSelectCanvasArea: _startAreaCaptureForAi,
               ),
+
+              // Overlay de Seleção de Área do Canvas para IA
+              if (_isSelectingAreaForAi)
+                Positioned.fill(
+                  child: CanvasAreaSelectionOverlay(
+                    onAreaSelected: _handleAreaSelectedForAi,
+                    onCancel: () {
+                      setState(() {
+                        _isSelectingAreaForAi = false;
+                      });
+                    },
+                  ),
+                ),
+
+              // 9. Barra de Título Customizada Moscaro (Frameless Window Header com Suíte Dev sob kDebugMode)
+              Positioned(
+                top: 0,
+                left: 0,
+                right: 0,
+                child: MoscaroWindowTitleBar(
+                  onHotReload: () {
+                    VmServiceClient.instance.hotReload();
+                  },
+                  onHotRestart: () async {
+                    final didRestart = await VmServiceClient.instance.hotRestart();
+                    if (!didRestart) {
+                      WidgetsBinding.instance.reassembleApplication();
+                      DevHubServer.instance.logAction('Para compilar arquivos em disco, pressione "R" no terminal do flutter run.');
+                    }
+                  },
+                  onToggleFps: () {
+                    DiagnosticsOverrideController.instance.cycleHudMode();
+                  },
+                  isFpsActive: DiagnosticsOverrideController.instance.hudMode != PerformanceHudDisplayMode.off,
+                  isDebugCardsActive: _isDebugCardsOverlayVisible,
+                  onToggleDebugCards: () {
+                    setState(() {
+                      _isDebugCardsOverlayVisible = !_isDebugCardsOverlayVisible;
+                    });
+                  },
+                  onOpenDevHub: () {
+                    DevHubServer.instance.openInBrowser();
+                  },
+                ),
+              ),
+
+              // 10. MiniHUD de Performance (FPS, 1% Low, Latência de UI e Raster)
+              const PerformanceDebugHud(),
             ],
           );
         },
       ),
     ),
-  ),
+  ],
 );
+            },
+          ),
+        ),
+      ),
+    );
   }
 
   Future<String?> _renderSelectedStrokesToBase64() async {
@@ -2392,6 +2740,209 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
     );
   }
 
+  /// Inicia a seleção de área do canvas através do overlay
+  void _startAreaCaptureForAi() {
+    setState(() {
+      _isSelectingAreaForAi = true;
+    });
+  }
+
+  /// Captura a área demarcada na tela através do RepaintBoundary e anexa na AiSidebar
+  Future<void> _handleAreaSelectedForAi(Rect screenRect) async {
+    setState(() {
+      _isSelectingAreaForAi = false;
+    });
+
+    try {
+      final boundary = _canvasRepaintBoundaryKey.currentContext?.findRenderObject() as RenderRepaintBoundary?;
+      if (boundary == null) return;
+
+      final pixelRatio = MediaQuery.of(context).devicePixelRatio.clamp(1.0, 2.0);
+      final fullImage = await boundary.toImage(pixelRatio: pixelRatio);
+
+      final cropRect = Rect.fromLTWH(
+        screenRect.left * pixelRatio,
+        screenRect.top * pixelRatio,
+        screenRect.width * pixelRatio,
+        screenRect.height * pixelRatio,
+      );
+
+      final recorder = ui.PictureRecorder();
+      final canvas = Canvas(recorder);
+      canvas.drawImageRect(
+        fullImage,
+        cropRect,
+        Rect.fromLTWH(0, 0, screenRect.width * pixelRatio, screenRect.height * pixelRatio),
+        Paint(),
+      );
+      final picture = recorder.endRecording();
+      final croppedImage = await picture.toImage(
+        cropRect.width.round(),
+        cropRect.height.round(),
+      );
+
+      final byteData = await croppedImage.toByteData(format: ui.ImageByteFormat.png);
+      if (byteData == null) return;
+      final bytes = byteData.buffer.asUint8List();
+      final base64String = 'data:image/png;base64,${base64Encode(bytes)}';
+
+      setState(() {
+        _isAIOpen = true;
+      });
+
+      // Anexa imagem no chat da IA (campo de texto permanece limpo sem prompt injetado)
+      _aiSidebarKey.currentState?.attachImage(
+        bytes: bytes,
+        base64: base64String,
+      );
+    } catch (e) {
+      debugPrint('[_handleAreaSelectedForAi] Erro ao capturar área: $e');
+    }
+  }
+
+  /// Ação no card de mídia: Enviar imagem diretamente para o painel de IA resolver o exercício
+  void _handleSolveCardWithAi(CanvasCardModel card) {
+    final mediaData = card.mediaData;
+    if (mediaData == null || mediaData.isEmpty) return;
+
+    try {
+      Uint8List? bytes;
+      if (mediaData.startsWith('data:')) {
+        final comma = mediaData.indexOf(',');
+        if (comma != -1) {
+          bytes = base64Decode(mediaData.substring(comma + 1));
+        }
+      } else {
+        final file = File(mediaData);
+        if (file.existsSync()) {
+          bytes = file.readAsBytesSync();
+        }
+      }
+
+      if (bytes != null) {
+        setState(() {
+          _isAIOpen = true;
+        });
+        _aiSidebarKey.currentState?.attachImage(
+          bytes: bytes,
+          base64: mediaData,
+          defaultPrompt: 'Resolva este exercício passo a passo detalhando todas as fórmulas e deduções em KaTeX:',
+        );
+      }
+    } catch (e) {
+      debugPrint('[_handleSolveCardWithAi] Erro ao anexar imagem do card: $e');
+    }
+  }
+
+  String _sanitizeLatexOcrOutput(String raw) {
+    var text = raw.trim();
+    // Remove tags de sugestões da IA
+    text = text.replaceAll(RegExp(r'\[(?:SUGESTOES|SUGESTÕES):\s*.*?\]', caseSensitive: false, dotAll: true), '');
+    text = text.replaceAll(RegExp(r'(?:Sugestões|Sugestoes|Suggestions):\s*.*', caseSensitive: false, dotAll: true), '');
+    // Remove blocos de markdown em volta ```latex ... ``` ou ``` ... ```
+    if (text.startsWith('```latex')) {
+      text = text.substring(8);
+    } else if (text.startsWith('```')) {
+      text = text.substring(3);
+    }
+    if (text.endsWith('```')) {
+      text = text.substring(0, text.length - 3);
+    }
+    text = text.trim();
+    // Garante que o conteúdo seja envolvido como bloco LaTeX puro se já não for
+    if (!text.startsWith(r'$$') && !text.startsWith(r'$')) {
+      text = '\$\$\n$text\n\$\$';
+    }
+    return text.trim();
+  }
+
+  /// Ação no card de mídia: OCR / Extrair LaTeX e criar card de texto adjacente (Apenas LaTeX puro)
+  void _handleExtractLatexFromCard(CanvasCardModel card) {
+    final mediaData = card.mediaData;
+    final note = _currentNote;
+    if (mediaData == null || mediaData.isEmpty || note == null) return;
+
+    final summaryEngine = SettingsService.instance.currentSettings.noteSummaryEngine;
+    final isLocalOcr = summaryEngine == NoteSummaryEngine.localOcr;
+    debugPrint('[OCR Engine] Executando extração de mídia via: ${isLocalOcr ? "OCR Nativo Local (Offline / Privacidade)" : "IA Multimodal (Nuvem)"}');
+
+    final targetX = card.x + card.width + 28.0;
+    final targetY = card.y;
+    final latexCardId = 'card_latex_ocr_${DateTime.now().millisecondsSinceEpoch}';
+
+    final initialCard = CanvasCardModel(
+      id: latexCardId,
+      cardType: CardType.textLatex,
+      title: 'LaTeX Extraído',
+      x: targetX,
+      y: targetY,
+      width: 420.0,
+      height: 240.0,
+      content: isLocalOcr
+          ? 'Processando OCR local no dispositivo (Privacidade/Offline)...'
+          : 'Extraindo fórmulas matemáticas via IA...',
+    );
+
+    _undoManager.pushCommand(
+      AddCardCommand(initialCard),
+      execute: true,
+      note: note,
+    );
+    setState(() {
+      _selectedCardId = latexCardId;
+    });
+
+    final prompt = 'Extraia EXCLUSIVAMENTE as equações matemáticas e expressões presentes nesta imagem. '
+        'Retorne APENAS o código LaTeX formatado em bloco (\$\$...\$\$). '
+        'É ESTRITAMENTE PROIBIDO incluir introduções, conclusões, explicações, textos em português/inglês ou sugestões. '
+        'Retorne APENAS a fórmula matemática pura.';
+    final buffer = StringBuffer();
+
+    AiServiceBridge.instance.streamPrompt(
+      userPrompt: prompt,
+      model: _activeAiModel,
+      imagesBase64: [mediaData],
+    ).listen(
+      (chunk) {
+        buffer.write(chunk);
+        final currentCard = note.cards.cast<CanvasCardModel?>().firstWhere((c) => c?.id == latexCardId, orElse: () => null);
+        if (currentCard != null) {
+          final sanitized = _sanitizeLatexOcrOutput(buffer.toString());
+          final updated = currentCard.copyWith(content: sanitized);
+          final idx = note.cards.indexWhere((c) => c.id == latexCardId);
+          if (idx != -1) {
+            note.cards[idx] = updated;
+            setState(() {});
+          }
+        }
+      },
+      onDone: () {
+        final currentCard = note.cards.cast<CanvasCardModel?>().firstWhere((c) => c?.id == latexCardId, orElse: () => null);
+        if (currentCard != null) {
+          final finalSanitized = _sanitizeLatexOcrOutput(buffer.toString());
+          final updated = currentCard.copyWith(content: finalSanitized);
+          final idx = note.cards.indexWhere((c) => c.id == latexCardId);
+          if (idx != -1) {
+            note.cards[idx] = updated;
+            setState(() {});
+          }
+        }
+        WorkspaceStorageService.instance.scheduleAutoSave(note);
+      },
+      onError: (err) {
+        final currentCard = note.cards.cast<CanvasCardModel?>().firstWhere((c) => c?.id == latexCardId, orElse: () => null);
+        if (currentCard != null) {
+          final updated = currentCard.copyWith(content: 'Erro ao extrair LaTeX: $err');
+          final idx = note.cards.indexWhere((c) => c.id == latexCardId);
+          if (idx != -1) {
+            note.cards[idx] = updated;
+            setState(() {});
+          }
+        }
+      },
+    );
+  }
+
   void _handleInsertAiMessageIntoCanvas(AiMessage message, [Offset? screenPosition]) {
     final note = _currentNote;
     if (note == null) return;
@@ -2523,6 +3074,25 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
     final note = _currentNote;
     if (note == null) return null;
     return _findCardAtPoint(note.cards, canvasPoint, _selectedCardId);
+  }
+
+  @override
+  void attachStrokeToCard(String cardId, String strokeId) {
+    final note = _currentNote;
+    if (note == null) return;
+    final idx = note.cards.indexWhere((c) => c.id == cardId);
+    if (idx != -1) {
+      final card = note.cards[idx];
+      if (!card.attachedStrokeIds.contains(strokeId)) {
+        final updatedList = List<String>.from(card.attachedStrokeIds)..add(strokeId);
+        final updatedCard = card.copyWith(attachedStrokeIds: updatedList);
+        note.cards[idx] = updatedCard;
+        _strokesVersion++;
+        _strokeUpdateNotifier.value++;
+        _canvasUpdateNotifier.value++;
+        WorkspaceStorageService.instance.scheduleAutoSave(note);
+      }
+    }
   }
 
   @override

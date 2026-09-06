@@ -5,10 +5,15 @@ import '../theme/moscaro_v2_extension.dart';
 import '../theme/moscaro_theme_controller.dart';
 import '../models/canvas_card_model.dart';
 import 'card_format_floating_pill.dart';
+import 'canvas_card_media_view.dart';
+import 'media_card_floating_pill.dart';
+import 'media_lightbox_modal.dart';
 import 'markdown_latex_block_view.dart';
 import 'svg_icon.dart';
 import 'card_resizable_frame.dart';
+import 'card_magnetic_snapper.dart';
 import '../services/cards_telemetry_controller.dart';
+import 'infinite_hit_test_stack.dart';
 
 /// Widget Completo do Card no Canvas Infinito (100% Moscaro Glass + Regiões Dinâmicas de Redimensionamento).
 class CanvasCardWidget extends StatefulWidget {
@@ -22,6 +27,10 @@ class CanvasCardWidget extends StatefulWidget {
   final ValueChanged<String> onSelectCard;
   final ValueChanged<String> onDeleteCard;
   final ValueChanged<CanvasCardModel> onDuplicateCard;
+  final List<CanvasCardModel>? allCards;
+  final double gridSpacing;
+  final VoidCallback? onSolveWithAi;
+  final VoidCallback? onExtractLatex;
 
   const CanvasCardWidget({
     super.key,
@@ -33,6 +42,10 @@ class CanvasCardWidget extends StatefulWidget {
     required this.onSelectCard,
     required this.onDeleteCard,
     required this.onDuplicateCard,
+    this.allCards,
+    this.gridSpacing = 28.0,
+    this.onSolveWithAi,
+    this.onExtractLatex,
   });
 
   @override
@@ -55,7 +68,9 @@ class _CanvasCardWidgetState extends State<CanvasCardWidget> {
   final GlobalKey<MarkdownLatexBlockViewState> _blockViewKey = GlobalKey<MarkdownLatexBlockViewState>();
   CardActiveTextStyles _activeStyles = const CardActiveTextStyles();
   final ValueNotifier<Offset> _dragOffsetNotifier = ValueNotifier<Offset>(Offset.zero);
+  late final ValueNotifier<double> _dragRotationNotifier = ValueNotifier<double>(widget.card.rotation);
   final GlobalKey _cardContainerKey = GlobalKey();
+  bool _isHovering = false;
 
   @override
   void initState() {
@@ -72,6 +87,9 @@ class _CanvasCardWidgetState extends State<CanvasCardWidget> {
     if (!widget.isSelected && oldWidget.isSelected) {
       _isEditingBlock = false;
     }
+    if (oldWidget.card.rotation != widget.card.rotation) {
+      _dragRotationNotifier.value = widget.card.rotation;
+    }
   }
 
   @override
@@ -80,6 +98,7 @@ class _CanvasCardWidgetState extends State<CanvasCardWidget> {
     _titleController.dispose();
     _titleFocusNode.dispose();
     _dragOffsetNotifier.dispose();
+    _dragRotationNotifier.dispose();
     super.dispose();
   }
 
@@ -103,14 +122,33 @@ class _CanvasCardWidgetState extends State<CanvasCardWidget> {
 
   void _onHeaderPanUpdate(DragUpdateDetails details) {
     if (_isEditingTitle || widget.card.isPinned || _dragStartPos == null) return;
-    final delta = (details.globalPosition - _dragStartPos!) / _currentZoom;
-    _dragOffsetNotifier.value = delta;
-    CardsTelemetryController.instance.updateCardDragDelta(delta);
+    final rawDelta = (details.globalPosition - _dragStartPos!) / _currentZoom;
+    
+    // Snapping magnético em tempo real
+    if (widget.allCards != null && _initialCardX != null && _initialCardY != null) {
+      final targetX = _initialCardX! + rawDelta.dx;
+      final targetY = _initialCardY! + rawDelta.dy;
+      final snapResult = CardMagneticSnapper.snap(
+        targetX: targetX,
+        targetY: targetY,
+        width: widget.card.width,
+        height: widget.card.height,
+        currentCardId: widget.card.id,
+        otherCards: widget.allCards!,
+        gridSpacing: widget.gridSpacing,
+      );
+      _dragOffsetNotifier.value = Offset(
+        snapResult.x - _initialCardX!,
+        snapResult.y - _initialCardY!,
+      );
+    } else {
+      _dragOffsetNotifier.value = rawDelta;
+    }
+    CardsTelemetryController.instance.updateCardDragDelta(_dragOffsetNotifier.value);
   }
 
   void _onHeaderPanEnd(DragEndDetails details) {
     CardsTelemetryController.instance.endCardDrag();
-    if (_isEditingTitle || widget.card.isPinned || _dragStartPos == null) return;
     final finalDelta = _dragOffsetNotifier.value;
     _dragOffsetNotifier.value = Offset.zero;
     _dragStartPos = null;
@@ -130,12 +168,26 @@ class _CanvasCardWidgetState extends State<CanvasCardWidget> {
 
   @override
   Widget build(BuildContext context) {
+    final alignY = (widget.card.height > 0)
+        ? (60.0 / (widget.card.height + 60.0))
+        : 0.0;
+
     return ValueListenableBuilder<Offset>(
       valueListenable: _dragOffsetNotifier,
       builder: (context, dragOffset, child) {
         return Transform.translate(
           offset: dragOffset,
-          child: child,
+          child: ValueListenableBuilder<double>(
+            valueListenable: _dragRotationNotifier,
+            builder: (context, rotation, rotatedChild) {
+              return Transform.rotate(
+                angle: rotation,
+                alignment: Alignment(0.0, alignY),
+                child: rotatedChild,
+              );
+            },
+            child: child,
+          ),
         );
       },
       child: ListenableBuilder(
@@ -148,29 +200,39 @@ class _CanvasCardWidgetState extends State<CanvasCardWidget> {
           final glassTint = widget.card.customGlassColor ?? MoscaroTokens.glassTint;
           final isSelected = widget.isSelected;
           final isCollapsed = widget.card.isCollapsed;
-          final showFloatingPill = isSelected && _isEditingBlock;
+          final isMediaCard = widget.card.cardType == CardType.media;
+          final showFloatingPill = isMediaCard
+              ? ((isSelected || _isHovering) && !isCollapsed)
+              : (isSelected && _isEditingBlock);
 
           final cardBody = !isCollapsed
-              ? MarkdownLatexBlockView(
-                  key: _blockViewKey,
-                  card: widget.card,
-                  onEditingModeChanged: (editing) {
-                    if (mounted && _isEditingBlock != editing) {
-                      setState(() => _isEditingBlock = editing);
-                    }
-                  },
-                  onActiveStylesChanged: (styles) {
-                    if (mounted) {
-                      setState(() => _activeStyles = styles);
-                    }
-                  },
-                  onContentChanged: (newContent) {
-                    final updatedCard = widget.card.copyWith(content: newContent);
-                    final calculatedMin = updatedCard.calculateMinHeight();
-                    final finalHeight = math.max(widget.card.height, calculatedMin);
-                    widget.onUpdateCard(updatedCard.copyWith(height: finalHeight));
-                  },
-                )
+              ? (isMediaCard
+                  ? CanvasCardMediaView(
+                      card: widget.card,
+                      isSelected: isSelected,
+                      onUpdateCard: widget.onUpdateCard,
+                      zoomScale: widget.zoomScale,
+                    )
+                  : MarkdownLatexBlockView(
+                      key: _blockViewKey,
+                      card: widget.card,
+                      onEditingModeChanged: (editing) {
+                        if (mounted && _isEditingBlock != editing) {
+                          setState(() => _isEditingBlock = editing);
+                        }
+                      },
+                      onActiveStylesChanged: (styles) {
+                        if (mounted) {
+                          setState(() => _activeStyles = styles);
+                        }
+                      },
+                      onContentChanged: (newContent) {
+                        final updatedCard = widget.card.copyWith(content: newContent);
+                        final calculatedMin = updatedCard.calculateMinHeight();
+                        final finalHeight = math.max(widget.card.height, calculatedMin);
+                        widget.onUpdateCard(updatedCard.copyWith(height: finalHeight));
+                      },
+                    ))
               : const SizedBox.shrink();
 
           return CardResizableFrame(
@@ -180,97 +242,157 @@ class _CanvasCardWidgetState extends State<CanvasCardWidget> {
             zoomNotifier: widget.zoomNotifier,
             onUpdateCard: widget.onUpdateCard,
             builder: (context, currentSize) {
-              return Stack(
-                clipBehavior: Clip.none,
-                children: [
-                  // 1. Pílula Flutuante Superior (Exibida SOMENTE durante a edição ativa de um bloco, Y = 6..52)
-                  if (showFloatingPill)
-                    Positioned(
-                      top: 6.0,
-                      left: 0,
-                      right: 0,
-                      child: Center(
-                        child: CardFormatFloatingPill(
-                          card: widget.card,
-                          cardWidth: currentSize.width,
-                          activeStyles: _activeStyles,
-                          onUpdateCard: widget.onUpdateCard,
-                          onInsertSnippet: (snippet) {
-                            if (_blockViewKey.currentState != null) {
-                              _blockViewKey.currentState!.insertSnippetAtActive(snippet);
-                            } else {
-                              final updatedContent = '${widget.card.content}$snippet';
-                              widget.onUpdateCard(widget.card.copyWith(content: updatedContent));
-                            }
-                          },
-                          onWrapSelection: (prefix, suffix) {
-                            if (_blockViewKey.currentState != null) {
-                              _blockViewKey.currentState!.wrapSelection(prefix: prefix, suffix: suffix);
-                            } else {
-                              final updatedContent = '${widget.card.content}$prefix$suffix';
-                              widget.onUpdateCard(widget.card.copyWith(content: updatedContent));
-                            }
-                          },
-                          onApplyTextColor: (color) {
-                            if (_blockViewKey.currentState != null && _blockViewKey.currentState!.isEditing) {
-                              _blockViewKey.currentState!.applyTextColor(color);
-                            } else {
-                              widget.onUpdateCard(widget.card.copyWith(textColor: color));
-                            }
-                          },
-                          onApplyFontSize: (size) {
-                            if (_blockViewKey.currentState != null && _blockViewKey.currentState!.isEditing) {
-                              _blockViewKey.currentState!.applyFontSize(size);
-                            } else {
-                              widget.onUpdateCard(widget.card.copyWith(fontSize: size));
-                            }
-                          },
-                          onDeleteCard: () => widget.onDeleteCard(widget.card.id),
-                          onDuplicateCard: () => widget.onDuplicateCard(widget.card),
-                        ),
-                      ),
-                    ),
-
-                  // 2. O Card Principal em Vidro Líquido Moscaro (Y = 60.0)
-                  Positioned(
-                    top: 60.0,
-                    left: 0,
-                    width: currentSize.width,
-                    height: currentSize.height,
-                    child: TapRegion(
-                      groupId: 'card_block_editor_${widget.card.id}',
-                      onTapOutside: (_) {
-                        if (_blockViewKey.currentState?.isEditing == true) {
-                          _blockViewKey.currentState?.commitBlockEdit();
-                        }
-                      },
-                      child: ClipRRect(
-                        key: _cardContainerKey,
-                        borderRadius: BorderRadius.circular(14),
-                        child: RepaintBoundary(
-                          child: _buildCardContainer(
-                            isSelected: isSelected,
-                            themeAccent: themeAccent,
-                            isLight: isLight,
-                            glassTint: glassTint,
-                            textPrimary: textPrimary,
-                            textSecondary: textSecondary,
-                            isCollapsed: isCollapsed,
-                            currentSize: currentSize,
-                            child: cardBody,
-                          ),
+              final cardMainBodyWidget = Positioned(
+                key: const ValueKey('card_main_body'),
+                top: 60.0,
+                left: 0,
+                width: currentSize.width,
+                height: currentSize.height,
+                child: MouseRegion(
+                  onEnter: (_) => setState(() => _isHovering = true),
+                  onExit: (_) => setState(() => _isHovering = false),
+                  child: TapRegion(
+                    groupId: 'card_block_editor_${widget.card.id}',
+                    onTapOutside: (_) {
+                      if (_blockViewKey.currentState?.isEditing == true) {
+                        _blockViewKey.currentState?.commitBlockEdit();
+                      }
+                    },
+                    child: ClipRRect(
+                      key: _cardContainerKey,
+                      borderRadius: BorderRadius.circular(14),
+                      child: RepaintBoundary(
+                        child: _buildCardContainer(
+                          isSelected: isSelected,
+                          themeAccent: themeAccent,
+                          isLight: isLight,
+                          glassTint: glassTint,
+                          textPrimary: textPrimary,
+                          textSecondary: textSecondary,
+                          isCollapsed: isCollapsed,
+                          currentSize: currentSize,
+                          child: cardBody,
                         ),
                       ),
                     ),
                   ),
-                ],
+                ),
               );
+
+              return ValueListenableBuilder<double>(
+                valueListenable: _dragRotationNotifier,
+                child: cardMainBodyWidget,
+                builder: (context, currentRotation, staticCardBody) {
+                  final theta = currentRotation;
+                  final halfW = currentSize.width / 2.0;
+                  final halfH = currentSize.height / 2.0;
+                  final xc = halfW;
+                  final yc = 60.0 + halfH;
+                  final sinTheta = math.sin(theta);
+                  final cosTheta = math.cos(theta);
+                  final halfBoundingH = halfW * sinTheta.abs() + halfH * cosTheta.abs();
+                  final d = halfBoundingH + 46.0;
+
+                  // Posição local da pílula para que, após a rotação do pai por theta,
+                  // ela fique exatamente no topo da AABB do card em tela, horizontal e sem sobreposição
+                  final localPillCenterX = xc - d * sinTheta;
+                  final localPillCenterY = yc - d * cosTheta;
+
+                  return InfiniteHitTestStack(
+                    clipBehavior: Clip.none,
+                    children: [
+                      // 1. O Card Principal em Vidro Liquido Moscaro estático (sem rebuild no giro)
+                      staticCardBody!,
+
+                      // 2. Pílula Flutuante Superior (Pintada por cima do Card para prioridade de hit-testing)
+                      if (showFloatingPill)
+                        Positioned(
+                          key: const ValueKey('floating_pill'),
+                          left: localPillCenterX - 400.0,
+                          top: localPillCenterY - 375.0,
+                          width: 800.0,
+                          height: 400.0,
+                          child: Align(
+                            alignment: Alignment.bottomCenter,
+                            child: Transform.rotate(
+                              angle: -currentRotation,
+                              alignment: Alignment.center,
+                              child: Padding(
+                                padding: const EdgeInsets.only(bottom: 6.0),
+                                child: isMediaCard
+                                    ? ValueListenableBuilder<double>(
+                                        valueListenable: widget.zoomNotifier ?? ValueNotifier(1.0),
+                                        builder: (context, currentZoomVal, _) {
+                                          return MediaCardFloatingPill(
+                                            card: widget.card,
+                                            zoomScale: currentZoomVal,
+                                            onUpdateCard: widget.onUpdateCard,
+                                            onDuplicateCard: () => widget.onDuplicateCard(widget.card),
+                                            onDeleteCard: () => widget.onDeleteCard(widget.card.id),
+                                            onSolveWithAi: widget.onSolveWithAi,
+                                            onExtractLatex: widget.onExtractLatex,
+                                            onOpenLightbox: () {
+                                              MediaLightboxModal.show(
+                                                context,
+                                                mediaData: widget.card.mediaData,
+                                                title: widget.card.title.isNotEmpty ? widget.card.title : 'Visualização de Mídia',
+                                              );
+                                            },
+                                          );
+                                        },
+                                      )
+                                    : CardFormatFloatingPill(
+                                        card: widget.card,
+                                        cardWidth: currentSize.width,
+                                        activeStyles: _activeStyles,
+                                        onUpdateCard: widget.onUpdateCard,
+                                        onInsertSnippet: (snippet) {
+                                          if (_blockViewKey.currentState != null) {
+                                            _blockViewKey.currentState!.insertSnippetAtActive(snippet);
+                                          } else {
+                                            final updatedContent = '${widget.card.content}$snippet';
+                                            widget.onUpdateCard(widget.card.copyWith(content: updatedContent));
+                                          }
+                                        },
+                                        onWrapSelection: (prefix, suffix) {
+                                          if (_blockViewKey.currentState != null) {
+                                            _blockViewKey.currentState!.wrapSelection(prefix: prefix, suffix: suffix);
+                                          } else {
+                                            final updatedContent = '${widget.card.content}$prefix$suffix';
+                                            widget.onUpdateCard(widget.card.copyWith(content: updatedContent));
+                                          }
+                                        },
+                                        onApplyTextColor: (color) {
+                                          if (_blockViewKey.currentState != null && _blockViewKey.currentState!.isEditing) {
+                                            _blockViewKey.currentState!.applyTextColor(color);
+                                          } else {
+                                            widget.onUpdateCard(widget.card.copyWith(textColor: color));
+                                          }
+                                        },
+                                        onApplyFontSize: (size) {
+                                          if (_blockViewKey.currentState != null && _blockViewKey.currentState!.isEditing) {
+                                            _blockViewKey.currentState!.applyFontSize(size);
+                                          } else {
+                                            widget.onUpdateCard(widget.card.copyWith(fontSize: size));
+                                          }
+                                        },
+                                        onDeleteCard: () => widget.onDeleteCard(widget.card.id),
+                                        onDuplicateCard: () => widget.onDuplicateCard(widget.card),
+                                      ),
+                              ),
+                            ),
+                          ),
+                        ),
+                    ],
+                  );
             },
           );
         },
-      ),
-    );
-  }
+      );
+    },
+  ),
+);
+}
 
   Widget _buildCardContainer({
     required bool isSelected,
@@ -297,6 +419,119 @@ class _CanvasCardWidgetState extends State<CanvasCardWidget> {
         offset: const Offset(0, 8),
       ),
     ];
+
+    if (widget.card.cardType == CardType.media) {
+      return SizedBox(
+        width: currentSize.width,
+        height: currentSize.height,
+        child: ClipRect(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              // Cabecalho de Arraste da Midia (Vidro Liquido Moscaro v2)
+              GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: () => widget.onSelectCard(widget.card.id),
+                onDoubleTap: () {
+                  globalIsEditingText = true;
+                  setState(() {
+                    _isEditingTitle = true;
+                    _titleController.text = widget.card.title;
+                  });
+                  _titleFocusNode.requestFocus();
+                },
+                onPanStart: _onHeaderPanStart,
+                onPanUpdate: _onHeaderPanUpdate,
+                onPanEnd: _onHeaderPanEnd,
+                onPanCancel: _onHeaderPanCancel,
+                child: MouseRegion(
+                  cursor: SystemMouseCursors.move,
+                  child: Container(
+                    height: 28,
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: isLight ? Colors.black.withValues(alpha: 0.04) : Colors.white.withValues(alpha: 0.05),
+                      borderRadius: const BorderRadius.vertical(top: Radius.circular(14)),
+                    ),
+                    child: Row(
+                      children: [
+                        SvgIcon(name: 'image', size: 13, color: themeAccent),
+                        const SizedBox(width: 6),
+                        Expanded(
+                          child: _isEditingTitle
+                              ? Container(
+                                  height: 20,
+                                  alignment: Alignment.centerLeft,
+                                  child: TextField(
+                                    controller: _titleController,
+                                    focusNode: _titleFocusNode,
+                                    autofocus: true,
+                                    style: TextStyle(
+                                      color: textPrimary,
+                                      fontSize: 11.0,
+                                      fontWeight: FontWeight.w600,
+                                      letterSpacing: 0.2,
+                                    ),
+                                    decoration: const InputDecoration(
+                                      isDense: true,
+                                      contentPadding: EdgeInsets.zero,
+                                      border: InputBorder.none,
+                                    ),
+                                    onSubmitted: (_) => _submitTitle(),
+                                    onTapOutside: (_) => _submitTitle(),
+                                  ),
+                                )
+                              : Tooltip(
+                                  message: 'Clique duas vezes para renomear',
+                                  child: Text(
+                                    widget.card.title.isNotEmpty ? widget.card.title : 'Media',
+                                    style: TextStyle(
+                                      color: textPrimary,
+                                      fontSize: 11.0,
+                                      fontWeight: FontWeight.w600,
+                                      letterSpacing: 0.2,
+                                    ),
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+
+              // Corpo da Mídia (Apenas seleciona ao tocar, duplo clique abre tela cheia)
+              Expanded(
+                child: GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: () => widget.onSelectCard(widget.card.id),
+                  onDoubleTap: widget.card.isDrawOverMode
+                      ? null
+                      : () {
+                          MediaLightboxModal.show(
+                            context,
+                            mediaData: widget.card.mediaData,
+                            title: widget.card.title.isNotEmpty ? widget.card.title : 'Visualização de Mídia',
+                          );
+                        },
+                  child: child,
+                ),
+              ),
+            ],
+          ).moscaroV2(
+            borderRadius: 14,
+            backgroundColor: glassTint,
+            borderColor: borderColor,
+            borderWidth: isSelected ? 1.5 : 1.0,
+            customShadows: cardShadows,
+            padding: EdgeInsets.zero,
+            enableBlur: MoscaroTokens.enableCardsBlur && MoscaroTokens.blurSigma > 0,
+            blurSigma: MoscaroTokens.blurSigma,
+          ),
+        ),
+      );
+    }
 
     return SizedBox(
       width: currentSize.width,
@@ -327,12 +562,6 @@ class _CanvasCardWidgetState extends State<CanvasCardWidget> {
                 decoration: BoxDecoration(
                   color: isLight ? Colors.black.withValues(alpha: 0.03) : Colors.white.withValues(alpha: 0.04),
                   borderRadius: const BorderRadius.vertical(top: Radius.circular(14)),
-                  border: Border(
-                    bottom: BorderSide(
-                      color: isLight ? Colors.black12 : Colors.white.withValues(alpha: 0.08),
-                      width: 0.8,
-                    ),
-                  ),
                 ),
                 child: Row(
                   children: [

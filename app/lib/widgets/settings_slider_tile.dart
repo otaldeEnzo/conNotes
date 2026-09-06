@@ -1,3 +1,4 @@
+import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import '../theme/moscaro_v2_tokens.dart';
 import '../theme/moscaro_theme_controller.dart';
@@ -47,15 +48,23 @@ class _SettingsSliderTileState extends State<SettingsSliderTile> {
     return MouseRegion(
       onEnter: (_) => setState(() => _isHovered = true),
       onExit: (_) => setState(() => _isHovered = false),
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 200),
-        curve: Curves.easeOutCubic,
-        margin: const EdgeInsets.only(bottom: 12),
-        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
-        decoration: BoxDecoration(
-          color: _isHovered
-              ? theme.backgroundSurface.withValues(alpha: 0.65)
-              : theme.backgroundSurface.withValues(alpha: 0.45),
+      child: Padding(
+        padding: const EdgeInsets.only(bottom: 12),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(16),
+          child: BackdropFilter(
+            filter: ui.ImageFilter.blur(
+              sigmaX: MoscaroTokens.blurSigma,
+              sigmaY: MoscaroTokens.blurSigma,
+            ),
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 200),
+              curve: Curves.easeOutCubic,
+              padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
+              decoration: BoxDecoration(
+                color: _isHovered
+                    ? theme.backgroundSurface.withValues(alpha: 0.65)
+                    : theme.backgroundSurface.withValues(alpha: 0.45),
           borderRadius: BorderRadius.circular(16),
           border: Border.all(
             color: _isHovered
@@ -187,6 +196,8 @@ class _SettingsSliderTileState extends State<SettingsSliderTile> {
           ],
         ),
       ),
-    );
+    ),
+  ),
+));
   }
 }

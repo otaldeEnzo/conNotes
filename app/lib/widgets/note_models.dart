@@ -86,6 +86,8 @@ class NoteDocument {
   double zoomScale;
   String? nativeDocId;
   final List<CanvasCardModel> cards;
+  String? aiSummary;
+  DateTime? summaryUpdatedAt;
 
   NoteDocument({
     required this.id,
@@ -102,6 +104,8 @@ class NoteDocument {
     this.panY = 0.0,
     this.zoomScale = 1.0,
     this.nativeDocId,
+    this.aiSummary,
+    this.summaryUpdatedAt,
     DateTime? createdAt,
     DateTime? updatedAt,
   })  : tags = tags ?? [],
@@ -263,6 +267,8 @@ class NoteDocument {
         'tags': tags,
         'isFavorite': isFavorite,
         'themeId': themeId,
+        'aiSummary': aiSummary,
+        'summaryUpdatedAt': summaryUpdatedAt?.toIso8601String(),
       },
       'canvasData': {
         'panX': panX,
@@ -332,6 +338,8 @@ class NoteDocument {
       strokes: strokes,
       cards: parsedCards,
       children: children,
+      aiSummary: metadata['aiSummary'] as String?,
+      summaryUpdatedAt: metadata['summaryUpdatedAt'] != null ? parseDate(metadata['summaryUpdatedAt']) : null,
       createdAt: parseDate(header['createdAt']),
       updatedAt: parseDate(header['updatedAt']),
     );

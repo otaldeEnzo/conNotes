@@ -1,3 +1,4 @@
+import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../theme/moscaro_v2_tokens.dart';
@@ -89,14 +90,23 @@ class _SettingsPageViewState extends State<SettingsPageView> {
     return ListenableBuilder(
       listenable: MoscaroThemeController.instance,
       builder: (context, _) {
-        return SizedBox(
-          width: double.infinity,
-          height: double.infinity,
-          child: Scrollbar(
-            controller: _scrollController,
-            child: SingleChildScrollView(
-              controller: _scrollController,
-              padding: const EdgeInsets.only(top: 86, bottom: 32),
+        final theme = MoscaroThemeController.instance.currentTheme;
+        final isLight = MoscaroTokens.isLight;
+
+        return ColoredBox(
+          color: isLight
+              ? const Color(0xF5F8FAFC)
+              : theme.backgroundDeep.withValues(alpha: 0.94),
+          child: BackdropFilter(
+            filter: ui.ImageFilter.blur(sigmaX: 30.0, sigmaY: 30.0),
+            child: SizedBox(
+              width: double.infinity,
+              height: double.infinity,
+              child: Scrollbar(
+                controller: _scrollController,
+                child: SingleChildScrollView(
+                  controller: _scrollController,
+                  padding: const EdgeInsets.only(top: 86, bottom: 32),
               child: Align(
                 alignment: Alignment.topCenter,
                 child: Container(
@@ -179,10 +189,12 @@ class _SettingsPageViewState extends State<SettingsPageView> {
             ),
           ),
         ),
-      );
-    },
+      ),
+    ),
   );
-}
+},
+);
+  }
 
   Widget _buildCategoryContent() {
     switch (widget.activeCategory) {
@@ -265,87 +277,98 @@ class _SettingsPageViewState extends State<SettingsPageView> {
     final theme = MoscaroThemeController.instance.currentTheme;
     final themeAccent = theme.accentPrimary;
 
-    return Container(
-      margin: const EdgeInsets.only(bottom: 12),
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: isLight ? Colors.white.withValues(alpha: 0.6) : theme.backgroundSurface.withValues(alpha: 0.45),
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: ClipRRect(
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(
-          color: isLight ? Colors.black.withValues(alpha: 0.08) : Colors.white.withValues(alpha: 0.08),
-        ),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Row(
-            children: [
-              SvgIcon(
-                name: 'folder',
-                size: 20,
-                color: themeAccent,
+        child: BackdropFilter(
+          filter: ui.ImageFilter.blur(
+            sigmaX: MoscaroTokens.blurSigma,
+            sigmaY: MoscaroTokens.blurSigma,
+          ),
+          child: Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: isLight ? Colors.white.withValues(alpha: 0.6) : theme.backgroundSurface.withValues(alpha: 0.45),
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(
+                color: isLight ? Colors.black.withValues(alpha: 0.08) : Colors.white.withValues(alpha: 0.08),
               ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Row(
                   children: [
-                    Text(
-                      'Diretório dos Cadernos & Workspace',
-                      style: TextStyle(
-                        color: textPrimary,
-                        fontSize: 13.5,
-                        fontWeight: FontWeight.w600,
+                    SvgIcon(
+                      name: 'folder',
+                      size: 20,
+                      color: themeAccent,
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Diretório dos Cadernos & Workspace',
+                            style: TextStyle(
+                              color: textPrimary,
+                              fontSize: 13.5,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          const SizedBox(height: 3),
+                          Text(
+                            'Pasta padrão onde seus cadernos, disciplinas e notas .cncanvas são salvos automaticamente.',
+                            style: TextStyle(
+                              color: textSecondary,
+                              fontSize: 11.5,
+                            ),
+                          ),
+                        ],
                       ),
                     ),
-                    const SizedBox(height: 3),
-                    Text(
-                      'Pasta padrão onde seus cadernos, disciplinas e notas .cncanvas são salvos automaticamente.',
-                      style: TextStyle(
-                        color: textSecondary,
-                        fontSize: 11.5,
+                    const SizedBox(width: 12),
+                    ElevatedButton.icon(
+                      onPressed: () => _handlePickWorkspaceFolder(context),
+                      icon: const SvgIcon(name: 'folder', size: 14, color: Colors.white),
+                      label: const Text('Alterar Pasta', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: themeAccent.withValues(alpha: 0.25),
+                        foregroundColor: Colors.white,
+                        side: BorderSide(color: themeAccent.withValues(alpha: 0.6), width: 1.2),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                        elevation: 0,
                       ),
                     ),
                   ],
                 ),
-              ),
-              const SizedBox(width: 12),
-              ElevatedButton.icon(
-                onPressed: () => _handlePickWorkspaceFolder(context),
-                icon: const SvgIcon(name: 'folder', size: 14, color: Colors.white),
-                label: const Text('Alterar Pasta', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: themeAccent.withValues(alpha: 0.25),
-                  foregroundColor: Colors.white,
-                  side: BorderSide(color: themeAccent.withValues(alpha: 0.6), width: 1.2),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                  elevation: 0,
+                const SizedBox(height: 10),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: isLight ? Colors.black.withValues(alpha: 0.04) : Colors.black.withValues(alpha: 0.35),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(
+                      color: themeAccent.withValues(alpha: 0.3),
+                    ),
+                  ),
+                  child: Text(
+                    currentPath.isNotEmpty ? currentPath : 'Padrão: Documentos/conNotes',
+                    style: TextStyle(
+                      color: themeAccent,
+                      fontSize: 12,
+                      fontFamily: 'monospace',
+                    ),
+                    overflow: TextOverflow.ellipsis,
+                  ),
                 ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 10),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-            decoration: BoxDecoration(
-              color: isLight ? Colors.black.withValues(alpha: 0.04) : Colors.black.withValues(alpha: 0.35),
-              borderRadius: BorderRadius.circular(10),
-              border: Border.all(
-                color: themeAccent.withValues(alpha: 0.3),
-              ),
-            ),
-            child: Text(
-              currentPath.isNotEmpty ? currentPath : 'Padrão: Documentos/conNotes',
-              style: TextStyle(
-                color: themeAccent,
-                fontSize: 12,
-                fontFamily: 'monospace',
-              ),
-              overflow: TextOverflow.ellipsis,
+              ],
             ),
           ),
-        ],
+        ),
       ),
     );
   }
@@ -359,19 +382,27 @@ class _SettingsPageViewState extends State<SettingsPageView> {
     final fontManager = CustomFontManager.instance;
     final textCtrl = TextEditingController();
 
-    return Container(
-      margin: const EdgeInsets.only(bottom: 12),
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: isLight ? Colors.white.withValues(alpha: 0.6) : theme.backgroundSurface.withValues(alpha: 0.45),
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: ClipRRect(
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(
-          color: isLight ? Colors.black.withValues(alpha: 0.08) : Colors.white.withValues(alpha: 0.08),
-        ),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
+        child: BackdropFilter(
+          filter: ui.ImageFilter.blur(
+            sigmaX: MoscaroTokens.blurSigma,
+            sigmaY: MoscaroTokens.blurSigma,
+          ),
+          child: Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: isLight ? Colors.white.withValues(alpha: 0.6) : theme.backgroundSurface.withValues(alpha: 0.45),
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(
+                color: isLight ? Colors.black.withValues(alpha: 0.08) : Colors.white.withValues(alpha: 0.08),
+              ),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
           Row(
             children: [
               SvgIcon(name: 'typography', size: 20, color: themeAccent),
@@ -481,7 +512,10 @@ class _SettingsPageViewState extends State<SettingsPageView> {
           ],
         ],
       ),
-    );
+    ),
+  ),
+),
+);
   }
 
   Future<void> _handlePickWorkspaceFolder(BuildContext context) async {
@@ -1451,6 +1485,104 @@ class _SettingsPageViewState extends State<SettingsPageView> {
           value: widget.settings.enableAiSocraticMode,
           onChanged: (val) => widget.onUpdateSettings(widget.settings.copyWith(enableAiSocraticMode: val)),
         ),
+
+        const SizedBox(height: 14),
+
+        // 4. Seletor de Motor de Resumo das Notas (Privacidade & Performance)
+        Padding(
+          padding: const EdgeInsets.only(left: 4, bottom: 8),
+          child: Text(
+            'RESUMO INTELIGENTE DAS NOTAS & PRIVACIDADE',
+            style: TextStyle(color: accent.withValues(alpha: 0.8), fontSize: 11, fontWeight: FontWeight.bold, letterSpacing: 1.0),
+          ),
+        ),
+
+        Padding(
+          padding: const EdgeInsets.only(bottom: 12),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(16),
+            child: BackdropFilter(
+              filter: ui.ImageFilter.blur(
+                sigmaX: MoscaroTokens.blurSigma,
+                sigmaY: MoscaroTokens.blurSigma,
+              ),
+              child: Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: theme.backgroundSurface.withValues(alpha: 0.45),
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: Colors.white.withValues(alpha: 0.08), width: 1.1),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        SvgIcon(name: widget.settings.noteSummaryEngine.iconName, size: 18, color: accent),
+                        const SizedBox(width: 10),
+                        const Text(
+                          'Motor de Síntese & OCR de Mídia (Privacidade)',
+                          style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: Colors.white),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 6),
+                    const Text(
+                      'Escolha como o conNotes deve processar o OCR de imagens no canvas e gerar os resumos dos cartões: via IA Multimodal na nuvem ou 100% Local e Privado no seu dispositivo.',
+                      style: TextStyle(fontSize: 12, color: Colors.white70),
+                    ),
+                    const SizedBox(height: 14),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: NoteSummaryEngine.values.map((engine) {
+                        final isSelected = widget.settings.noteSummaryEngine == engine;
+                        return GestureDetector(
+                          onTap: () => widget.onUpdateSettings(widget.settings.copyWith(noteSummaryEngine: engine)),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                            decoration: BoxDecoration(
+                              color: isSelected ? accent.withValues(alpha: 0.2) : Colors.white.withValues(alpha: 0.04),
+                              borderRadius: BorderRadius.circular(10),
+                              border: Border.all(
+                                color: isSelected ? accent : Colors.white.withValues(alpha: 0.1),
+                                width: isSelected ? 1.4 : 0.8,
+                              ),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                SvgIcon(
+                                  name: engine.iconName,
+                                  size: 13,
+                                  color: isSelected ? accent : Colors.white70,
+                                ),
+                                const SizedBox(width: 6),
+                                Text(
+                                  engine.label,
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
+                                    color: isSelected ? Colors.white : Colors.white70,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        );
+                      }).toList(),
+                    ),
+                    const SizedBox(height: 10),
+                    Text(
+                      widget.settings.noteSummaryEngine.description,
+                      style: TextStyle(fontSize: 11.5, color: accent.withValues(alpha: 0.9), fontStyle: FontStyle.italic),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
       ],
     );
   }
@@ -1471,14 +1603,22 @@ class _SettingsPageViewState extends State<SettingsPageView> {
     required ValueChanged<String> onChanged,
     required ValueChanged<bool> onToggleEnable,
   }) {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 12),
-      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
-      decoration: BoxDecoration(
-        color: surfaceColor.withValues(alpha: 0.45),
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: ClipRRect(
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.08), width: 1.1),
-      ),
+        child: BackdropFilter(
+          filter: ui.ImageFilter.blur(
+            sigmaX: MoscaroTokens.blurSigma,
+            sigmaY: MoscaroTokens.blurSigma,
+          ),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
+            decoration: BoxDecoration(
+              color: surfaceColor.withValues(alpha: 0.45),
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: Colors.white.withValues(alpha: 0.08), width: 1.1),
+            ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -1604,6 +1744,9 @@ class _SettingsPageViewState extends State<SettingsPageView> {
           ),
         ],
       ),
-    );
+    ),
+  ),
+),
+);
   }
 }

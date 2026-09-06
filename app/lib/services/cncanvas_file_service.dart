@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import 'package:flutter/painting.dart';
 import '../widgets/note_models.dart';
 import '../widgets/ink_models.dart';
 import '../models/canvas_card_model.dart';
@@ -320,6 +321,37 @@ $embeddedJson
   static String _generateCardsSvg(List<CanvasCardModel> cards) {
     final buffer = StringBuffer();
     for (final card in cards) {
+      if (card.cardType == CardType.media && card.mediaData != null && card.mediaData!.isNotEmpty) {
+        final captionHtml = (card.caption != null && card.caption!.isNotEmpty)
+            ? '<div style="position: absolute; bottom: 0; left: 0; right: 0; padding: 6px 10px; background: rgba(14, 16, 24, 0.85); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); border-top: 1px solid rgba(0, 225, 255, 0.25); font-size: 11px; color: #f1f5f9;">${const HtmlEscape().convert(card.caption!)}</div>'
+            : '';
+        final objectFit = card.mediaFit == BoxFit.cover ? 'cover' : 'contain';
+
+        buffer.writeln('''
+      <foreignObject x="${card.x}" y="${card.y}" width="${card.width}" height="${card.height}">
+        <div xmlns="http://www.w3.org/1999/xhtml" style="
+          width: 100%;
+          height: 100%;
+          position: relative;
+          background: rgba(14, 20, 32, 0.92);
+          backdrop-filter: blur(16px);
+          -webkit-backdrop-filter: blur(16px);
+          border: 1px solid rgba(0, 225, 255, 0.35);
+          border-radius: 14px;
+          overflow: hidden;
+          box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+        ">
+          <img src="${card.mediaData}" style="width: 100%; height: 100%; object-fit: $objectFit; display: block;" alt="Media STEM" />
+          $captionHtml
+        </div>
+      </foreignObject>
+        ''');
+        continue;
+      }
+
       final textEscaped = const HtmlEscape().convert(card.content);
       final titleEscaped = const HtmlEscape().convert(card.title.toUpperCase());
       buffer.writeln('''

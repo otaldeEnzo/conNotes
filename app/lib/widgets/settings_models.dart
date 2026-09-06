@@ -117,6 +117,53 @@ enum StylusBarrelAction {
   }
 }
 
+/// Mecanismo configuravel de geracao de resumo das notas (Privacidade & Performance)
+enum NoteSummaryEngine {
+  aiMultimodal,
+  localOcr,
+  structuralOnly,
+  disabled;
+
+  String get label {
+    switch (this) {
+      case NoteSummaryEngine.aiMultimodal:
+        return 'IA Multimodal (Nuvem)';
+      case NoteSummaryEngine.localOcr:
+        return 'OCR Local & Vetorial (Privado / Offline)';
+      case NoteSummaryEngine.structuralOnly:
+        return 'Estrutural / Heurístico (Offline)';
+      case NoteSummaryEngine.disabled:
+        return 'Desativado';
+    }
+  }
+
+  String get description {
+    switch (this) {
+      case NoteSummaryEngine.aiMultimodal:
+        return 'Análise semântica profunda de texto e desenhos via IA multimodal.';
+      case NoteSummaryEngine.localOcr:
+        return 'Reconhecimento 100% offline e privado via Rust FFI. Zero envio de dados para a nuvem.';
+      case NoteSummaryEngine.structuralOnly:
+        return 'Síntese imediata baseada na contagem e tópicos dos cartões e traços.';
+      case NoteSummaryEngine.disabled:
+        return 'Não gera resumos das notas, exibindo apenas dados brutos do arquivo.';
+    }
+  }
+
+  String get iconName {
+    switch (this) {
+      case NoteSummaryEngine.aiMultimodal:
+        return 'ai';
+      case NoteSummaryEngine.localOcr:
+        return 'shield';
+      case NoteSummaryEngine.structuralOnly:
+        return 'card';
+      case NoteSummaryEngine.disabled:
+        return 'lock';
+    }
+  }
+}
+
 /// Modo de acionamento do botão do Stylus (Hold vs Toggle)
 enum StylusTriggerMode {
   hold,
@@ -208,6 +255,7 @@ class AppSettingsState {
   final bool enableAiSocraticMode;
   final bool enableAiMermaidDiagrams;
   final bool enableAiHandwritingOcr;
+  final NoteSummaryEngine noteSummaryEngine;
 
   const AppSettingsState({
     this.activeThemeId = 'moscaro_cyan',
@@ -253,6 +301,7 @@ class AppSettingsState {
     this.enableAiSocraticMode = false,
     this.enableAiMermaidDiagrams = true,
     this.enableAiHandwritingOcr = true,
+    this.noteSummaryEngine = NoteSummaryEngine.aiMultimodal,
   });
 
   factory AppSettingsState.defaults() => const AppSettingsState();
@@ -301,6 +350,7 @@ class AppSettingsState {
     bool? enableAiSocraticMode,
     bool? enableAiMermaidDiagrams,
     bool? enableAiHandwritingOcr,
+    NoteSummaryEngine? noteSummaryEngine,
   }) {
     return AppSettingsState(
       activeThemeId: activeThemeId ?? this.activeThemeId,
@@ -346,6 +396,7 @@ class AppSettingsState {
       enableAiSocraticMode: enableAiSocraticMode ?? this.enableAiSocraticMode,
       enableAiMermaidDiagrams: enableAiMermaidDiagrams ?? this.enableAiMermaidDiagrams,
       enableAiHandwritingOcr: enableAiHandwritingOcr ?? this.enableAiHandwritingOcr,
+      noteSummaryEngine: noteSummaryEngine ?? this.noteSummaryEngine,
     );
   }
 
@@ -394,6 +445,7 @@ class AppSettingsState {
       'enableAiSocraticMode': enableAiSocraticMode,
       'enableAiMermaidDiagrams': enableAiMermaidDiagrams,
       'enableAiHandwritingOcr': enableAiHandwritingOcr,
+      'noteSummaryEngine': noteSummaryEngine.name,
     };
   }
 
@@ -410,6 +462,12 @@ class AppSettingsState {
         }
       }
     }
+
+    final summaryEngineStr = json['noteSummaryEngine'] as String?;
+    final noteSummaryEngine = NoteSummaryEngine.values.firstWhere(
+      (e) => e.name == summaryEngineStr,
+      orElse: () => NoteSummaryEngine.aiMultimodal,
+    );
 
     final primaryActionStr = json['stylusPrimaryBarrelAction'] as String? ?? json['primaryBarrelAction'] as String?;
     final primaryBarrelAction = primaryActionStr == 'selection'
@@ -483,6 +541,7 @@ class AppSettingsState {
       enableAiSocraticMode: json['enableAiSocraticMode'] as bool? ?? false,
       enableAiMermaidDiagrams: json['enableAiMermaidDiagrams'] as bool? ?? true,
       enableAiHandwritingOcr: json['enableAiHandwritingOcr'] as bool? ?? true,
+      noteSummaryEngine: noteSummaryEngine,
     );
   }
 }

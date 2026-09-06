@@ -1,6 +1,7 @@
 import 'dart:math' as math;
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import '../models/canvas_card_model.dart';
 import '../controllers/canvas_input_context.dart';
 import '../handlers/ink_input_handler.dart';
 import '../handlers/selection_input_handler.dart';
@@ -119,6 +120,8 @@ class _CanvasInputRouterState extends State<CanvasInputRouter> {
 
   // Estado dos botões do stylus (Hold vs Toggle) para Botão Inferior (Primário) e Superior (Secundário)
   int _lastButtons = 0;
+  bool _lastButtonsPrimaryPressed = false;
+  bool _lastButtonsSecondaryPressed = false;
   bool _isPrimaryBarrelToggleActive = false;
   bool _isSecondaryBarrelToggleActive = false;
   StylusBarrelAction? _currentActiveAction;
@@ -135,6 +138,7 @@ class _CanvasInputRouterState extends State<CanvasInputRouter> {
   StemProtractorState? _protractorInitialState;
 
   bool _isInteractingWithCard = false;
+  String? _activeDrawOverCardId;
   final ValueNotifier<MouseCursor> _cursorNotifier = ValueNotifier(SystemMouseCursors.basic);
 
   @override
@@ -168,7 +172,11 @@ class _CanvasInputRouterState extends State<CanvasInputRouter> {
     int buttons = 0;
     if (state.isPrimaryBarrelPressed) buttons |= kSecondaryStylusButton;
     if (state.isSecondaryBarrelPressed) buttons |= 0x08;
-    _handleButtonTransitions(buttons);
+    _handleButtonTransitions(
+      buttons,
+      forcePrimaryPressed: state.isPrimaryBarrelPressed,
+      forceSecondaryPressed: state.isSecondaryBarrelPressed,
+    );
   }
 
   void _onSettingsChanged() {
@@ -178,6 +186,8 @@ class _CanvasInputRouterState extends State<CanvasInputRouter> {
   void _resetToolAndToggleStates() {
     _isPrimaryBarrelToggleActive = false;
     _isSecondaryBarrelToggleActive = false;
+    _lastButtonsPrimaryPressed = false;
+    _lastButtonsSecondaryPressed = false;
     _isActionExecuting = false;
     _currentActiveAction = null;
     _lastButtons = 0;
@@ -252,35 +262,35 @@ class _CanvasInputRouterState extends State<CanvasInputRouter> {
   /// Detecta se o Botão Superior (Secundário / Barrel 2) está pressionado
   bool _isSecondaryBarrelPressed(int buttons) {
     if (StylusNativeChannel.instance.state.isSecondaryBarrelPressed) return true;
-    return (buttons & 0x08 != 0) || (buttons & 0x10 != 0) || (buttons & kMiddleMouseButton != 0);
+    return (buttons & 0x08 != 0) || (buttons & 0x10 != 0);
   }
 
-  void _handleButtonTransitions(int currentButtons) {
+  void _handleButtonTransitions(int currentButtons, {bool? forcePrimaryPressed, bool? forceSecondaryPressed}) {
     final settings = SettingsService.instance.currentSettings;
 
-    // 1. Transição do Botão Inferior (Primário)
-    final wasPrimaryPressed = _isPrimaryBarrelPressed(_lastButtons);
-    final isPrimaryPressed = _isPrimaryBarrelPressed(currentButtons);
+    final isPrimaryPressed = forcePrimaryPressed ?? _isPrimaryBarrelPressed(currentButtons);
+    final wasPrimaryPressed = _lastButtonsPrimaryPressed;
     if (!wasPrimaryPressed && isPrimaryPressed) {
       if (settings.stylusPrimaryTriggerMode == StylusTriggerMode.toggle) {
         _isPrimaryBarrelToggleActive = !_isPrimaryBarrelToggleActive;
       }
     }
+    _lastButtonsPrimaryPressed = isPrimaryPressed;
 
-    // 2. Transição do Botão Superior (Secundário)
-    final wasSecondaryPressed = _isSecondaryBarrelPressed(_lastButtons);
-    final isSecondaryPressed = _isSecondaryBarrelPressed(currentButtons);
+    final isSecondaryPressed = forceSecondaryPressed ?? _isSecondaryBarrelPressed(currentButtons);
+    final wasSecondaryPressed = _lastButtonsSecondaryPressed;
     if (!wasSecondaryPressed && isSecondaryPressed) {
       if (settings.stylusSecondaryTriggerMode == StylusTriggerMode.toggle) {
         _isSecondaryBarrelToggleActive = !_isSecondaryBarrelToggleActive;
       }
     }
+    _lastButtonsSecondaryPressed = isSecondaryPressed;
 
     _lastButtons = currentButtons;
   }
 
   StylusBarrelAction _getEffectiveStylusAction(int buttons, PointerDeviceKind? kind) {
-    if (kind == PointerDeviceKind.mouse && (buttons == kMiddleMouseButton || buttons == 4)) {
+    if (kind != PointerDeviceKind.stylus && kind != PointerDeviceKind.invertedStylus) {
       return StylusBarrelAction.disabled;
     }
     final settings = SettingsService.instance.currentSettings;
@@ -494,7 +504,19 @@ class _CanvasInputRouterState extends State<CanvasInputRouter> {
                 )
               : (zone: CardHoverZone.none, card: null);
 
-          final bool isTouchingCard = cardHit.zone != CardHoverZone.none || ctx.findCardAtPoint(canvasPoint) != null;
+          final cardUnderPointer = cardHit.card ?? ctx.findCardAtPoint(canvasPoint);
+          final bool isDrawOverMediaCard = cardUnderPointer != null &&
+              cardUnderPointer.cardType == CardType.media &&
+              cardUnderPointer.isDrawOverMode == true &&
+              (ctx.activeTool == 'pen' || ctx.activeTool == 'laser');
+
+          if (isDrawOverMediaCard) {
+            _activeDrawOverCardId = cardUnderPointer.id;
+          } else {
+            _activeDrawOverCardId = null;
+          }
+
+          final bool isTouchingCard = (cardHit.zone != CardHoverZone.none || ctx.findCardAtPoint(canvasPoint) != null) && !isDrawOverMediaCard;
           _isInteractingWithCard = isTouchingCard;
 
           CardsTelemetryController.instance.updatePointerEvent(
@@ -526,7 +548,7 @@ class _CanvasInputRouterState extends State<CanvasInputRouter> {
           // IMPORTANTE: Defer o selectCard para pós-frame para que o PointerDown original
           // propagate completamente até os GestureDetectors dos cards antes de qualquer rebuild.
           if (isTouchingCard) {
-            final clickedCard = cardHit.card ?? ctx.findCardAtPoint(canvasPoint);
+            final clickedCard = cardUnderPointer;
             if (clickedCard != null) {
               if (ctx.selectedCardId != clickedCard.id) {
                 WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -625,17 +647,46 @@ class _CanvasInputRouterState extends State<CanvasInputRouter> {
             }
 
             // Desmarca cards caso o clique seja no vazio (deferir para pós-frame para não quebrar propagação)
-            if (ctx.selectedCardId != null && ctx.selectionState.selectedCardIds.isEmpty) {
+            // Antes, verifica se o ponto está na zona da pílula flutuante (popover) do card selecionado,
+            // que fica acima do corpo do card e não é detectada por cardUnderPointer.
+            bool isInFloatingPillZone = false;
+            if (ctx.selectedCardId != null && note != null) {
+              for (final card in note.cards) {
+                if (card.id == ctx.selectedCardId) {
+                  // A pílula flutuante fica posicionada acima do card, numa faixa de ~150px
+                  // Horizontal: largura do card + margem de 100px de cada lado
+                  // Vertical: do topo do card até 150px acima (para acomodar popover de rotação)
+                  final pillRect = Rect.fromLTWH(
+                    card.x - 100.0,
+                    card.y - 150.0,
+                    math.max(card.width, 500.0) + 200.0,
+                    150.0,
+                  );
+                  if (pillRect.contains(canvasPoint)) {
+                    isInFloatingPillZone = true;
+                  }
+                  break;
+                }
+              }
+            }
+
+            if (!isInFloatingPillZone && !isDrawOverMediaCard && cardUnderPointer == null && ctx.selectedCardId != null && ctx.selectionState.selectedCardIds.isEmpty) {
               WidgetsBinding.instance.addPostFrameCallback((_) {
                 FocusManager.instance.primaryFocus?.unfocus();
                 ctx.selectCard(null);
               });
-            } else if (ctx.selectionState.selectedCardIds.isNotEmpty) {
+            } else if (!isInFloatingPillZone && !isDrawOverMediaCard && cardUnderPointer == null && ctx.selectionState.selectedCardIds.isNotEmpty) {
               WidgetsBinding.instance.addPostFrameCallback((_) {
                 FocusManager.instance.primaryFocus?.unfocus();
                 ctx.selectCard(null);
                 ctx.updateSelectionState(SelectionState.empty());
               });
+            }
+
+            // Se o clique está na zona da pílula flutuante, deixar o Flutter processar
+            // os InkWell/GestureDetectors do popover sem iniciar traços ou outras ações do canvas.
+            if (isInFloatingPillZone) {
+              return;
             }
 
             if (note != null) {
@@ -1021,6 +1072,15 @@ class _CanvasInputRouterState extends State<CanvasInputRouter> {
           if (ctx.activeTool == 'pen' || ctx.activeTool == 'shapes') {
             final finishedStroke = _inkHandler.finishStroke();
             if (finishedStroke != null) {
+              if (_activeDrawOverCardId != null) {
+                ctx.attachStrokeToCard(_activeDrawOverCardId!, finishedStroke.id);
+              } else if (finishedStroke.points.isNotEmpty) {
+                final firstPoint = finishedStroke.points.first.point;
+                final cardAtPoint = ctx.findCardAtPoint(firstPoint);
+                if (cardAtPoint != null && cardAtPoint.cardType == CardType.media && cardAtPoint.isDrawOverMode) {
+                  ctx.attachStrokeToCard(cardAtPoint.id, finishedStroke.id);
+                }
+              }
               widget.onCommitStroke(finishedStroke);
             }
           } else if (ctx.activeTool == 'eraser') {
@@ -1032,9 +1092,11 @@ class _CanvasInputRouterState extends State<CanvasInputRouter> {
               onUpdateState: ctx.updateSelectionState,
             );
           }
+          _activeDrawOverCardId = null;
         },
         onPointerCancel: (event) {
           _handleButtonTransitions(0);
+          _activeDrawOverCardId = null;
           _activePalmPointerIds.remove(event.pointer);
           _isInteractingWithCard = false;
           CardsTelemetryController.instance.setInteractingWithCard(false);
@@ -1158,23 +1220,21 @@ class _CanvasHoverFeedbackOverlay extends StatelessWidget {
         final accentPrimary = theme.accentPrimary;
         final accentSecondary = theme.accentSecondary;
 
-        // Para a Caneta (Pen) e Formas: Não desenha o círculo/retículo sob a ponta física da caneta/mesa
+        // Cálculo do Raio do Retículo Minimalista Moscaro (Precision Micro-Dot)
+        double ringRadius = 10.0;
         if (effectiveTool == 'pen' || effectiveTool == 'shapes') {
-          return const SizedBox.shrink();
-        }
-
-        // Cálculo do Raio do Retículo de Hover para ferramentas que necessitam de preview de área
-        double ringRadius = 12.0;
-        if (isEraser) {
-          ringRadius = math.max(14.0, (canvasContext.eraserRadius * zoom));
+          // Espessura exata da ponta da caneta em pixels de tela
+          ringRadius = math.max(2.5, (activePenPreset.strokeWidth * zoom) / 2.0);
+        } else if (isEraser) {
+          ringRadius = math.max(12.0, (canvasContext.eraserRadius * zoom));
         } else if (effectiveTool == 'laser') {
-          ringRadius = 9.0;
+          ringRadius = 7.0;
         } else if (effectiveTool == 'select') {
-          ringRadius = 14.0;
+          ringRadius = 10.0;
         } else if (effectiveTool == 'colorPicker') {
-          ringRadius = 12.0;
+          ringRadius = 10.0;
         } else if (effectiveTool == 'pan') {
-          ringRadius = 12.0;
+          ringRadius = 10.0;
         }
 
         return RepaintBoundary(
@@ -1228,138 +1288,96 @@ class _HoverRingCustomPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     if (isEraser) {
-      // Feedback da Borracha: Anel Neon Pro Max com halo suave
-      final glowPaint = Paint()
-        ..color = MoscaroTokens.auroraPink.withValues(alpha: 0.25)
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 2.5
-        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 3.0);
-      canvas.drawCircle(center, radius, glowPaint);
-
+      // Feedback da Borracha: Anel fino minimalista com micro-ponto central
       final ringPaint = Paint()
-        ..color = MoscaroTokens.auroraPink.withValues(alpha: 0.90)
+        ..color = MoscaroTokens.auroraPink.withValues(alpha: 0.70)
         ..style = PaintingStyle.stroke
-        ..strokeWidth = 1.4;
+        ..strokeWidth = 1.0;
       canvas.drawCircle(center, radius, ringPaint);
 
-      // Micro retículo central
       final corePaint = Paint()
-        ..color = Colors.white
+        ..color = Colors.white.withValues(alpha: 0.85)
         ..style = PaintingStyle.fill;
-      canvas.drawCircle(center, 1.8, corePaint);
-
-      if (isPixelEraser) {
-        // Miras de precisão nos eixos
-        final crossPaint = Paint()
-          ..color = MoscaroTokens.auroraPink
-          ..style = PaintingStyle.stroke
-          ..strokeWidth = 1.2;
-        const tick = 3.5;
-        canvas.drawLine(Offset(center.dx - radius - tick, center.dy), Offset(center.dx - radius + 1, center.dy), crossPaint);
-        canvas.drawLine(Offset(center.dx + radius - 1, center.dy), Offset(center.dx + radius + tick, center.dy), crossPaint);
-        canvas.drawLine(Offset(center.dx, center.dy - radius - tick), Offset(center.dx, center.dy - radius + 1), crossPaint);
-        canvas.drawLine(Offset(center.dx, center.dy + radius - 1), Offset(center.dx, center.dy + radius + tick), crossPaint);
-      }
+      canvas.drawCircle(center, 1.2, corePaint);
       return;
     }
 
     if (effectiveTool == 'laser') {
       final laserHalo = Paint()
-        ..color = const Color(0xFFFF0055).withValues(alpha: 0.45)
-        ..style = PaintingStyle.fill
-        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 7.0);
-      canvas.drawCircle(center, 7.0, laserHalo);
+        ..color = const Color(0xFFFF0055).withValues(alpha: 0.35)
+        ..style = PaintingStyle.fill;
+      canvas.drawCircle(center, 6.0, laserHalo);
 
       final laserDot = Paint()
         ..color = const Color(0xFFFF2A6D)
         ..style = PaintingStyle.fill;
-      canvas.drawCircle(center, 3.0, laserDot);
+      canvas.drawCircle(center, 2.5, laserDot);
       return;
     }
 
     if (effectiveTool == 'select') {
+      // Retículo de Seleção: Anel ultra-fino e micro-ponto nítido
       final selectPaint = Paint()
-        ..color = accentPrimary.withValues(alpha: 0.85)
+        ..color = accentPrimary.withValues(alpha: 0.75)
         ..style = PaintingStyle.stroke
-        ..strokeWidth = 1.2;
+        ..strokeWidth = 1.0;
       canvas.drawCircle(center, radius, selectPaint);
 
-      final tickPaint = Paint()
-        ..color = accentPrimary
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 1.5;
-      const tick = 4.0;
-      canvas.drawLine(Offset(center.dx - radius - tick, center.dy), Offset(center.dx - radius + 2, center.dy), tickPaint);
-      canvas.drawLine(Offset(center.dx + radius - 2, center.dy), Offset(center.dx + radius + tick, center.dy), tickPaint);
-      canvas.drawLine(Offset(center.dx, center.dy - radius - tick), Offset(center.dx, center.dy - radius + 2), tickPaint);
-      canvas.drawLine(Offset(center.dx, center.dy + radius - 2), Offset(center.dx, center.dy + radius + tick), tickPaint);
+      final corePaint = Paint()
+        ..color = Colors.white
+        ..style = PaintingStyle.fill;
+      canvas.drawCircle(center, 1.2, corePaint);
       return;
     }
 
     if (effectiveTool == 'colorPicker') {
       // Retículo de conta-gotas / amostragem de cor
-      final outerGlow = Paint()
-        ..color = accentPrimary.withValues(alpha: 0.3)
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 3.0
-        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 3.0);
-      canvas.drawCircle(center, radius, outerGlow);
-
       final ringPaint = Paint()
         ..color = accentPrimary
         ..style = PaintingStyle.stroke
-        ..strokeWidth = 1.5;
+        ..strokeWidth = 1.2;
       canvas.drawCircle(center, radius, ringPaint);
 
       // Ponto de visualização da cor ativa
       final previewPaint = Paint()
         ..color = penColor
         ..style = PaintingStyle.fill;
-      canvas.drawCircle(center, 4.0, previewPaint);
+      canvas.drawCircle(center, 3.5, previewPaint);
 
       final innerBorder = Paint()
         ..color = Colors.white.withValues(alpha: 0.8)
         ..style = PaintingStyle.stroke
-        ..strokeWidth = 1.0;
-      canvas.drawCircle(center, 4.0, innerBorder);
+        ..strokeWidth = 0.8;
+      canvas.drawCircle(center, 3.5, innerBorder);
       return;
     }
 
     if (effectiveTool == 'pan') {
       final panRing = Paint()
-        ..color = accentPrimary.withValues(alpha: 0.7)
+        ..color = accentPrimary.withValues(alpha: 0.6)
         ..style = PaintingStyle.stroke
-        ..strokeWidth = 1.2;
+        ..strokeWidth = 1.0;
       canvas.drawCircle(center, radius, panRing);
 
-      final cross = Paint()
-        ..color = accentPrimary
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 1.5;
-      canvas.drawLine(Offset(center.dx - 4, center.dy), Offset(center.dx + 4, center.dy), cross);
-      canvas.drawLine(Offset(center.dx, center.dy - 4), Offset(center.dx, center.dy + 4), cross);
+      final core = Paint()
+        ..color = Colors.white
+        ..style = PaintingStyle.fill;
+      canvas.drawCircle(center, 1.2, core);
       return;
     }
 
-    // Feedback da Caneta / Formas: Anel correspondente à espessura real do traço
-    final glowPaint = Paint()
-      ..color = penColor.withValues(alpha: 0.30)
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 2.5
-      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 2.5);
-    canvas.drawCircle(center, radius, glowPaint);
-
+    // Feedback da Caneta / Formas: Anel na espessura exata da caneta + micro-ponto de precisão
     final ringPaint = Paint()
-      ..color = penColor
+      ..color = penColor.withValues(alpha: 0.55)
       ..style = PaintingStyle.stroke
-      ..strokeWidth = 1.2;
+      ..strokeWidth = 0.9;
     canvas.drawCircle(center, radius, ringPaint);
 
-    // Retículo de alta precisão no centro
+    // Micro-retículo de alta precisão no centro
     final centerDotPaint = Paint()
       ..color = penColor.computeLuminance() > 0.6 ? Colors.black87 : Colors.white
       ..style = PaintingStyle.fill;
-    canvas.drawCircle(center, 1.4, centerDotPaint);
+    canvas.drawCircle(center, 1.2, centerDotPaint);
   }
 
   @override

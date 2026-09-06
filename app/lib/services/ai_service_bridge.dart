@@ -32,9 +32,9 @@ class AiServiceBridge {
     }
 
     buffer.writeln('9. Sugestões de Continuação: Ao final da resposta, inclua 2 ou 3 sugestões curtas de ações ou perguntas de continuação entre colchetes na última linha no formato exato:');
-    buffer.writeln('   [SUGESTOES: "⚡ Ação 1", "📐 Ação 2", "📊 Ação 3"]');
-    buffer.writeln('   Exemplo para matemática: [SUGESTOES: "⚡ Deduzir passo a passo", "📐 Estruturar em KaTeX", "📊 Esboçar gráfico"]');
-    buffer.writeln('   Exemplo para conceitos: [SUGESTOES: "💡 Exemplo prático", "❓ Testar meu conhecimento"]');
+    buffer.writeln('   [SUGESTOES: "Ação 1", "Ação 2", "Ação 3"]');
+    buffer.writeln('   Exemplo para matemática: [SUGESTOES: "Deduzir passo a passo", "Estruturar em KaTeX", "Esboçar gráfico"]');
+    buffer.writeln('   Exemplo para conceitos: [SUGESTOES: "Exemplo prático", "Testar meu conhecimento"]');
 
     if (scopeContext != null && scopeContext.trim().isNotEmpty) {
       buffer.writeln('\n--- CONTEXTO DO CANVAS ---');
@@ -101,6 +101,25 @@ class AiServiceBridge {
     }
   }
 
+  /// Sanitiza dados base64 de imagem extraindo o MIME type e removendo headers data URI
+  static ({String cleanBase64, String mimeType}) _sanitizeBase64Image(String raw) {
+    String cleanBase64 = raw.trim();
+    String mimeType = 'image/jpeg';
+    if (raw.contains(',')) {
+      final split = raw.split(',');
+      final header = split[0];
+      cleanBase64 = split[1].trim();
+      if (header.contains('image/webp')) {
+        mimeType = 'image/webp';
+      } else if (header.contains('image/png')) {
+        mimeType = 'image/png';
+      } else if (header.contains('image/gif')) {
+        mimeType = 'image/gif';
+      }
+    }
+    return (cleanBase64: cleanBase64, mimeType: mimeType);
+  }
+
   /// Streaming do Google Gemini (com suporte Multimodal a múltiplas imagens e resolução robusta)
   Stream<String> _streamGemini(
     String userPrompt,
@@ -121,10 +140,11 @@ class AiServiceBridge {
     final parts = <Map<String, dynamic>>[];
     if (imagesBase64 != null && imagesBase64.isNotEmpty) {
       for (final img in imagesBase64) {
+        final sanitized = _sanitizeBase64Image(img);
         parts.add({
-          'inlineData': {
-            'mimeType': 'image/png',
-            'data': img,
+          'inline_data': {
+            'mime_type': sanitized.mimeType,
+            'data': sanitized.cleanBase64,
           }
         });
       }
@@ -232,15 +252,19 @@ class AiServiceBridge {
 
     final url = Uri.parse('https://api.openai.com/v1/chat/completions');
 
-    final dynamic userContent = (imageBase64 != null && imageBase64.isNotEmpty)
-        ? [
-            {'type': 'text', 'text': userPrompt},
-            {
-              'type': 'image_url',
-              'image_url': {'url': 'data:image/png;base64,$imageBase64'}
-            }
-          ]
-        : userPrompt;
+    final dynamic userContent;
+    if (imageBase64 != null && imageBase64.isNotEmpty) {
+      final sanitized = _sanitizeBase64Image(imageBase64);
+      userContent = [
+        {'type': 'text', 'text': userPrompt},
+        {
+          'type': 'image_url',
+          'image_url': {'url': 'data:${sanitized.mimeType};base64,${sanitized.cleanBase64}'}
+        }
+      ];
+    } else {
+      userContent = userPrompt;
+    }
 
     final requestBody = jsonEncode({
       'model': modelId,
@@ -317,19 +341,23 @@ class AiServiceBridge {
 
     final url = Uri.parse('https://api.anthropic.com/v1/messages');
 
-    final dynamic userContent = (imageBase64 != null && imageBase64.isNotEmpty)
-        ? [
-            {
-              'type': 'image',
-              'source': {
-                'type': 'base64',
-                'media_type': 'image/png',
-                'data': imageBase64,
-              }
-            },
-            {'type': 'text', 'text': userPrompt}
-          ]
-        : userPrompt;
+    final dynamic userContent;
+    if (imageBase64 != null && imageBase64.isNotEmpty) {
+      final sanitized = _sanitizeBase64Image(imageBase64);
+      userContent = [
+        {
+          'type': 'image',
+          'source': {
+            'type': 'base64',
+            'media_type': sanitized.mimeType,
+            'data': sanitized.cleanBase64,
+          }
+        },
+        {'type': 'text', 'text': userPrompt}
+      ];
+    } else {
+      userContent = userPrompt;
+    }
 
     final requestBody = jsonEncode({
       'model': modelId == 'claude-3-5-sonnet' ? 'claude-3-5-sonnet-20241022' : modelId,

@@ -118,7 +118,7 @@ class _NoteSidebarState extends State<NoteSidebar> {
           duration: const Duration(milliseconds: 350),
           curve: Curves.easeInOutCubic,
           left: widget.isOpen ? 24 : -390,
-          top: 24,
+          top: 48,
           bottom: 24,
           child: SizedBox(
             width: 340,
@@ -726,7 +726,9 @@ class _NoteSidebarState extends State<NoteSidebar> {
     final FontWeight fontWeight = isSelected ? FontWeight.w600 : FontWeight.normal;
     final Color iconColor = isSelected ? themeAccent : MoscaroTokens.textSecondary.withValues(alpha: 0.7);
 
-    return Container(
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 220),
+      curve: Curves.easeOutCubic,
       height: 38,
       margin: EdgeInsets.only(left: indent, bottom: 4),
       decoration: BoxDecoration(
@@ -734,8 +736,17 @@ class _NoteSidebarState extends State<NoteSidebar> {
         borderRadius: BorderRadius.circular(10),
         border: Border.all(
           color: borderColor,
-          width: (isSubnoteHighlight || isSelected) ? 1.2 : 1.0,
+          width: (isSubnoteHighlight || isSelected) ? 1.4 : 1.0,
         ),
+        boxShadow: isSelected
+            ? [
+                BoxShadow(
+                  color: themeAccent.withValues(alpha: 0.25),
+                  blurRadius: 10,
+                  spreadRadius: 0,
+                ),
+              ]
+            : null,
       ),
       child: InkWell(
         onTap: () {

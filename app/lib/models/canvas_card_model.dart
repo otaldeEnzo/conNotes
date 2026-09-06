@@ -1,14 +1,20 @@
 import 'dart:math' as math;
-import 'dart:ui';
 import 'package:flutter/material.dart';
 
 /// Variável global para rastrear se algum campo de texto (bloco, título, etc) está sendo editado.
 /// Utilizada para impedir que atalhos globais (como Delete/Backspace) interfiram na digitação.
 bool globalIsEditingText = false;
 
-/// Modelo de Dados para Cards no Canvas Infinito (Texto, Markdown, LaTeX & Mermaid).
+/// Tipo de Card no Canvas Infinito
+enum CardType {
+  textLatex,
+  media,
+}
+
+/// Modelo de Dados para Cards no Canvas Infinito (Texto, Markdown, LaTeX, Mermaid & Mídia).
 class CanvasCardModel {
   final String id;
+  final CardType cardType;
   String title;
   double x;
   double y;
@@ -24,11 +30,24 @@ class CanvasCardModel {
   bool isPinned;
   bool isCollapsed;
   Color? customGlassColor;
+  String? mediaData;
+  double? originalAspectRatio;
+  bool lockAspectRatio;
+  BoxFit mediaFit;
+  String? caption;
+  bool invertLuminance;
+  bool isDrawOverMode;
+  final double rotation;
+  int imageRotationQuarterTurns;
+  bool isFlippedHorizontal;
+  bool isFlippedVertical;
+  final List<String> attachedStrokeIds;
   final DateTime createdAt;
   DateTime updatedAt;
 
   CanvasCardModel({
     required this.id,
+    this.cardType = CardType.textLatex,
     this.title = 'Card STEM',
     required this.x,
     required this.y,
@@ -44,11 +63,29 @@ class CanvasCardModel {
     this.isPinned = false,
     this.isCollapsed = false,
     this.customGlassColor,
+    this.mediaData,
+    this.originalAspectRatio,
+    this.lockAspectRatio = true,
+    this.mediaFit = BoxFit.contain,
+    this.caption,
+    this.invertLuminance = false,
+    this.isDrawOverMode = false,
+    this.rotation = 0.0,
+    this.imageRotationQuarterTurns = 0,
+    this.isFlippedHorizontal = false,
+    this.isFlippedVertical = false,
+    this.attachedStrokeIds = const [],
     DateTime? createdAt,
     DateTime? updatedAt,
   })  : _manualMinHeight = minHeight,
         createdAt = createdAt ?? DateTime.now(),
         updatedAt = updatedAt ?? DateTime.now();
+
+  /// Alias de tipo de card
+  CardType get type => cardType;
+
+  /// Centro geométrico do card no espaço do canvas
+  Offset get center => Offset(x + width / 2.0, y + height / 2.0);
 
   /// Retorna a altura mínima requerida para acomodar todo o conteúdo sem barras de rolagem
   double get minHeight => calculateMinHeight();
@@ -60,6 +97,10 @@ class CanvasCardModel {
   /// perfeitamente sem gerar barras de rolagem (scroll) ou avisos de overflow.
   double calculateMinHeight() {
     if (isCollapsed) return 36.0;
+
+    if (cardType == CardType.media) {
+      return 100.0;
+    }
 
     const headerHeight = 36.0;
     const paddingVertical = 24.0; // 8px topo + 8px base + respiro
@@ -160,8 +201,49 @@ class CanvasCardModel {
     return math.max(110.0, totalMin);
   }
 
+  /// Gira o conteúdo da imagem em múltiplos de 90° e inverte largura e altura
+  /// mantendo rigorosamente o centro geométrico no mesmo ponto da tela/canvas.
+  void rotateQuarterTurns(int delta) {
+    imageRotationQuarterTurns = (imageRotationQuarterTurns + delta) % 4;
+    if (imageRotationQuarterTurns < 0) {
+      imageRotationQuarterTurns += 4;
+    }
+
+    if (delta % 2 != 0) {
+      // Troca largura e altura
+      final oldW = width;
+      final oldH = height;
+      final newW = oldH;
+      final newH = oldW;
+
+      // Deslocamento para manter o centro invariante
+      x += (oldW - newW) / 2.0;
+      y += (oldH - newH) / 2.0;
+      width = newW;
+      height = newH;
+
+      if (originalAspectRatio != null && originalAspectRatio! > 0) {
+        originalAspectRatio = 1.0 / originalAspectRatio!;
+      }
+    }
+    updatedAt = DateTime.now();
+  }
+
+  /// Alterna o espelhamento horizontal da mídia
+  void toggleFlipHorizontal() {
+    isFlippedHorizontal = !isFlippedHorizontal;
+    updatedAt = DateTime.now();
+  }
+
+  /// Alterna o espelhamento vertical da mídia
+  void toggleFlipVertical() {
+    isFlippedVertical = !isFlippedVertical;
+    updatedAt = DateTime.now();
+  }
+
   CanvasCardModel copyWith({
     String? id,
+    CardType? cardType,
     String? title,
     double? x,
     double? y,
@@ -177,11 +259,24 @@ class CanvasCardModel {
     bool? isPinned,
     bool? isCollapsed,
     Color? customGlassColor,
+    String? mediaData,
+    double? originalAspectRatio,
+    bool? lockAspectRatio,
+    BoxFit? mediaFit,
+    String? caption,
+    bool? invertLuminance,
+    bool? isDrawOverMode,
+    double? rotation,
+    int? imageRotationQuarterTurns,
+    bool? isFlippedHorizontal,
+    bool? isFlippedVertical,
+    List<String>? attachedStrokeIds,
     DateTime? createdAt,
     DateTime? updatedAt,
   }) {
     return CanvasCardModel(
       id: id ?? this.id,
+      cardType: cardType ?? this.cardType,
       title: title ?? this.title,
       x: x ?? this.x,
       y: y ?? this.y,
@@ -197,6 +292,18 @@ class CanvasCardModel {
       isPinned: isPinned ?? this.isPinned,
       isCollapsed: isCollapsed ?? this.isCollapsed,
       customGlassColor: customGlassColor ?? this.customGlassColor,
+      mediaData: mediaData ?? this.mediaData,
+      originalAspectRatio: originalAspectRatio ?? this.originalAspectRatio,
+      lockAspectRatio: lockAspectRatio ?? this.lockAspectRatio,
+      mediaFit: mediaFit ?? this.mediaFit,
+      caption: caption ?? this.caption,
+      invertLuminance: invertLuminance ?? this.invertLuminance,
+      isDrawOverMode: isDrawOverMode ?? this.isDrawOverMode,
+      rotation: rotation ?? this.rotation,
+      imageRotationQuarterTurns: imageRotationQuarterTurns ?? this.imageRotationQuarterTurns,
+      isFlippedHorizontal: isFlippedHorizontal ?? this.isFlippedHorizontal,
+      isFlippedVertical: isFlippedVertical ?? this.isFlippedVertical,
+      attachedStrokeIds: attachedStrokeIds ?? this.attachedStrokeIds,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? DateTime.now(),
     );
@@ -205,6 +312,7 @@ class CanvasCardModel {
   Map<String, dynamic> toMap() {
     return {
       'id': id,
+      'cardType': cardType.name,
       'title': title,
       'x': x,
       'y': y,
@@ -220,10 +328,26 @@ class CanvasCardModel {
       'isPinned': isPinned,
       'isCollapsed': isCollapsed,
       'customGlassColor': customGlassColor?.toARGB32(),
+      'mediaData': mediaData,
+      'originalAspectRatio': originalAspectRatio,
+      'lockAspectRatio': lockAspectRatio,
+      'mediaFit': mediaFit.name,
+      'caption': caption,
+      'invertLuminance': invertLuminance,
+      'isDrawOverMode': isDrawOverMode,
+      'rotation': rotation,
+      'imageRotationQuarterTurns': imageRotationQuarterTurns,
+      'isFlippedHorizontal': isFlippedHorizontal,
+      'isFlippedVertical': isFlippedVertical,
+      'attachedStrokeIds': attachedStrokeIds,
       'createdAt': createdAt.toIso8601String(),
       'updatedAt': updatedAt.toIso8601String(),
     };
   }
+
+  Map<String, dynamic> toJson() => toMap();
+
+  factory CanvasCardModel.fromJson(Map<String, dynamic> json) => CanvasCardModel.fromMap(json);
 
   factory CanvasCardModel.fromMap(Map<String, dynamic> map) {
     TextAlign parsedAlign = TextAlign.left;
@@ -236,9 +360,30 @@ class CanvasCardModel {
       }
     }
 
+    CardType parsedType = CardType.textLatex;
+    if (map['cardType'] != null) {
+      for (final t in CardType.values) {
+        if (t.name == map['cardType']) {
+          parsedType = t;
+          break;
+        }
+      }
+    }
+
+    BoxFit parsedFit = BoxFit.contain;
+    if (map['mediaFit'] != null) {
+      for (final f in BoxFit.values) {
+        if (f.name == map['mediaFit']) {
+          parsedFit = f;
+          break;
+        }
+      }
+    }
+
     return CanvasCardModel(
       id: map['id']?.toString() ?? 'card_${DateTime.now().millisecondsSinceEpoch}',
-      title: map['title']?.toString() ?? 'Card STEM',
+      cardType: parsedType,
+      title: map['title']?.toString() ?? (parsedType == CardType.media ? 'Media' : 'Card STEM'),
       x: (map['x'] as num?)?.toDouble() ?? 100.0,
       y: (map['y'] as num?)?.toDouble() ?? 100.0,
       width: (map['width'] as num?)?.toDouble() ?? 340.0,
@@ -253,6 +398,21 @@ class CanvasCardModel {
       isPinned: map['isPinned'] == true,
       isCollapsed: map['isCollapsed'] == true,
       customGlassColor: map['customGlassColor'] != null ? Color(map['customGlassColor'] as int) : null,
+      mediaData: map['mediaData']?.toString(),
+      originalAspectRatio: (map['originalAspectRatio'] as num?)?.toDouble(),
+      lockAspectRatio: map['lockAspectRatio'] ?? true,
+      mediaFit: parsedFit,
+      caption: map['caption']?.toString(),
+      invertLuminance: map['invertLuminance'] == true,
+      isDrawOverMode: map['isDrawOverMode'] == true,
+      rotation: (map['rotation'] as num?)?.toDouble() ?? 0.0,
+      imageRotationQuarterTurns: (map['imageRotationQuarterTurns'] as num?)?.toInt() ?? 0,
+      isFlippedHorizontal: map['isFlippedHorizontal'] == true,
+      isFlippedVertical: map['isFlippedVertical'] == true,
+      attachedStrokeIds: (map['attachedStrokeIds'] as List<dynamic>?)
+              ?.map((e) => e.toString())
+              .toList() ??
+          const [],
       createdAt: map['createdAt'] != null ? DateTime.tryParse(map['createdAt'].toString()) : null,
       updatedAt: map['updatedAt'] != null ? DateTime.tryParse(map['updatedAt'].toString()) : null,
     );

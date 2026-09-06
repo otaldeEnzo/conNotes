@@ -100,6 +100,15 @@ class _FakeCanvasInputContext implements CanvasInputContext {
   @override
   CanvasCardModel? findCardAtPoint(Offset canvasPoint) => null;
 
+  String? lastAttachedCardId;
+  String? lastAttachedStrokeId;
+
+  @override
+  void attachStrokeToCard(String cardId, String strokeId) {
+    lastAttachedCardId = cardId;
+    lastAttachedStrokeId = strokeId;
+  }
+
   @override
   void hideUIElementsOnInteraction() {}
 
@@ -312,6 +321,73 @@ void main() {
     expect(fakeContext.selectedCardId, equals('card_touch_test'));
   });
 
+  testWidgets('CanvasInputRouter allows drawing strokes over media card when isDrawOverMode is true', (WidgetTester tester) async {
+    final fakeContext = _FakeCanvasInputContext();
+    final mediaCard = CanvasCardModel(
+      id: 'card_media_draw_over',
+      cardType: CardType.media,
+      isDrawOverMode: true,
+      x: 50,
+      y: 50,
+      width: 300,
+      height: 200,
+      title: 'Media Card',
+    );
+    fakeContext.currentNote?.cards.add(mediaCard);
+
+    final strokeUpdateNotifier = ValueNotifier<int>(0);
+    final selectionUpdateNotifier = ValueNotifier<int>(0);
+    final panNotifier = ValueNotifier<Offset>(Offset.zero);
+    final zoomNotifier = ValueNotifier<double>(1.0);
+
+    const activePenPreset = PenSlotPreset(
+      id: 'slot_1',
+      name: 'Pen',
+      color: Colors.white,
+      strokeWidth: 2.0,
+    );
+
+    bool strokeCommitted = false;
+    InkStroke? committedStroke;
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: CanvasInputRouter(
+            canvasContext: fakeContext,
+            activePenPreset: activePenPreset,
+            activeStrokeUpdateNotifier: strokeUpdateNotifier,
+            selectionUpdateNotifier: selectionUpdateNotifier,
+            panNotifier: panNotifier,
+            zoomNotifier: zoomNotifier,
+            onCommitStroke: (s) {
+              strokeCommitted = true;
+              committedStroke = s;
+            },
+            onScheduleBounceCheck: () {},
+            child: Container(color: Colors.black),
+          ),
+        ),
+      ),
+    );
+
+    // Draw on top of the media card at (100, 100) -> (120, 120)
+    final gesture = await tester.createGesture(kind: PointerDeviceKind.mouse);
+    await gesture.down(const Offset(100, 100));
+    await tester.pump();
+    await gesture.moveTo(const Offset(120, 120));
+    await tester.pump();
+    await gesture.up();
+    await gesture.removePointer();
+    await tester.pump();
+
+    // Stroke SHOULD be committed and attached to the media card
+    expect(strokeCommitted, isTrue);
+    expect(committedStroke, isNotNull);
+    expect(fakeContext.lastAttachedCardId, equals('card_media_draw_over'));
+    expect(fakeContext.lastAttachedStrokeId, equals(committedStroke!.id));
+  });
+
   testWidgets('CanvasInputRouter handles Middle Click (buttons == 4) Pan immediately', (WidgetTester tester) async {
     final fakeContext = _FakeCanvasInputContext();
     final strokeUpdateNotifier = ValueNotifier<int>(0);
@@ -446,6 +522,58 @@ void main() {
 
     await stylus.up();
     await stylus.removePointer();
+    await tester.pump();
+  });
+
+  testWidgets('Mouse events do NOT trigger stylus secondary barrel actions such as selectionLasso', (WidgetTester tester) async {
+    final fakeContext = _FakeCanvasInputContext();
+    fakeContext.activeTool = 'pen';
+    final strokeUpdateNotifier = ValueNotifier<int>(0);
+    final selectionUpdateNotifier = ValueNotifier<int>(0);
+    final panNotifier = ValueNotifier<Offset>(Offset.zero);
+    final zoomNotifier = ValueNotifier<double>(1.0);
+
+    const activePenPreset = PenSlotPreset(
+      id: 'slot_1',
+      name: 'Pen',
+      color: Colors.white,
+      strokeWidth: 2.0,
+    );
+
+    SettingsService.instance.updateSettingsInMemory(const AppSettingsState(
+      stylusSecondaryBarrelAction: StylusBarrelAction.selectionLasso,
+      stylusSecondaryTriggerMode: StylusTriggerMode.hold,
+    ));
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: CanvasInputRouter(
+            canvasContext: fakeContext,
+            activePenPreset: activePenPreset,
+            activeStrokeUpdateNotifier: strokeUpdateNotifier,
+            selectionUpdateNotifier: selectionUpdateNotifier,
+            panNotifier: panNotifier,
+            zoomNotifier: zoomNotifier,
+            onCommitStroke: (_) {},
+            onScheduleBounceCheck: () {},
+            child: Container(color: Colors.black),
+          ),
+        ),
+      ),
+    );
+
+    // Mouse click with auxiliary button (e.g. 0x08 or middle click) must NOT trigger lasso selection
+    final mouseGesture = await tester.createGesture(kind: PointerDeviceKind.mouse, buttons: 0x08);
+    await mouseGesture.down(const Offset(200, 200));
+    await tester.pump();
+
+    // Selection must remain empty
+    expect(fakeContext.selectionState.hasSelection, isFalse);
+    expect(fakeContext.selectionState.selectedStrokeIds.isEmpty, isTrue);
+
+    await mouseGesture.up();
+    await mouseGesture.removePointer();
     await tester.pump();
   });
 }

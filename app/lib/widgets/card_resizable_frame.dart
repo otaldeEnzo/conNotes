@@ -2,6 +2,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import '../models/canvas_card_model.dart';
 import '../services/cards_telemetry_controller.dart';
+import 'infinite_hit_test_stack.dart';
 
 typedef ResizableFrameBuilder = Widget Function(
   BuildContext context,
@@ -93,29 +94,66 @@ class _CardResizableFrameState extends State<CardResizableFrame> {
     double newWidth = _initialWidth!;
     double newHeight = _initialHeight!;
 
-    if (isRight || isCorner) {
-      newWidth = (_initialWidth! + delta.dx).clamp(200.0, 1600.0);
-      if (_lastDragMeasuredWidth == null || (newWidth - _lastDragMeasuredWidth!).abs() >= 4.0) {
-        _cachedDragMinHeight = widget.card.copyWith(width: newWidth).calculateMinHeight();
-        _lastDragMeasuredWidth = newWidth;
+    final isMedia = widget.card.cardType == CardType.media;
+
+    if (isMedia) {
+      // Cards de mídia: esticamento livre e independente por aresta (zero dependência cruzada)
+      const minMediaWidth = 140.0;
+      const minMediaHeight = 100.0;
+
+      if (isCorner) {
+        // Redimensionamento livre no vértice (idêntico aos rabiscos/traços):
+        newWidth = (_initialWidth! + delta.dx).clamp(minMediaWidth, 2400.0);
+        newHeight = (_initialHeight! + delta.dy).clamp(minMediaHeight, 2400.0);
+      } else if (isRight) {
+        // Redimensiona estritamente a largura; altura permanece intocada
+        newWidth = (_initialWidth! + delta.dx).clamp(minMediaWidth, 2400.0);
+        newHeight = _initialHeight!;
+      } else if (isBottom) {
+        // Redimensiona estritamente a altura; largura permanece intocada
+        newHeight = (_initialHeight! + delta.dy).clamp(minMediaHeight, 2400.0);
+        newWidth = _initialWidth!;
       }
-    }
-    final dynamicMinHeight = _cachedDragMinHeight ?? _cachedStaticMinHeight ?? widget.card.calculateMinHeight();
-    final dynamicMinArea = widget.card.minArea;
-
-    if (isBottom || isCorner) {
-      newHeight = (_initialHeight! + delta.dy).clamp(dynamicMinHeight, 2400.0);
+    } else if (widget.card.lockAspectRatio &&
+        widget.card.originalAspectRatio != null &&
+        widget.card.originalAspectRatio! > 0) {
+      final ratio = widget.card.originalAspectRatio!;
+      if (isCorner) {
+        final avgDelta = (delta.dx + (delta.dy * ratio)) / 2.0;
+        newWidth = (_initialWidth! + avgDelta).clamp(120.0, 2400.0);
+        newHeight = (newWidth / ratio).clamp(60.0, 2400.0);
+      } else if (isRight) {
+        newWidth = (_initialWidth! + delta.dx).clamp(120.0, 2400.0);
+        newHeight = (newWidth / ratio).clamp(60.0, 2400.0);
+      } else if (isBottom) {
+        newHeight = (_initialHeight! + delta.dy).clamp(60.0, 2400.0);
+        newWidth = (newHeight * ratio).clamp(120.0, 2400.0);
+      }
     } else {
-      newHeight = math.max(newHeight, dynamicMinHeight);
-    }
+      if (isRight || isCorner) {
+        newWidth = (_initialWidth! + delta.dx).clamp(200.0, 1600.0);
+        if (_lastDragMeasuredWidth == null || (newWidth - _lastDragMeasuredWidth!).abs() >= 4.0) {
+          _cachedDragMinHeight = widget.card.copyWith(width: newWidth).calculateMinHeight();
+          _lastDragMeasuredWidth = newWidth;
+        }
+      }
+      final dynamicMinHeight = _cachedDragMinHeight ?? _cachedStaticMinHeight ?? widget.card.calculateMinHeight();
+      final dynamicMinArea = widget.card.minArea;
 
-    if (newWidth * newHeight < dynamicMinArea) {
-      if (isRight && !isCorner) {
-        newHeight = math.max(newHeight, dynamicMinArea / newWidth);
-      } else if (isBottom && !isCorner) {
-        newWidth = math.max(newWidth, dynamicMinArea / newHeight);
+      if (isBottom || isCorner) {
+        newHeight = (_initialHeight! + delta.dy).clamp(dynamicMinHeight, 2400.0);
       } else {
-        newHeight = math.max(newHeight, dynamicMinArea / newWidth);
+        newHeight = math.max(newHeight, dynamicMinHeight);
+      }
+
+      if (newWidth * newHeight < dynamicMinArea) {
+        if (isRight && !isCorner) {
+          newHeight = math.max(newHeight, dynamicMinArea / newWidth);
+        } else if (isBottom && !isCorner) {
+          newWidth = math.max(newWidth, dynamicMinArea / newHeight);
+        } else {
+          newHeight = math.max(newHeight, dynamicMinArea / newWidth);
+        }
       }
     }
 
@@ -132,13 +170,22 @@ class _CardResizableFrameState extends State<CardResizableFrame> {
     CardsTelemetryController.instance.endCardResize();
     if (_dragSizeNotifier.value != null) {
       final finalWidth = _dragSizeNotifier.value!.width;
-      final dynamicMin = widget.card.copyWith(width: finalWidth).calculateMinHeight();
-      final dynamicMinArea = widget.card.minArea;
-      double finalHeight = math.max(_dragSizeNotifier.value!.height, dynamicMin);
-      if (finalWidth * finalHeight < dynamicMinArea) {
-        finalHeight = math.max(finalHeight, dynamicMinArea / finalWidth);
+      double finalHeight = _dragSizeNotifier.value!.height;
+
+      if (widget.card.cardType != CardType.media) {
+        final dynamicMin = widget.card.copyWith(width: finalWidth).calculateMinHeight();
+        final dynamicMinArea = widget.card.minArea;
+        finalHeight = math.max(finalHeight, dynamicMin);
+        if (widget.card.lockAspectRatio &&
+            widget.card.originalAspectRatio != null &&
+            widget.card.originalAspectRatio! > 0) {
+          finalHeight = finalWidth / widget.card.originalAspectRatio!;
+        } else if (finalWidth * finalHeight < dynamicMinArea) {
+          finalHeight = math.max(finalHeight, dynamicMinArea / finalWidth);
+        }
+        _cachedStaticMinHeight = dynamicMin;
       }
-      _cachedStaticMinHeight = dynamicMin;
+
       widget.onUpdateCard(widget.card.copyWith(
         width: finalWidth,
         height: finalHeight,
@@ -177,10 +224,10 @@ class _CardResizableFrameState extends State<CardResizableFrame> {
         const cornerSize = 24.0;
         const edgeThickness = 12.0;
 
-        return SizedBox(
+        return InfiniteHitTestSizedBox(
           width: currentWidth,
           height: currentHeight + 60.0,
-          child: Stack(
+          child: InfiniteHitTestStack(
             clipBehavior: Clip.none,
             children: [
               // 1. O filho encapsulado recebe as restrições completas
