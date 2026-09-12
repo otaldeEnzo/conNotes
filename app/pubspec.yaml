@@ -21,6 +21,8 @@ dependencies:
   http: ^1.2.0
   pasteboard: ^0.5.0
   image: ^4.3.0
+  path_provider: ^2.1.2
+  path: ^1.9.0
 
 dev_dependencies:
   flutter_test:
@@ -34,3 +36,4 @@ flutter:
     - assets/icons/
   shaders:
     - shaders/kawase_blur.frag
+

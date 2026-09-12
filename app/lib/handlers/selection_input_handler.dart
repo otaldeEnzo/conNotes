@@ -6,7 +6,6 @@ import '../widgets/ink_models.dart';
 import '../widgets/note_models.dart';
 import '../widgets/selection_overlay_painter.dart';
 import '../widgets/canvas_layers.dart';
-import '../widgets/canvas_card_widget.dart';
 
 class SelectionInputHandler {
   final ValueNotifier<int> selectionUpdateNotifier;
@@ -96,7 +95,6 @@ class SelectionInputHandler {
     if (selectionState.isDraggingSelection) {
       final delta = canvasPoint - selectionStartCanvasPoint!;
       onUpdateState(selectionState.copyWith(dragOffset: delta));
-      selectionUpdateNotifier.value++;
       return;
     }
 

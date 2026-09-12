@@ -7,10 +7,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart' show RenderRepaintBoundary;
 import 'package:flutter/services.dart';
 import 'package:flutter/scheduler.dart';
-import '../main.dart' show rootKeyNotifier;
 import 'moscaro_window_title_bar.dart';
 import '../controllers/canvas_input_context.dart';
-import '../controllers/canvas_workspace_state.dart';
 import 'canvas_input_router.dart';
 import 'canvas_layer_stack.dart';
 import '../theme/moscaro_v2_tokens.dart';
@@ -39,34 +37,39 @@ import 'stem_protractor_model.dart';
 import 'ruler_sub_bar.dart';
 import 'settings_models.dart';
 import 'settings_tab_bar.dart';
-import 'settings_page_view.dart';
 import '../theme/moscaro_theme_controller.dart';
 import '../services/settings_service.dart';
 import '../services/workspace_storage_service.dart';
 import 'undo_commands.dart';
 import '../dev_hub/dev_hub_server.dart';
 import '../models/canvas_card_model.dart';
+import 'media_lightbox_modal.dart';
 import 'cards_sub_bar.dart';
 import '../models/ai_message_model.dart';
 import '../models/ai_provider_models.dart';
 import '../services/ai_service_bridge.dart';
 import 'cards_debug_overlay.dart';
 import '../services/cards_telemetry_controller.dart';
-import 'package:pasteboard/pasteboard.dart';
 import 'package:file_picker/file_picker.dart';
 import '../services/media_compression_service.dart';
 import 'canvas_area_selection_overlay.dart';
 import 'debug/performance_debug_hud.dart';
 import '../services/diagnostics_override_controller.dart';
 import '../services/vm_service_client.dart';
+import '../services/canvas_clipboard_service.dart';
+import '../services/canvas_media_ocr_service.dart';
+import '../controllers/pen_slots_controller.dart';
+import 'settings_overlay_view.dart';
 
 class CanvasHomeScreen extends StatefulWidget {
   final NoteDocument? initialNote;
-  final VoidCallback? onBackToHome;
+  final List<String>? initialOpenNoteIds;
+  final void Function(List<String> activeTabIds)? onBackToHome;
 
   const CanvasHomeScreen({
     super.key,
     this.initialNote,
+    this.initialOpenNoteIds,
     this.onBackToHome,
   });
 
@@ -108,14 +111,9 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
   bool get _isPenSubBarVisible => _isPenSubBarVisibleNotifier.value;
   set _isPenSubBarVisible(bool val) => _isPenSubBarVisibleNotifier.value = val;
 
-  final List<PenSlotPreset> _penSlots = [
-    const PenSlotPreset(id: '1', name: 'Branco Técnico', color: Colors.white, strokeWidth: 2.5, toolType: InkToolType.technical, enablePressure: true),
-    const PenSlotPreset(id: '2', name: 'Ciano Neon', color: Color(0xFF00E1FF), strokeWidth: 3.0, toolType: InkToolType.technical, enablePressure: true),
-    const PenSlotPreset(id: '3', name: 'Rosa Neon', color: Color(0xFFFF007A), strokeWidth: 3.5, toolType: InkToolType.fountain, enablePressure: true),
-    const PenSlotPreset(id: '4', name: 'Roxo Grafite', color: Color(0xFFA855F7), strokeWidth: 2.5, toolType: InkToolType.pencil, enablePressure: true),
-    const PenSlotPreset(id: '5', name: 'Marca-Texto', color: Color(0xFFF59E0B), strokeWidth: 6.0, toolType: InkToolType.highlighter, enablePressure: false),
-  ];
-  late String _activeSlotId;
+  List<PenSlotPreset> get _penSlots => PenSlotsController.instance.slots;
+  String get _activeSlotId => PenSlotsController.instance.activeSlotId;
+  set _activeSlotId(String id) => PenSlotsController.instance.selectSlot(id);
 
   // Histórico Universal de Desfazer/Refazer (Command Pattern)
   final AppUndoManager _undoManager = AppUndoManager();
@@ -128,7 +126,7 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
   bool _isAiStreaming = false;
   AiModelDefinition _activeAiModel = AiModelDefinition.allModels.first;
   AiScopeType _activeAiScope = AiScopeType.activeNote;
-  bool _isDebugCardsOverlayVisible = true;
+  bool _isDebugCardsOverlayVisible = false;
   final GlobalKey<AiSidebarState> _aiSidebarKey = GlobalKey<AiSidebarState>();
   final GlobalKey _canvasRepaintBoundaryKey = GlobalKey();
   bool _isSelectingAreaForAi = false;
@@ -306,8 +304,7 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
     });
   }
 
-  List<InkStroke> _clipboardStrokes = [];
-  List<CanvasCardModel> _clipboardCards = [];
+  // Clipboard gerenciado pelo CanvasClipboardService isolado
   int _globalCounter = 0;
   Timer? _telemetrySyncTimer;
   final Map<String, InkStroke> _pendingErasures = {};
@@ -324,6 +321,7 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
 
   void _loadSavedSettings() async {
     final loaded = await SettingsService.instance.loadSettings();
+    PenSlotsController.instance.initialize(loaded);
     MoscaroTokens.blurSigma = loaded.blurSigma;
     MoscaroThemeController.instance.initialize(
       themeId: loaded.activeThemeId,
@@ -360,7 +358,16 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
           _notes.addAll(allNotes);
           final target = widget.initialNote ?? allNotes.first;
           _activeNoteIds.clear();
-          _activeNoteIds.add(target.id);
+          if (widget.initialOpenNoteIds != null && widget.initialOpenNoteIds!.isNotEmpty) {
+            for (final id in widget.initialOpenNoteIds!) {
+              if (allNotes.any((n) => n.id == id) && !_activeNoteIds.contains(id)) {
+                _activeNoteIds.add(id);
+              }
+            }
+          }
+          if (!_activeNoteIds.contains(target.id)) {
+            _activeNoteIds.add(target.id);
+          }
           _selectedNoteId = target.id;
           _panNotifier.value = Offset(target.panX, target.panY);
           _zoomNotifier.value = target.zoomScale;
@@ -396,6 +403,11 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
     );
     setState(() {
       _settings = mergedSettings;
+      if (_currentNote != null) {
+        _currentNote?.pictureCache.invalidatePictures();
+      }
+      _committedStrokesNotifier.value++;
+      _canvasUpdateNotifier.value++;
     });
     SettingsService.instance.saveSettings(mergedSettings);
   }
@@ -464,7 +476,6 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
     _loadSavedSettings();
 
     _laserEngine.init(this);
-    _activeSlotId = _penSlots.first.id;
     HardwareKeyboard.instance.addHandler(_handleKeyEvent);
 
     _bounceController = AnimationController(
@@ -505,7 +516,6 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
 
     // Observador Dinâmico de Temas para atualização em 0ms de traços e UI
     MoscaroThemeController.instance.addListener(_handleThemeChanged);
-    SettingsService.instance.settingsNotifier.addListener(_handleThemeChanged);
   }
 
   void _switchToNote(NoteDocument targetNote) {
@@ -521,6 +531,7 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
     _activeStroke = null;
     _panNotifier.value = Offset(targetNote.panX, targetNote.panY);
     _zoomNotifier.value = targetNote.zoomScale;
+    _currentBackground = targetNote.backgroundType;
     _strokesVersion++;
     _committedStrokesNotifier.value++;
     _selectionUpdateNotifier.value++;
@@ -530,6 +541,13 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
   @override
   void didUpdateWidget(covariant CanvasHomeScreen oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (widget.initialOpenNoteIds != null && widget.initialOpenNoteIds!.isNotEmpty) {
+      for (final id in widget.initialOpenNoteIds!) {
+        if (!_activeNoteIds.contains(id)) {
+          _activeNoteIds.add(id);
+        }
+      }
+    }
     if (widget.initialNote != null && widget.initialNote?.id != _selectedNoteId) {
       setState(() {
         _switchToNote(widget.initialNote!);
@@ -886,50 +904,11 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
   void _copy() {
     final note = _currentNote;
     if (note == null) return;
-
-    _clipboardCards.clear();
-    _clipboardStrokes.clear();
-
-    // 1. Cards selecionados
-    final selectedCards = <CanvasCardModel>[];
-    if (_selectionState.selectedCardIds.isNotEmpty) {
-      for (final cardId in _selectionState.selectedCardIds) {
-        final c = note.cards.cast<CanvasCardModel?>().firstWhere((card) => card?.id == cardId, orElse: () => null);
-        if (c != null) selectedCards.add(c);
-      }
-    } else if (_selectedCardId != null) {
-      final c = note.cards.cast<CanvasCardModel?>().firstWhere((card) => card?.id == _selectedCardId, orElse: () => null);
-      if (c != null) selectedCards.add(c);
-    }
-
-    // 2. Traços selecionados
-    final selectedStrokes = <InkStroke>[];
-    if (_selectionState.selectedStrokeIds.isNotEmpty) {
-      for (final strokeId in _selectionState.selectedStrokeIds) {
-        final s = note.getStroke(strokeId);
-        if (s != null) selectedStrokes.add(s);
-      }
-    }
-
-    _clipboardCards = List<CanvasCardModel>.from(selectedCards);
-    _clipboardStrokes = List<InkStroke>.from(selectedStrokes);
-
-    // Se um card de mídia estiver selecionado, copia a imagem para a área de transferência do sistema
-    if (_selectedCardId != null) {
-      final c = note.cards.cast<CanvasCardModel?>().firstWhere((card) => card?.id == _selectedCardId, orElse: () => null);
-      if (c != null && c.cardType == CardType.media && c.mediaData != null && c.mediaData!.isNotEmpty) {
-        try {
-          String raw = c.mediaData!;
-          if (raw.startsWith('data:') && raw.contains(',')) {
-            raw = raw.split(',').last;
-          }
-          final bytes = base64Decode(raw);
-          Pasteboard.writeImage(bytes);
-        } catch (_) {}
-      }
-    }
-
-    DevHubServer.instance.logAction('Copiar (${_clipboardCards.length} cards, ${_clipboardStrokes.length} traços)');
+    CanvasClipboardService.instance.copy(
+      note: note,
+      selectionState: _selectionState,
+      selectedCardId: _selectedCardId,
+    );
   }
 
   Future<void> _paste() async {
@@ -939,153 +918,27 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
     final mousePos = _mousePosNotifier.value ?? const Offset(400, 300);
     final canvasMousePos = (mousePos - _panOffset) / _zoomScale;
 
-    // 1. Verificar se a área de transferência do sistema contém uma imagem
-    try {
-      final clipboardImage = await Pasteboard.image;
-      if (clipboardImage != null && clipboardImage.isNotEmpty) {
-        final compressed = await MediaCompressionService.compressImageBytes(clipboardImage);
-        if (compressed != null) {
-          final nowMicro = DateTime.now().microsecondsSinceEpoch;
-          final newId = 'card_media_${nowMicro}_${_globalCounter++}';
+    final result = await CanvasClipboardService.instance.paste(
+      note: note,
+      canvasMousePos: canvasMousePos,
+      zoomScale: _zoomScale,
+      selectionType: _selectionType,
+      undoManager: _undoManager,
+      ingestStrokesAdaptively: _ingestStrokesAdaptively,
+    );
 
-          // Dimensionamento dinâmico baseado no zoom do canvas (_zoomScale)
-          final visualDesiredWidth = 420.0;
-          final zoomScaledWidth = visualDesiredWidth / (_zoomScale > 0 ? _zoomScale : 1.0);
-          final targetWidth = zoomScaledWidth.clamp(160.0, 1400.0);
-          final targetHeight = compressed.aspectRatio > 0
-              ? (targetWidth / compressed.aspectRatio)
-              : 220.0;
-
-          final newCard = CanvasCardModel(
-            id: newId,
-            cardType: CardType.media,
-            title: 'Mídia',
-            mediaData: compressed.dataUri,
-            originalAspectRatio: compressed.aspectRatio,
-            lockAspectRatio: true,
-            x: canvasMousePos.dx - (targetWidth / 2),
-            y: canvasMousePos.dy - (targetHeight / 2),
-            width: targetWidth,
-            height: targetHeight,
-          );
-
-          _undoManager.pushCommand(
-            AddCardCommand(newCard),
-            execute: true,
-            note: note,
-          );
-
-          setState(() {
-            _selectedCardId = newCard.id;
-            _activeTool = 'select';
-          });
-          WorkspaceStorageService.instance.scheduleAutoSave(note);
-          DevHubServer.instance.logAction('Colar Mídia (${compressed.byteSize ~/ 1024} KB)');
-          return;
-        }
-      }
-    } catch (e) {
-      debugPrint('[_paste] Erro ao obter imagem da área de transferência: $e');
+    if (result != null && mounted) {
+      setState(() {
+        _strokesVersion++;
+        _committedStrokesNotifier.value++;
+        _activeTool = 'select';
+        _isPenSubBarVisible = false;
+        _selectedCardId = result.singleSelectedCardId;
+        _selectionState = result.newSelectionState;
+      });
+      _selectionUpdateNotifier.value++;
     }
-
-    if (_clipboardCards.isEmpty && _clipboardStrokes.isEmpty) return;
-
-    // Calcular bounding box combinado da área copiada
-    double minX = double.infinity, minY = double.infinity;
-    double maxX = -double.infinity, maxY = -double.infinity;
-
-    for (final c in _clipboardCards) {
-      if (c.x < minX) minX = c.x;
-      if (c.y < minY) minY = c.y;
-      if (c.x + c.width > maxX) maxX = c.x + c.width;
-      if (c.y + c.height > maxY) maxY = c.y + c.height;
-    }
-    for (final s in _clipboardStrokes) {
-      final b = s.boundingBox ?? SelectionGeometry.computeStrokeBounds(s);
-      if (b.left < minX) minX = b.left;
-      if (b.top < minY) minY = b.top;
-      if (b.right > maxX) maxX = b.right;
-      if (b.bottom > maxY) maxY = b.bottom;
-    }
-
-    final Rect originalBounds = (minX.isFinite && minY.isFinite)
-        ? Rect.fromLTRB(minX, minY, maxX, maxY)
-        : Rect.fromLTWH(0, 0, 300, 200);
-
-    final offsetToMouse = canvasMousePos.dx > 0
-        ? (canvasMousePos - originalBounds.center)
-        : const Offset(30.0, 30.0);
-
-    final nowMicro = DateTime.now().microsecondsSinceEpoch;
-    final allNewCards = <CanvasCardModel>[];
-    final allNewCardIds = <String>{};
-    final allNewStrokes = <InkStroke>[];
-    final allNewStrokeIds = <String>{};
-
-    for (var i = 0; i < _clipboardCards.length; i++) {
-      final c = _clipboardCards[i];
-      final newId = 'card_${nowMicro}_${_globalCounter++}_$i';
-      final clone = c.copyWith(
-        id: newId,
-        x: c.x + offsetToMouse.dx,
-        y: c.y + offsetToMouse.dy,
-      );
-      allNewCards.add(clone);
-      allNewCardIds.add(newId);
-    }
-
-    for (var i = 0; i < _clipboardStrokes.length; i++) {
-      final s = _clipboardStrokes[i];
-      final newId = '${nowMicro}_${_globalCounter++}_${s.id}';
-      final clone = InkStroke(
-        id: newId,
-        points: s.points,
-        transform: s.transform + offsetToMouse,
-        color: s.color,
-        strokeWidth: s.strokeWidth,
-        toolType: s.toolType,
-        enablePressure: s.enablePressure,
-        boundingBox: s.boundingBox?.shift(offsetToMouse),
-        cachedPath: s.cachedPath,
-        cachedRawPoints: s.cachedRawPoints,
-      );
-      allNewStrokes.add(clone);
-      allNewStrokeIds.add(newId);
-    }
-
-    final commands = <UndoCommand>[];
-    for (final card in allNewCards) {
-      commands.add(AddCardCommand(card));
-    }
-    if (allNewStrokes.isNotEmpty) {
-      commands.add(DuplicateStrokesCommand(allNewStrokes));
-    }
-
-    if (commands.length == 1) {
-      _undoManager.pushCommand(commands.first, execute: true, note: note);
-    } else if (commands.length > 1) {
-      _undoManager.pushCommand(BatchCommand(commands), execute: true, note: note);
-    }
-
-    setState(() {
-      _strokesVersion++;
-      _committedStrokesNotifier.value++;
-      _activeTool = 'select';
-      _isPenSubBarVisible = false;
-      _selectedCardId = allNewCardIds.length == 1 ? allNewCardIds.first : null;
-      _selectionState = SelectionState(
-        type: _selectionType,
-        selectedStrokeIds: allNewStrokeIds,
-        selectedCardIds: allNewCardIds,
-        bounds: originalBounds.shift(offsetToMouse),
-        dragOffset: Offset.zero,
-      );
-    });
-
-    WorkspaceStorageService.instance.scheduleAutoSave(note);
-    DevHubServer.instance.logAction('Colar (${allNewCards.length} cards, ${allNewStrokes.length} traços)');
   }
-
   void _duplicateSelectedStrokes() {
     final note = _currentNote;
     if (note == null || !_selectionState.hasSelection) return;
@@ -1596,19 +1449,24 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
                       final n = _currentNote;
                       if (n != null) {
                         InkStroke strokeToAdd = newStroke;
-                        // Se houver um card de mídia em modo de anotação na posição do traço, vincula o traço ao card
-                        final strokeBounds = newStroke.points.fold<Rect?>(
-                          null,
-                          (acc, p) => acc == null
-                              ? Rect.fromLTWH(p.point.dx, p.point.dy, 0, 0)
-                              : acc.expandToInclude(Rect.fromLTWH(p.point.dx, p.point.dy, 0, 0)),
-                        );
-
-                        if (strokeBounds != null) {
+                        // Se >= 50% dos pontos do traço estiverem dentro da área de imagem da mídia (descontando cabeçalho de 28px)
+                        if (newStroke.points.isNotEmpty) {
                           for (final card in n.cards) {
-                            if (card.cardType == CardType.media && card.isDrawOverMode) {
-                              final cardRect = Rect.fromLTWH(card.x, card.y, card.width, card.height);
-                              if (cardRect.overlaps(strokeBounds)) {
+                            if (card.cardType == CardType.media) {
+                              final imgRect = Rect.fromLTWH(
+                                card.x,
+                                card.y + 28.0,
+                                card.width,
+                                math.max(1.0, card.height - 28.0),
+                              );
+                              int pointsInside = 0;
+                              for (final p in newStroke.points) {
+                                if (imgRect.contains(p.point)) {
+                                  pointsInside++;
+                                }
+                              }
+                              final overlapRatio = pointsInside / newStroke.points.length;
+                              if (overlapRatio >= 0.5) {
                                 strokeToAdd = newStroke.copyWith(parentCardId: card.id);
                                 if (!card.attachedStrokeIds.contains(newStroke.id)) {
                                   final cardIdx = n.cards.indexOf(card);
@@ -1630,7 +1488,9 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
                         );
                         _strokesVersion++;
                         _strokeUpdateNotifier.value++;
+                        _committedStrokesNotifier.value++;
                         _canvasUpdateNotifier.value++;
+                        setState(() {});
                         WorkspaceStorageService.instance.scheduleAutoSave(n);
                       }
                     },
@@ -1660,6 +1520,7 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
                       selectedCardId: _selectedCardId,
                       activeTool: _activeTool,
                       eraserRadius: _eraserConfig.radius,
+                      onSyncCardStrokes: _handleSyncCardStrokes,
                       onUpdateCard: (updated) {
                         final n = _currentNote;
                         if (n != null) {
@@ -1669,41 +1530,32 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
                             final deltaX = updated.x - prev.x;
                             final deltaY = updated.y - prev.y;
                             final angleDelta = updated.rotation - prev.rotation;
+                            final isMedia = updated.cardType == CardType.media;
+                            final scaleX = prev.width > 0 ? (updated.width / prev.width) : 1.0;
+                            final prevMediaH = math.max(1.0, prev.height - 28.0);
+                            final updatedMediaH = math.max(1.0, updated.height - 28.0);
+                            final scaleY = isMedia
+                                ? (updatedMediaH / prevMediaH)
+                                : (prev.height > 0 ? (updated.height / prev.height) : 1.0);
+                            final turnsDelta = (updated.imageRotationQuarterTurns - prev.imageRotationQuarterTurns) % 4;
+                            final flipHChanged = updated.isFlippedHorizontal != prev.isFlippedHorizontal;
+                            final flipVChanged = updated.isFlippedVertical != prev.isFlippedVertical;
                             final attachedIds = {...prev.attachedStrokeIds, ...updated.attachedStrokeIds};
+                            final mediaCenter = isMedia
+                                ? Offset(updated.x + updated.width / 2.0, updated.y + 28.0 + updatedMediaH / 2.0)
+                                : updated.center;
 
                             bool strokesChanged = false;
                             final newStrokes = List.of(n.strokes);
 
-                            // Se o card mudou de posição, translada também todos os traços filhos ou anexados
-                            if (deltaX != 0 || deltaY != 0) {
-                              final deltaOffset = Offset(deltaX, deltaY);
-                              for (int i = 0; i < newStrokes.length; i++) {
-                                final s = newStrokes[i];
-                                if (s.parentCardId == updated.id) {
-                                  final newTrans = s.transform + deltaOffset;
-                                  newStrokes[i] = s.copyWith(
-                                    transform: newTrans,
-                                    boundingBox: s.boundingBox?.shift(deltaOffset),
-                                  );
-                                  strokesChanged = true;
-                                } else if (attachedIds.contains(s.id)) {
-                                  final updatedPoints = s.points.map((p) => p.translate(deltaOffset.dx, deltaOffset.dy)).toList();
-                                  newStrokes[i] = s.copyWith(
-                                    points: updatedPoints,
-                                    boundingBox: s.boundingBox?.shift(deltaOffset),
-                                  );
-                                  strokesChanged = true;
-                                }
-                              }
-                            }
-
-                            // Rotação: se o card rotacionou, rotaciona traços anexados ao redor de card.center
-                            if (angleDelta != 0 && attachedIds.isNotEmpty) {
-                              final center = updated.center;
+                            // Se for Rotação Interna de 90° (Quarter Turns)
+                            if (turnsDelta != 0 && attachedIds.isNotEmpty) {
+                              final quarterAngle = turnsDelta * math.pi / 2;
+                              final center = mediaCenter;
                               for (int i = 0; i < newStrokes.length; i++) {
                                 final s = newStrokes[i];
                                 if (attachedIds.contains(s.id)) {
-                                  final updatedPoints = s.points.map((p) => p.rotateAround(center, angleDelta)).toList();
+                                  final updatedPoints = s.points.map((p) => p.rotateAround(center, quarterAngle)).toList();
                                   double minX = double.infinity, minY = double.infinity;
                                   double maxX = -double.infinity, maxY = -double.infinity;
                                   for (final p in updatedPoints) {
@@ -1716,8 +1568,127 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
                                   newStrokes[i] = s.copyWith(
                                     points: updatedPoints,
                                     boundingBox: newBounds,
-                                  );
+                                  )..cachedPath = null;
                                   strokesChanged = true;
+                                }
+                              }
+                            } else if ((flipHChanged || flipVChanged) && attachedIds.isNotEmpty) {
+                              // Se for Espelhamento Horizontal ou Vertical (Flips)
+                              final center = mediaCenter;
+                              for (int i = 0; i < newStrokes.length; i++) {
+                                final s = newStrokes[i];
+                                if (attachedIds.contains(s.id)) {
+                                  final updatedPoints = s.points.map((p) {
+                                    double px = p.point.dx;
+                                    double py = p.point.dy;
+                                    if (flipHChanged) px = 2 * center.dx - px;
+                                    if (flipVChanged) py = 2 * center.dy - py;
+                                    return StrokePoint(
+                                      point: Offset(px, py),
+                                      pressure: p.pressure,
+                                      tilt: p.tilt,
+                                    );
+                                  }).toList();
+
+                                  double minX = double.infinity, minY = double.infinity;
+                                  double maxX = -double.infinity, maxY = -double.infinity;
+                                  for (final p in updatedPoints) {
+                                    if (p.point.dx < minX) minX = p.point.dx;
+                                    if (p.point.dx > maxX) maxX = p.point.dx;
+                                    if (p.point.dy < minY) minY = p.point.dy;
+                                    if (p.point.dy > maxY) maxY = p.point.dy;
+                                  }
+                                  final newBounds = minX.isFinite ? Rect.fromLTRB(minX, minY, maxX, maxY) : null;
+                                  newStrokes[i] = s.copyWith(
+                                    points: updatedPoints,
+                                    boundingBox: newBounds,
+                                  )..cachedPath = null;
+                                  strokesChanged = true;
+                                }
+                              }
+                            } else {
+                              // Caso normal: Arraste (Translação), Resize ou Rotação livre
+
+                              // 1. Translação (quando o card é arrastado)
+                              if (deltaX != 0 || deltaY != 0) {
+                                final deltaOffset = Offset(deltaX, deltaY);
+                                for (int i = 0; i < newStrokes.length; i++) {
+                                  final s = newStrokes[i];
+                                  if (s.parentCardId == updated.id) {
+                                    final newTrans = s.transform + deltaOffset;
+                                    newStrokes[i] = s.copyWith(
+                                      transform: newTrans,
+                                      boundingBox: s.boundingBox?.shift(deltaOffset),
+                                    );
+                                    strokesChanged = true;
+                                  } else if (attachedIds.contains(s.id)) {
+                                    final updatedPoints = s.points.map((p) => p.translate(deltaOffset.dx, deltaOffset.dy)).toList();
+                                    newStrokes[i] = s.copyWith(
+                                      points: updatedPoints,
+                                      boundingBox: s.boundingBox?.shift(deltaOffset),
+                                    );
+                                    strokesChanged = true;
+                                  }
+                                }
+                              }
+
+                              // 2. Redimensionamento / Scale (Bake proporcional a partir da origem do card)
+                              if ((scaleX != 1.0 || scaleY != 1.0) && attachedIds.isNotEmpty) {
+                                final originX = updated.x;
+                                final originY = isMedia ? (updated.y + 28.0) : updated.y;
+                                for (int i = 0; i < newStrokes.length; i++) {
+                                  final s = newStrokes[i];
+                                  if (attachedIds.contains(s.id)) {
+                                    final updatedPoints = s.points.map((p) {
+                                      final nx = originX + (p.point.dx - originX) * scaleX;
+                                      final ny = originY + (p.point.dy - originY) * scaleY;
+                                      return StrokePoint(
+                                        point: Offset(nx, ny),
+                                        pressure: p.pressure,
+                                        tilt: p.tilt,
+                                      );
+                                    }).toList();
+
+                                    double minX = double.infinity, minY = double.infinity;
+                                    double maxX = -double.infinity, maxY = -double.infinity;
+                                    for (final p in updatedPoints) {
+                                      if (p.point.dx < minX) minX = p.point.dx;
+                                      if (p.point.dx > maxX) maxX = p.point.dx;
+                                      if (p.point.dy < minY) minY = p.point.dy;
+                                      if (p.point.dy > maxY) maxY = p.point.dy;
+                                    }
+                                    final newBounds = minX.isFinite ? Rect.fromLTRB(minX, minY, maxX, maxY) : null;
+                                    newStrokes[i] = s.copyWith(
+                                      points: updatedPoints,
+                                      boundingBox: newBounds,
+                                    )..cachedPath = null;
+                                    strokesChanged = true;
+                                  }
+                                }
+                              }
+
+                              // 3. Rotação livre do card (ao redor do centro do card)
+                              if (angleDelta != 0 && attachedIds.isNotEmpty) {
+                                final center = updated.center;
+                                for (int i = 0; i < newStrokes.length; i++) {
+                                  final s = newStrokes[i];
+                                  if (attachedIds.contains(s.id)) {
+                                    final updatedPoints = s.points.map((p) => p.rotateAround(center, angleDelta)).toList();
+                                    double minX = double.infinity, minY = double.infinity;
+                                    double maxX = -double.infinity, maxY = -double.infinity;
+                                    for (final p in updatedPoints) {
+                                      if (p.point.dx < minX) minX = p.point.dx;
+                                      if (p.point.dx > maxX) maxX = p.point.dx;
+                                      if (p.point.dy < minY) minY = p.point.dy;
+                                      if (p.point.dy > maxY) maxY = p.point.dy;
+                                    }
+                                    final newBounds = minX.isFinite ? Rect.fromLTRB(minX, minY, maxX, maxY) : null;
+                                    newStrokes[i] = s.copyWith(
+                                      points: updatedPoints,
+                                      boundingBox: newBounds,
+                                    )..cachedPath = null;
+                                    strokesChanged = true;
+                                  }
                                 }
                               }
                             }
@@ -1751,6 +1722,19 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
                         if (n != null) {
                           final target = n.cards.cast<CanvasCardModel?>().firstWhere((c) => c?.id == cardId, orElse: () => null);
                           if (target != null) {
+                            if (target.attachedStrokeIds.isNotEmpty) {
+                              final strokesToRemove = n.strokes.where((s) => target.attachedStrokeIds.contains(s.id)).toList();
+                              if (strokesToRemove.isNotEmpty) {
+                                _undoManager.pushCommand(
+                                  RemoveStrokesCommand(strokesToRemove),
+                                  execute: true,
+                                  note: n,
+                                );
+                                _strokesVersion++;
+                                _strokeUpdateNotifier.value++;
+                                _canvasUpdateNotifier.value++;
+                              }
+                            }
                             _undoManager.pushCommand(
                               RemoveCardCommand(target),
                               execute: true,
@@ -1766,11 +1750,46 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
                       onDuplicateCard: (card) {
                         final n = _currentNote;
                         if (n != null) {
+                          final now = DateTime.now().millisecondsSinceEpoch;
+                          final newAttachedIds = <String>[];
+                          final clonedStrokes = <InkStroke>[];
+                          
+                          if (card.attachedStrokeIds.isNotEmpty) {
+                            for (int i = 0; i < card.attachedStrokeIds.length; i++) {
+                              final oldId = card.attachedStrokeIds[i];
+                              final originalStroke = n.getStroke(oldId);
+                              if (originalStroke != null) {
+                                final newStrokeId = 'stroke_${now}_$i';
+                                newAttachedIds.add(newStrokeId);
+                                final shiftedPoints = originalStroke.points.map((p) => p.translate(30.0, 30.0)).toList();
+                                final shiftedBounds = originalStroke.boundingBox?.shift(const Offset(30.0, 30.0));
+                                clonedStrokes.add(originalStroke.copyWith(
+                                  id: newStrokeId,
+                                  points: shiftedPoints,
+                                  boundingBox: shiftedBounds,
+                                  parentCardId: 'card_$now',
+                                ));
+                              }
+                            }
+                          }
+
                           final dup = card.copyWith(
-                            id: 'card_${DateTime.now().millisecondsSinceEpoch}',
+                            id: 'card_$now',
                             x: card.x + 30,
                             y: card.y + 30,
+                            attachedStrokeIds: newAttachedIds,
                           );
+
+                          if (clonedStrokes.isNotEmpty) {
+                            n.addAllStrokes(clonedStrokes);
+                            for (final s in clonedStrokes) {
+                              _undoManager.pushCommand(AddStrokeCommand(s), execute: false, note: n);
+                            }
+                            _strokesVersion++;
+                            _strokeUpdateNotifier.value++;
+                            _canvasUpdateNotifier.value++;
+                          }
+
                           _undoManager.pushCommand(
                             AddCardCommand(dup),
                             execute: true,
@@ -1866,20 +1885,15 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
                   builder: (context, _) {
                     return Stack(
                       children: [
-                        // 3. Visualização de Configurações (SettingsPageView no Canvas com Fundo Unificado)
-                        if (_isSettingsOpen)
-                Positioned.fill(
-                  top: 0,
-                  left: _isSidebarOpen ? 348 : 0,
-                  right: 0,
-                  bottom: 0,
-                  child: SettingsPageView(
-                    activeCategory: _activeSettingsCategory,
-                    settings: _settings,
-                    onUpdateSettings: _updateSettings,
-                    onResetCategory: _resetSettingsCategory,
-                  ),
-                ),
+                        // 3. Visualização de Configurações (SettingsOverlayView no Canvas com Fundo Unificado e Transição Moscaro v2)
+                        SettingsOverlayView(
+                          isOpen: _isSettingsOpen,
+                          leftOffset: _isSidebarOpen ? 348 : 0,
+                          activeCategory: _activeSettingsCategory,
+                          settings: _settings,
+                          onUpdateSettings: _updateSettings,
+                          onResetCategory: _resetSettingsCategory,
+                        ),
 
               // 4. TabBar Superior (Alternância fluida entre Abas de Notas e Abas de Configurações)
               Positioned(
@@ -1908,7 +1922,9 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
                             noteTitles: noteTitles,
                             selectedNoteId: _selectedNoteId,
                             isSidebarOpen: _isSidebarOpen,
-                            onBackToHome: widget.onBackToHome,
+                            onBackToHome: () {
+                              widget.onBackToHome?.call(_activeNoteIds);
+                            },
                             onOpenSettings: () {
                               _isSettingsOpen = true;
                             },
@@ -2036,49 +2052,29 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
                               activePresetId: _activeSlotId,
                               onSelectPreset: (preset) {
                                 setState(() {
-                                  _activeSlotId = preset.id;
+                                  PenSlotsController.instance.selectSlot(preset.id);
                                   _activeTool = 'pen';
                                   _selectionState = SelectionState.empty();
                                 });
                               },
                               onUpdatePreset: (updated) {
-                                setState(() {
-                                  final idx = _penSlots.indexWhere((s) => s.id == updated.id);
-                                  if (idx != -1) {
-                                    _penSlots[idx] = updated;
-                                  }
-                                });
+                                PenSlotsController.instance.updateSlot(updated);
+                                setState(() {});
                               },
                               onReorderSlots: (oldIndex, newIndex) {
-                                setState(() {
-                                  final item = _penSlots.removeAt(oldIndex);
-                                  _penSlots.insert(newIndex, item);
-                                });
+                                PenSlotsController.instance.reorderSlots(oldIndex, newIndex);
+                                setState(() {});
                               },
                               onAddNewSlot: () {
-                                final newId = DateTime.now().millisecondsSinceEpoch.toString();
-                                final newSlot = PenSlotPreset(
-                                  id: newId,
-                                  name: 'Slot ${_penSlots.length + 1}',
-                                  color: MoscaroTokens.stemPalette[_penSlots.length % MoscaroTokens.stemPalette.length],
-                                  strokeWidth: 3.0,
-                                  toolType: InkToolType.technical,
-                                  enablePressure: false,
-                                );
+                                PenSlotsController.instance.addNewSlot();
                                 setState(() {
-                                  _penSlots.add(newSlot);
-                                  _activeSlotId = newId;
                                   _activeTool = 'pen';
                                   _selectionState = SelectionState.empty();
                                 });
                               },
                               onDeleteSlot: (slotId) {
-                                setState(() {
-                                  _penSlots.removeWhere((s) => s.id == slotId);
-                                  if (_activeSlotId == slotId && _penSlots.isNotEmpty) {
-                                    _activeSlotId = _penSlots.first.id;
-                                  }
-                                });
+                                PenSlotsController.instance.deleteSlot(slotId);
+                                setState(() {});
                               },
                             ),
 
@@ -2207,8 +2203,12 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
                                     onSelectBackground: (newBg) {
                                       setState(() {
                                         _currentBackground = newBg;
+                                        _currentNote?.backgroundType = newBg;
                                         _isGridMenuOpen = false;
                                       });
+                                      if (_currentNote != null) {
+                                        WorkspaceStorageService.instance.scheduleAutoSave(_currentNote!);
+                                      }
                                     },
                                   )
                                 : const SizedBox.shrink(key: ValueKey('grid_menu_closed')),
@@ -2296,7 +2296,11 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
                     onBackgroundChanged: (newBg) {
                       setState(() {
                         _currentBackground = newBg;
+                        _currentNote?.backgroundType = newBg;
                       });
+                      if (_currentNote != null) {
+                        WorkspaceStorageService.instance.scheduleAutoSave(_currentNote!);
+                      }
                     },
                     onSelectPen: () {
                       setState(() {
@@ -2834,111 +2838,20 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
     }
   }
 
-  String _sanitizeLatexOcrOutput(String raw) {
-    var text = raw.trim();
-    // Remove tags de sugestões da IA
-    text = text.replaceAll(RegExp(r'\[(?:SUGESTOES|SUGESTÕES):\s*.*?\]', caseSensitive: false, dotAll: true), '');
-    text = text.replaceAll(RegExp(r'(?:Sugestões|Sugestoes|Suggestions):\s*.*', caseSensitive: false, dotAll: true), '');
-    // Remove blocos de markdown em volta ```latex ... ``` ou ``` ... ```
-    if (text.startsWith('```latex')) {
-      text = text.substring(8);
-    } else if (text.startsWith('```')) {
-      text = text.substring(3);
-    }
-    if (text.endsWith('```')) {
-      text = text.substring(0, text.length - 3);
-    }
-    text = text.trim();
-    // Garante que o conteúdo seja envolvido como bloco LaTeX puro se já não for
-    if (!text.startsWith(r'$$') && !text.startsWith(r'$')) {
-      text = '\$\$\n$text\n\$\$';
-    }
-    return text.trim();
-  }
-
-  /// Ação no card de mídia: OCR / Extrair LaTeX e criar card de texto adjacente (Apenas LaTeX puro)
+  /// Ação no card de mídia: OCR / Extrair LaTeX e criar card de texto adjacente
   void _handleExtractLatexFromCard(CanvasCardModel card) {
-    final mediaData = card.mediaData;
     final note = _currentNote;
-    if (mediaData == null || mediaData.isEmpty || note == null) return;
-
-    final summaryEngine = SettingsService.instance.currentSettings.noteSummaryEngine;
-    final isLocalOcr = summaryEngine == NoteSummaryEngine.localOcr;
-    debugPrint('[OCR Engine] Executando extração de mídia via: ${isLocalOcr ? "OCR Nativo Local (Offline / Privacidade)" : "IA Multimodal (Nuvem)"}');
-
-    final targetX = card.x + card.width + 28.0;
-    final targetY = card.y;
-    final latexCardId = 'card_latex_ocr_${DateTime.now().millisecondsSinceEpoch}';
-
-    final initialCard = CanvasCardModel(
-      id: latexCardId,
-      cardType: CardType.textLatex,
-      title: 'LaTeX Extraído',
-      x: targetX,
-      y: targetY,
-      width: 420.0,
-      height: 240.0,
-      content: isLocalOcr
-          ? 'Processando OCR local no dispositivo (Privacidade/Offline)...'
-          : 'Extraindo fórmulas matemáticas via IA...',
-    );
-
-    _undoManager.pushCommand(
-      AddCardCommand(initialCard),
-      execute: true,
+    if (note == null) return;
+    CanvasMediaOcrService.instance.extractLatexFromCard(
+      card: card,
       note: note,
-    );
-    setState(() {
-      _selectedCardId = latexCardId;
-    });
-
-    final prompt = 'Extraia EXCLUSIVAMENTE as equações matemáticas e expressões presentes nesta imagem. '
-        'Retorne APENAS o código LaTeX formatado em bloco (\$\$...\$\$). '
-        'É ESTRITAMENTE PROIBIDO incluir introduções, conclusões, explicações, textos em português/inglês ou sugestões. '
-        'Retorne APENAS a fórmula matemática pura.';
-    final buffer = StringBuffer();
-
-    AiServiceBridge.instance.streamPrompt(
-      userPrompt: prompt,
-      model: _activeAiModel,
-      imagesBase64: [mediaData],
-    ).listen(
-      (chunk) {
-        buffer.write(chunk);
-        final currentCard = note.cards.cast<CanvasCardModel?>().firstWhere((c) => c?.id == latexCardId, orElse: () => null);
-        if (currentCard != null) {
-          final sanitized = _sanitizeLatexOcrOutput(buffer.toString());
-          final updated = currentCard.copyWith(content: sanitized);
-          final idx = note.cards.indexWhere((c) => c.id == latexCardId);
-          if (idx != -1) {
-            note.cards[idx] = updated;
-            setState(() {});
-          }
-        }
+      activeAiModel: _activeAiModel,
+      undoManager: _undoManager,
+      onCardCreated: () {
+        setState(() {});
       },
-      onDone: () {
-        final currentCard = note.cards.cast<CanvasCardModel?>().firstWhere((c) => c?.id == latexCardId, orElse: () => null);
-        if (currentCard != null) {
-          final finalSanitized = _sanitizeLatexOcrOutput(buffer.toString());
-          final updated = currentCard.copyWith(content: finalSanitized);
-          final idx = note.cards.indexWhere((c) => c.id == latexCardId);
-          if (idx != -1) {
-            note.cards[idx] = updated;
-            setState(() {});
-          }
-        }
-        WorkspaceStorageService.instance.scheduleAutoSave(note);
-      },
-      onError: (err) {
-        final currentCard = note.cards.cast<CanvasCardModel?>().firstWhere((c) => c?.id == latexCardId, orElse: () => null);
-        if (currentCard != null) {
-          final updated = currentCard.copyWith(content: 'Erro ao extrair LaTeX: $err');
-          final idx = note.cards.indexWhere((c) => c.id == latexCardId);
-          if (idx != -1) {
-            note.cards[idx] = updated;
-            setState(() {});
-          }
-        }
+      onCardUpdated: () {
+        setState(() {});
       },
     );
   }
@@ -3004,8 +2917,20 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
 
       if (toRemove.isNotEmpty) {
         _undoManager.pushCommand(RemoveStrokesCommand(toRemove), execute: true, note: note);
+        final removedIds = toRemove.map((s) => s.id).toSet();
+        for (int cIdx = 0; cIdx < note.cards.length; cIdx++) {
+          final c = note.cards[cIdx];
+          if (c.attachedStrokeIds.any(removedIds.contains)) {
+            note.cards[cIdx] = c.copyWith(
+              attachedStrokeIds: c.attachedStrokeIds.where((id) => !removedIds.contains(id)).toList(),
+            );
+          }
+        }
         _strokesVersion++;
         _committedStrokesNotifier.value++;
+        _strokeUpdateNotifier.value++;
+        _canvasUpdateNotifier.value++;
+        setState(() {});
       }
     } else {
       // 2. Borracha de Precisão / Segmentação
@@ -3053,6 +2978,7 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
             strokeWidth: stroke.strokeWidth,
             toolType: stroke.toolType,
             enablePressure: stroke.enablePressure,
+            parentCardId: stroke.parentCardId,
             boundingBox: bounds,
           ));
         }
@@ -3063,8 +2989,22 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
         if (addedNew.isNotEmpty) {
           note.addAllStrokes(addedNew);
         }
+        final removedIds = removedOld.map((s) => s.id).toSet();
+        for (int cIdx = 0; cIdx < note.cards.length; cIdx++) {
+          final c = note.cards[cIdx];
+          if (c.attachedStrokeIds.any(removedIds.contains)) {
+            final survivingAttachedIds = c.attachedStrokeIds.where((id) => !removedIds.contains(id)).toList();
+            final newSegmentsForThisCard = addedNew.where((s) => s.parentCardId == c.id).map((s) => s.id);
+            note.cards[cIdx] = c.copyWith(
+              attachedStrokeIds: [...survivingAttachedIds, ...newSegmentsForThisCard],
+            );
+          }
+        }
         _strokesVersion++;
         _committedStrokesNotifier.value++;
+        _strokeUpdateNotifier.value++;
+        _canvasUpdateNotifier.value++;
+        setState(() {});
       }
     }
   }
@@ -3087,8 +3027,15 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
         final updatedList = List<String>.from(card.attachedStrokeIds)..add(strokeId);
         final updatedCard = card.copyWith(attachedStrokeIds: updatedList);
         note.cards[idx] = updatedCard;
+
+        final sIdx = note.strokes.indexWhere((s) => s.id == strokeId);
+        if (sIdx != -1) {
+          note.strokes[sIdx] = note.strokes[sIdx].copyWith(parentCardId: cardId);
+        }
+
         _strokesVersion++;
         _strokeUpdateNotifier.value++;
+        _committedStrokesNotifier.value++;
         _canvasUpdateNotifier.value++;
         WorkspaceStorageService.instance.scheduleAutoSave(note);
       }
@@ -3110,12 +3057,9 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
     for (final stroke in candidateStrokes.reversed) {
       if (SelectionGeometry.isPointNearStroke(canvasPoint, stroke, 16.0 / _zoomScale)) {
         final sampled = stroke.color;
-        final idx = _penSlots.indexWhere((s) => s.id == _activeSlotId);
-        if (idx != -1) {
-          setState(() {
-            _penSlots[idx] = _penSlots[idx].copyWith(color: sampled);
-          });
-        }
+        final active = PenSlotsController.instance.activePreset;
+        PenSlotsController.instance.updateSlot(active.copyWith(color: sampled));
+        setState(() {});
         return sampled;
       }
     }
@@ -3123,12 +3067,9 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
     if (card != null) {
       final cardColor = card.customGlassColor ?? card.highlightColor ?? card.textColor;
       if (cardColor != null) {
-        final idx = _penSlots.indexWhere((s) => s.id == _activeSlotId);
-        if (idx != -1) {
-          setState(() {
-            _penSlots[idx] = _penSlots[idx].copyWith(color: cardColor);
-          });
-        }
+        final active = PenSlotsController.instance.activePreset;
+        PenSlotsController.instance.updateSlot(active.copyWith(color: cardColor));
+        setState(() {});
         return cardColor;
       }
     }
@@ -3243,6 +3184,84 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
 
   @override
   void onPalmContactRejected({required Offset position, required double contactSize}) {}
+
+  bool _isLightboxOpen = false;
+
+  @override
+  void openMediaLightbox(String cardId) async {
+    if (_isLightboxOpen) return;
+    _isLightboxOpen = true;
+    try {
+      final n = _currentNote;
+      if (n == null) return;
+      final card = n.cards.cast<CanvasCardModel?>().firstWhere(
+        (c) => c?.id == cardId,
+        orElse: () => null,
+      );
+      if (card == null || card.cardType != CardType.media) return;
+
+      final attached = card.attachedStrokeIds.isNotEmpty
+          ? n.strokes.where((s) => card.attachedStrokeIds.contains(s.id)).toList()
+          : <InkStroke>[];
+
+      final finalStrokes = await MediaLightboxModal.show(
+        context,
+        mediaData: card.mediaData,
+        title: card.title.isNotEmpty ? card.title : 'Visualização de Mídia',
+        initialStrokes: attached,
+        cardX: card.x,
+        cardY: card.y + 28.0,
+        cardWidth: card.width,
+        cardHeight: math.max(1.0, card.height - 28.0),
+        parentCardId: card.id,
+      );
+
+      if (finalStrokes != null) {
+        _handleSyncCardStrokes(finalStrokes, card.id);
+      }
+    } finally {
+      _isLightboxOpen = false;
+    }
+  }
+
+  void _handleSyncCardStrokes(List<InkStroke> finalStrokes, String cardId) {
+    final n = _currentNote;
+    if (n != null) {
+      final idx = n.cards.indexWhere((c) => c.id == cardId);
+      if (idx != -1) {
+        final card = n.cards[idx];
+        final oldAttachedIds = card.attachedStrokeIds.toSet();
+        final oldStrokes = n.strokes.where((s) => oldAttachedIds.contains(s.id)).toList();
+
+        // Remove os traços antigos deste card do documento
+        n.removeAllStrokes(oldAttachedIds);
+        // Adiciona os traços finais vindos do Lightbox
+        n.addAllStrokes(finalStrokes);
+
+        final newAttachedIds = finalStrokes.map((s) => s.id).toList();
+        n.cards[idx] = card.copyWith(
+          attachedStrokeIds: newAttachedIds,
+        );
+
+        _undoManager.pushCommand(
+          SyncCardStrokesCommand(
+            cardId: cardId,
+            oldStrokes: oldStrokes,
+            newStrokes: finalStrokes,
+          ),
+          execute: false,
+          note: n,
+        );
+
+        _strokesVersion++;
+        _strokeUpdateNotifier.value++;
+        _committedStrokesNotifier.value++;
+        _canvasUpdateNotifier.value++;
+        setState(() {});
+        WorkspaceStorageService.instance.scheduleAutoSave(n);
+      }
+    }
+  }
 }
 
 /// Painter do Cursor Halo da Borracha

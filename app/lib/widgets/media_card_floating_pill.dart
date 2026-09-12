@@ -109,11 +109,6 @@ class _MediaCardFloatingPillState extends State<MediaCardFloatingPill> {
     ));
   }
 
-  void _toggleDrawOverMode() {
-    widget.onUpdateCard(widget.card.copyWith(
-      isDrawOverMode: !widget.card.isDrawOverMode,
-    ));
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -130,22 +125,6 @@ class _MediaCardFloatingPillState extends State<MediaCardFloatingPill> {
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              // Indicador / Ícone de Mídia
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 6.0),
-                child: SvgIcon(
-                  name: 'image',
-                  size: 16.0,
-                  color: themeAccent,
-                ),
-              ),
-              Container(
-                width: 1.0,
-                height: 18.0,
-                color: dividerColor,
-                margin: const EdgeInsets.symmetric(horizontal: 4.0),
-              ),
-
               // Ação IA: Resolver Exercício com IA
               if (widget.onSolveWithAi != null)
                 _PillActionButton(
@@ -162,16 +141,6 @@ class _MediaCardFloatingPillState extends State<MediaCardFloatingPill> {
                   tooltip: 'Extrair LaTeX / OCR para novo card',
                   onPressed: widget.onExtractLatex!,
                 ),
-
-              // Modo Anotação STEM (Desenhar sobre Imagem)
-              _PillActionButton(
-                iconName: 'pen',
-                tooltip: widget.card.isDrawOverMode
-                    ? 'Modo anotação ativo (clique para sair)'
-                    : 'Anotar / Desenhar sobre a imagem',
-                isActive: widget.card.isDrawOverMode,
-                onPressed: _toggleDrawOverMode,
-              ),
 
               // Inverter Luminância (Dark Mode para Gráficos Brancos)
               _PillActionButton(
@@ -249,15 +218,34 @@ class _MediaCardFloatingPillState extends State<MediaCardFloatingPill> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.center,
           children: [
-            if (_isOrientationPopoverOpen) ...[
-              MediaOrientationPopover(
-                onRotateCw: _handleRotateCw,
-                onRotateCcw: _handleRotateCcw,
-                onFlipH: _handleFlipH,
-                onFlipV: _handleFlipV,
-              ),
-              const SizedBox(height: 6.0),
-            ],
+            AnimatedSwitcher(
+              duration: const Duration(milliseconds: 180),
+              reverseDuration: const Duration(milliseconds: 130),
+              switchInCurve: Curves.easeOutBack,
+              switchOutCurve: Curves.easeInCubic,
+              transitionBuilder: (child, animation) {
+                return FadeTransition(
+                  opacity: animation,
+                  child: ScaleTransition(
+                    scale: Tween<double>(begin: 0.88, end: 1.0).animate(animation),
+                    alignment: Alignment.bottomCenter,
+                    child: child,
+                  ),
+                );
+              },
+              child: _isOrientationPopoverOpen
+                  ? Padding(
+                      key: const ValueKey('media_orientation_popover_open'),
+                      padding: const EdgeInsets.only(bottom: 6.0),
+                      child: MediaOrientationPopover(
+                        onRotateCw: _handleRotateCw,
+                        onRotateCcw: _handleRotateCcw,
+                        onFlipH: _handleFlipH,
+                        onFlipV: _handleFlipV,
+                      ),
+                    )
+                  : const SizedBox.shrink(key: ValueKey('media_orientation_popover_closed')),
+            ),
             pillRow,
           ],
         );
@@ -274,7 +262,7 @@ class _MediaCardFloatingPillState extends State<MediaCardFloatingPill> {
   }
 }
 
-class _PillActionButton extends StatelessWidget {
+class _PillActionButton extends StatefulWidget {
   final String iconName;
   final String tooltip;
   final VoidCallback onPressed;
@@ -290,35 +278,70 @@ class _PillActionButton extends StatelessWidget {
   });
 
   @override
+  State<_PillActionButton> createState() => _PillActionButtonState();
+}
+
+class _PillActionButtonState extends State<_PillActionButton> {
+  bool _isHovered = false;
+  bool _isPressed = false;
+
+  @override
   Widget build(BuildContext context) {
     final theme = MoscaroThemeController.instance.currentTheme;
     final themeAccent = theme.accentPrimary;
     final isLight = MoscaroTokens.isLight;
     final defaultColor = isLight ? MoscaroTokens.textSecondary : Colors.white70;
 
-    final effectiveColor = iconColor ?? (isActive ? themeAccent : defaultColor);
+    final effectiveColor = widget.iconColor ?? (widget.isActive ? themeAccent : (_isHovered ? themeAccent : defaultColor));
+    final double scale = _isPressed ? 0.90 : (_isHovered ? 1.08 : 1.0);
 
     return Tooltip(
-      message: tooltip,
+      message: widget.tooltip,
       waitDuration: const Duration(milliseconds: 300),
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          borderRadius: BorderRadius.circular(20),
-          onTap: onPressed,
-          child: Container(
-            padding: const EdgeInsets.all(7),
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color: isActive ? themeAccent.withValues(alpha: 0.25) : Colors.transparent,
-              border: isActive
-                  ? Border.all(color: themeAccent.withValues(alpha: 0.4), width: 1.0)
-                  : null,
-            ),
-            child: SvgIcon(
-              name: iconName,
-              size: 16,
-              color: effectiveColor,
+      child: MouseRegion(
+        cursor: SystemMouseCursors.click,
+        onEnter: (_) => setState(() => _isHovered = true),
+        onExit: (_) => setState(() => _isHovered = false),
+        child: GestureDetector(
+          onTapDown: (_) => setState(() => _isPressed = true),
+          onTapUp: (_) => setState(() => _isPressed = false),
+          onTapCancel: () {
+            if (_isPressed) setState(() => _isPressed = false);
+          },
+          onTap: widget.onPressed,
+          child: AnimatedScale(
+            scale: scale,
+            duration: const Duration(milliseconds: 140),
+            curve: Curves.easeOutCubic,
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 180),
+              curve: Curves.easeOutCubic,
+              padding: const EdgeInsets.all(7),
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: widget.isActive
+                    ? themeAccent.withValues(alpha: 0.25)
+                    : (_isHovered
+                        ? (isLight ? Colors.black.withValues(alpha: 0.05) : Colors.white.withValues(alpha: 0.08))
+                        : Colors.transparent),
+                border: widget.isActive
+                    ? Border.all(color: themeAccent.withValues(alpha: 0.4), width: 1.0)
+                    : null,
+                boxShadow: widget.isActive
+                    ? [
+                        BoxShadow(
+                          color: themeAccent.withValues(alpha: 0.35),
+                          blurRadius: 6,
+                          spreadRadius: 1,
+                        ),
+                      ]
+                    : null,
+              ),
+              child: SvgIcon(
+                name: widget.iconName,
+                size: 16,
+                color: effectiveColor,
+              ),
             ),
           ),
         ),

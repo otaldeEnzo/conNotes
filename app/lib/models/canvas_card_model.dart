@@ -42,6 +42,7 @@ class CanvasCardModel {
   bool isFlippedHorizontal;
   bool isFlippedVertical;
   final List<String> attachedStrokeIds;
+  final bool isProcessing;
   final DateTime createdAt;
   DateTime updatedAt;
 
@@ -62,6 +63,7 @@ class CanvasCardModel {
     this.highlightColor,
     this.isPinned = false,
     this.isCollapsed = false,
+    this.isProcessing = false,
     this.customGlassColor,
     this.mediaData,
     this.originalAspectRatio,
@@ -151,7 +153,35 @@ class CanvasCardModel {
         final lineCount = trimmed.split('\n').length;
         contentHeight += (lineCount * (fontSize * 1.45)) + 40.0;
       } else if (trimmed.startsWith(r'$$')) {
-        contentHeight += (fontSize * 3.0) + 28.0;
+        // Bloco LaTeX: extrai linhas reais de fórmulas descartando delimitadores e ambientes
+        var cleanTex = trimmed.replaceAll(r'$$', '').trim();
+        cleanTex = cleanTex
+            .replaceAll(RegExp(r'\\begin\{(?:aligned|gathered|matrix|bmatrix|pmatrix|cases)\}'), '')
+            .replaceAll(RegExp(r'\\end\{(?:aligned|gathered|matrix|bmatrix|pmatrix|cases)\}'), '');
+        final lines = cleanTex
+            .split(RegExp(r'\\\\|\n'))
+            .map((l) => l.trim())
+            .where((l) => l.isNotEmpty)
+            .toList();
+        
+        double mathBlockH = 20.0; // padding interno do container LaTeX (10px topo + 10px base)
+        for (final line in lines) {
+          final fracCount = RegExp(r'\\(?:frac|cfrac)').allMatches(line).length;
+          final sqrtCount = RegExp(r'\\sqrt').allMatches(line).length;
+          final hasBigOp = RegExp(r'\\(?:iint|iiint|oint|int|sum|prod)').hasMatch(line);
+          if (fracCount >= 2) {
+            mathBlockH += 56.0;
+          } else if (fracCount == 1) {
+            mathBlockH += 40.0;
+          } else if (hasBigOp) {
+            mathBlockH += 44.0;
+          } else if (sqrtCount > 0) {
+            mathBlockH += 30.0;
+          } else {
+            mathBlockH += 24.0;
+          }
+        }
+        contentHeight += mathBlockH + 6.0;
       } else if (trimmed.startsWith('> [!')) {
         final lines = trimmed.split('\n');
         double calloutInner = 36.0;
@@ -197,8 +227,8 @@ class CanvasCardModel {
       }
     }
 
-    final totalMin = headerHeight + paddingVertical + contentHeight + 24.0;
-    return math.max(110.0, totalMin);
+    final totalMin = headerHeight + paddingVertical + contentHeight;
+    return math.max(90.0, totalMin);
   }
 
   /// Gira o conteúdo da imagem em múltiplos de 90° e inverte largura e altura
@@ -258,6 +288,7 @@ class CanvasCardModel {
     Color? highlightColor,
     bool? isPinned,
     bool? isCollapsed,
+    bool? isProcessing,
     Color? customGlassColor,
     String? mediaData,
     double? originalAspectRatio,
@@ -291,6 +322,7 @@ class CanvasCardModel {
       highlightColor: highlightColor ?? this.highlightColor,
       isPinned: isPinned ?? this.isPinned,
       isCollapsed: isCollapsed ?? this.isCollapsed,
+      isProcessing: isProcessing ?? this.isProcessing,
       customGlassColor: customGlassColor ?? this.customGlassColor,
       mediaData: mediaData ?? this.mediaData,
       originalAspectRatio: originalAspectRatio ?? this.originalAspectRatio,
@@ -327,6 +359,7 @@ class CanvasCardModel {
       'highlightColor': highlightColor?.toARGB32(),
       'isPinned': isPinned,
       'isCollapsed': isCollapsed,
+      'isProcessing': isProcessing,
       'customGlassColor': customGlassColor?.toARGB32(),
       'mediaData': mediaData,
       'originalAspectRatio': originalAspectRatio,
@@ -397,6 +430,7 @@ class CanvasCardModel {
       highlightColor: map['highlightColor'] != null ? Color(map['highlightColor'] as int) : null,
       isPinned: map['isPinned'] == true,
       isCollapsed: map['isCollapsed'] == true,
+      isProcessing: map['isProcessing'] == true,
       customGlassColor: map['customGlassColor'] != null ? Color(map['customGlassColor'] as int) : null,
       mediaData: map['mediaData']?.toString(),
       originalAspectRatio: (map['originalAspectRatio'] as num?)?.toDouble(),

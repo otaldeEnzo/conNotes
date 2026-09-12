@@ -96,24 +96,20 @@ class _PopoverActionButton extends StatelessWidget {
       waitDuration: const Duration(milliseconds: 250),
       child: Material(
         color: Colors.transparent,
-        child: GestureDetector(
-          behavior: HitTestBehavior.opaque,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(20),
           onTap: onPressed,
-          child: InkWell(
-            borderRadius: BorderRadius.circular(20),
-            onTap: onPressed,
-            hoverColor: themeAccent.withValues(alpha: 0.15),
-            child: Container(
-              padding: const EdgeInsets.all(7),
-              decoration: const BoxDecoration(
-                shape: BoxShape.circle,
-                color: Colors.transparent,
-              ),
-              child: SvgIcon(
-                name: iconName,
-                size: 16,
-                color: defaultColor,
-              ),
+          hoverColor: themeAccent.withValues(alpha: 0.15),
+          child: Container(
+            padding: const EdgeInsets.all(7),
+            decoration: const BoxDecoration(
+              shape: BoxShape.circle,
+              color: Colors.transparent,
+            ),
+            child: SvgIcon(
+              name: iconName,
+              size: 16,
+              color: defaultColor,
             ),
           ),
         ),

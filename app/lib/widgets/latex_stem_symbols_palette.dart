@@ -1,7 +1,9 @@
-import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter_math_fork/flutter_math.dart';
 import '../theme/moscaro_v2_tokens.dart';
+import '../theme/moscaro_v2_extension.dart';
+import '../theme/moscaro_theme_controller.dart';
+import 'svg_icon.dart';
 
 class LatexSymbolItem {
   final String label;
@@ -164,163 +166,223 @@ class _LatexStemSymbolsPaletteState extends State<LatexStemSymbolsPalette> {
 
   @override
   Widget build(BuildContext context) {
-    final isLight = MoscaroTokens.isLight;
-    final themeAccent = MoscaroTokens.auroraBlue;
-    final textPrimary = MoscaroTokens.textPrimary;
-    final textSecondary = MoscaroTokens.textSecondary;
-    final glassTint = MoscaroTokens.glassTint;
-    final blur = (MoscaroTokens.enableSubBarsBlur && MoscaroTokens.blurSigma > 0)
-        ? MoscaroTokens.blurSigma
-        : 0.0;
+    return ListenableBuilder(
+      listenable: MoscaroThemeController.instance,
+      builder: (context, _) {
+        final theme = MoscaroThemeController.instance.currentTheme;
+        final isLight = MoscaroTokens.isLight;
+        final themeAccent = theme.accentPrimary;
+        final textPrimary = isLight ? Colors.black : Colors.white;
+        final textSecondary = isLight ? Colors.black87 : const Color(0xB3FFFFFF);
+        final isBlurEnabled = theme.enableSubBarsBlur || theme.enableModalsBlur;
+        final effectiveBlur = isBlurEnabled ? theme.blurSigma : 0.0;
 
-    final currentItems = _categories[_activeCategoryIndex];
+        final currentItems = _categories[_activeCategoryIndex];
 
-    Widget content = Container(
-      width: 360,
-      height: 280,
-          decoration: BoxDecoration(
-            color: isLight ? Colors.white.withValues(alpha: 0.94) : glassTint,
-            borderRadius: BorderRadius.circular(14),
-            border: Border.all(color: themeAccent.withValues(alpha: 0.5), width: 1.2),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: 0.4),
-                blurRadius: 20,
-                offset: const Offset(0, 8),
-              ),
-            ],
-          ),
+        Widget content = SizedBox(
+          width: 380,
+          height: 290,
           child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          // Cabeçalho da Paleta
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Row(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              // Cabeçalho da Paleta
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    Icon(Icons.functions_rounded, size: 16, color: themeAccent),
-                    const SizedBox(width: 6),
-                    Text(
-                      'Símbolos STEM LaTeX',
-                      style: TextStyle(
-                        color: textPrimary,
-                        fontSize: 12.5,
-                        fontWeight: FontWeight.bold,
+                    Row(
+                      children: [
+                        SvgIcon(name: 'math', size: 16, color: themeAccent),
+                        const SizedBox(width: 8),
+                        Text(
+                          'Símbolos STEM LaTeX',
+                          style: TextStyle(
+                            color: textPrimary,
+                            fontSize: 12.5,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ],
+                    ),
+                    GestureDetector(
+                      onTap: widget.onClose,
+                      behavior: HitTestBehavior.opaque,
+                      child: Padding(
+                        padding: const EdgeInsets.all(4),
+                        child: SvgIcon(name: 'close', size: 13, color: textSecondary),
                       ),
                     ),
                   ],
                 ),
-                IconButton(
-                  icon: Icon(Icons.close, size: 16, color: textSecondary),
-                  padding: EdgeInsets.zero,
-                  constraints: const BoxConstraints(minWidth: 24, minHeight: 24),
-                  onPressed: widget.onClose,
-                ),
-              ],
-            ),
-          ),
-          Divider(height: 1, color: isLight ? Colors.black12 : Colors.white12),
-
-          // Abas de Categorias
-          SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
-            child: Row(
-              children: List.generate(_categoryNames.length, (idx) {
-                final isSelected = _activeCategoryIndex == idx;
-                return Padding(
-                  padding: const EdgeInsets.only(right: 4),
-                  child: InkWell(
-                    onTap: () => setState(() => _activeCategoryIndex = idx),
-                    borderRadius: BorderRadius.circular(8),
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                      decoration: BoxDecoration(
-                        color: isSelected
-                            ? themeAccent.withValues(alpha: 0.2)
-                            : (isLight ? Colors.black.withValues(alpha: 0.04) : Colors.white.withValues(alpha: 0.05)),
-                        borderRadius: BorderRadius.circular(8),
-                        border: Border.all(
-                          color: isSelected ? themeAccent : Colors.transparent,
-                          width: 1.0,
-                        ),
-                      ),
-                      child: Text(
-                        _categoryNames[idx],
-                        style: TextStyle(
-                          color: isSelected ? (isLight ? Colors.black : Colors.white) : textSecondary,
-                          fontSize: 11,
-                          fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-                        ),
-                      ),
-                    ),
-                  ),
-                );
-              }),
-            ),
-          ),
-          Divider(height: 1, color: isLight ? Colors.black12 : Colors.white12),
-
-          // Grid de Símbolos Renderizados via KaTeX
-          Expanded(
-            child: GridView.builder(
-              padding: const EdgeInsets.all(8),
-              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                crossAxisCount: 4,
-                childAspectRatio: 1.35,
-                crossAxisSpacing: 6,
-                mainAxisSpacing: 6,
               ),
-              itemCount: currentItems.length,
-              itemBuilder: (ctx, index) {
-                final item = currentItems[index];
-                return Tooltip(
-                  message: '${item.label}\n${item.latexSnippet}',
-                  child: InkWell(
-                    onTap: () {
-                      widget.onSelectSymbol(item.latexSnippet);
-                    },
-                    borderRadius: BorderRadius.circular(8),
-                    child: Container(
-                      alignment: Alignment.center,
-                      decoration: BoxDecoration(
-                        color: isLight ? Colors.black.withValues(alpha: 0.03) : Colors.white.withValues(alpha: 0.04),
-                        borderRadius: BorderRadius.circular(8),
-                        border: Border.all(color: isLight ? Colors.black12 : Colors.white12),
-                      ),
-                      child: Math.tex(
-                        item.displayMath,
-                        textStyle: TextStyle(
-                          color: textPrimary,
-                          fontSize: 13,
+              Divider(
+                height: 1,
+                color: isLight ? Colors.black.withValues(alpha: 0.08) : Colors.white.withValues(alpha: 0.08),
+              ),
+
+              // Abas de Categorias
+              SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                child: Row(
+                  children: List.generate(_categoryNames.length, (idx) {
+                    final isSelected = _activeCategoryIndex == idx;
+                    return Padding(
+                      padding: const EdgeInsets.only(right: 5),
+                      child: GestureDetector(
+                        onTap: () => setState(() => _activeCategoryIndex = idx),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+                          decoration: BoxDecoration(
+                            color: isSelected
+                                ? themeAccent.withValues(alpha: 0.22)
+                                : (isLight ? Colors.black.withValues(alpha: 0.04) : Colors.white.withValues(alpha: 0.05)),
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(
+                              color: isSelected ? themeAccent.withValues(alpha: 0.7) : Colors.transparent,
+                              width: 1.0,
+                            ),
+                          ),
+                          child: Text(
+                            _categoryNames[idx],
+                            style: TextStyle(
+                              color: isSelected ? (isLight ? Colors.black : Colors.white) : textSecondary,
+                              fontSize: 11,
+                              fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
+                            ),
+                          ),
                         ),
-                        onErrorFallback: (err) => Text(
-                          item.label,
-                          style: TextStyle(color: textPrimary, fontSize: 10),
-                          textAlign: TextAlign.center,
-                        ),
                       ),
+                    );
+                  }),
+                ),
+              ),
+              Divider(
+                height: 1,
+                color: isLight ? Colors.black.withValues(alpha: 0.08) : Colors.white.withValues(alpha: 0.08),
+              ),
+
+              // Grid de Símbolos Renderizados via KaTeX
+              Expanded(
+                child: Padding(
+                  padding: const EdgeInsets.all(8),
+                  child: GridView.builder(
+                    padding: EdgeInsets.zero,
+                    gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                      crossAxisCount: 4,
+                      childAspectRatio: 1.35,
+                      crossAxisSpacing: 6,
+                      mainAxisSpacing: 6,
                     ),
+                    itemCount: currentItems.length,
+                    itemBuilder: (ctx, index) {
+                      final item = currentItems[index];
+                      return _LatexSymbolCard(
+                        item: item,
+                        themeAccent: themeAccent,
+                        textPrimary: textPrimary,
+                        isLight: isLight,
+                        onTap: () => widget.onSelectSymbol(item.latexSnippet),
+                      );
+                    },
                   ),
-                );
-              },
+                ),
+              ),
+            ],
+          ),
+        );
+
+        return content.moscaroV2(
+          borderRadius: 16,
+          blurSigma: effectiveBlur,
+          enableBlur: isBlurEnabled && effectiveBlur > 0,
+          backgroundColor: isLight
+              ? const Color(0xFFF8FAFC).withValues(alpha: 0.95)
+              : MoscaroTokens.glassTint,
+          borderColor: isLight ? MoscaroTokens.borderSubtle : MoscaroTokens.borderGlow,
+          borderWidth: 1.0,
+          padding: EdgeInsets.zero,
+          customShadows: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.35),
+              blurRadius: 18,
+              offset: const Offset(0, 6),
+            ),
+          ],
+        );
+      },
+    );
+  }
+}
+
+class _LatexSymbolCard extends StatefulWidget {
+  final LatexSymbolItem item;
+  final Color themeAccent;
+  final Color textPrimary;
+  final bool isLight;
+  final VoidCallback onTap;
+
+  const _LatexSymbolCard({
+    required this.item,
+    required this.themeAccent,
+    required this.textPrimary,
+    required this.isLight,
+    required this.onTap,
+  });
+
+  @override
+  State<_LatexSymbolCard> createState() => _LatexSymbolCardState();
+}
+
+class _LatexSymbolCardState extends State<_LatexSymbolCard> {
+  bool _isHovered = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final item = widget.item;
+    return MouseRegion(
+      onEnter: (_) => setState(() => _isHovered = true),
+      onExit: (_) => setState(() => _isHovered = false),
+      cursor: SystemMouseCursors.click,
+      child: Tooltip(
+        message: '${item.label}\n${item.latexSnippet}',
+        child: GestureDetector(
+          onTap: widget.onTap,
+          behavior: HitTestBehavior.opaque,
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 140),
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: _isHovered
+                  ? widget.themeAccent.withValues(alpha: 0.16)
+                  : (widget.isLight ? Colors.black.withValues(alpha: 0.03) : Colors.white.withValues(alpha: 0.04)),
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(
+                color: _isHovered
+                    ? widget.themeAccent.withValues(alpha: 0.6)
+                    : (widget.isLight ? Colors.black12 : Colors.white12),
+                width: _isHovered ? 1.0 : 0.8,
+              ),
+            ),
+            child: Math.tex(
+              item.displayMath,
+              textStyle: TextStyle(
+                color: _isHovered ? widget.themeAccent : widget.textPrimary,
+                fontSize: 13,
+              ),
+              onErrorFallback: (err) => Text(
+                item.label,
+                style: TextStyle(
+                  color: _isHovered ? widget.themeAccent : widget.textPrimary,
+                  fontSize: 10,
+                ),
+                textAlign: TextAlign.center,
+              ),
             ),
           ),
-        ],
+        ),
       ),
-    );
-
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(14),
-      child: blur > 0
-          ? BackdropFilter(
-              filter: ImageFilter.blur(sigmaX: blur, sigmaY: blur),
-              child: content,
-            )
-          : content,
     );
   }
 }

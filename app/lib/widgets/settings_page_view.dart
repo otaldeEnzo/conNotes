@@ -176,12 +176,24 @@ class _SettingsPageViewState extends State<SettingsPageView> {
                     ),
                     const SizedBox(height: 14),
 
-                    // Conteúdo Dinâmico da Categoria Ativa
+                    // Conteúdo Dinâmico da Categoria Ativa (Transição suave sem fantasmas)
                     AnimatedSwitcher(
-                      duration: const Duration(milliseconds: 240),
-                      switchInCurve: Curves.easeOutCubic,
-                      switchOutCurve: Curves.easeInCubic,
-                      child: _buildCategoryContent(),
+                      duration: const Duration(milliseconds: 160),
+                      switchInCurve: Curves.easeOutQuad,
+                      switchOutCurve: Curves.easeInQuad,
+                      layoutBuilder: (currentChild, previousChildren) {
+                        return currentChild ?? const SizedBox.shrink();
+                      },
+                      transitionBuilder: (child, animation) {
+                        return FadeTransition(
+                          opacity: animation,
+                          child: child,
+                        );
+                      },
+                      child: KeyedSubtree(
+                        key: ValueKey(widget.activeCategory),
+                        child: _buildCategoryContent(),
+                      ),
                     ),
                   ],
                 ),
@@ -235,6 +247,7 @@ class _SettingsPageViewState extends State<SettingsPageView> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       key: const ValueKey('visual_settings'),
       children: [
+        _buildStartupBehaviorTile(context),
         _buildWorkspaceDirectoryTile(context),
         _buildCustomFontsTile(context),
         SettingsSliderTile(
@@ -266,6 +279,199 @@ class _SettingsPageViewState extends State<SettingsPageView> {
           onChanged: (val) => widget.onUpdateSettings(widget.settings.copyWith(enableNativeRendering: val)),
         ),
       ],
+    );
+  }
+
+  Widget _buildStartupBehaviorTile(BuildContext context) {
+    final isLight = MoscaroTokens.isLight;
+    final textPrimary = MoscaroTokens.textPrimary;
+    final textSecondary = MoscaroTokens.textSecondary;
+    final theme = MoscaroThemeController.instance.currentTheme;
+    final themeAccent = theme.accentPrimary;
+    final currentBehavior = widget.settings.startupBehavior;
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(16),
+        child: BackdropFilter(
+          filter: ui.ImageFilter.blur(
+            sigmaX: MoscaroTokens.blurSigma,
+            sigmaY: MoscaroTokens.blurSigma,
+          ),
+          child: Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: isLight ? Colors.white.withValues(alpha: 0.6) : theme.backgroundSurface.withValues(alpha: 0.45),
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(
+                color: isLight ? Colors.black.withValues(alpha: 0.08) : Colors.white.withValues(alpha: 0.08),
+              ),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Row(
+                  children: [
+                    SvgIcon(
+                      name: 'restore',
+                      size: 20,
+                      color: themeAccent,
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Comportamento ao Inicializar',
+                            style: TextStyle(
+                              color: textPrimary,
+                              fontSize: 13.5,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          const SizedBox(height: 3),
+                          Text(
+                            'Escolha o que exibir ao abrir o conNotes.',
+                            style: TextStyle(
+                              color: textSecondary,
+                              fontSize: 11.5,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 14),
+                Row(
+                  children: [
+                    Expanded(
+                      child: _buildStartupOption(
+                        title: 'Reabrir última nota editada',
+                        subtitle: 'Restaura a nota ativa, abas e viewport',
+                        isSelected: currentBehavior == AppStartupBehavior.lastOpenedNote,
+                        icon: 'restore',
+                        onTap: () {
+                          widget.onUpdateSettings(
+                            widget.settings.copyWith(startupBehavior: AppStartupBehavior.lastOpenedNote),
+                          );
+                        },
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: _buildStartupOption(
+                        title: 'Página Inicial (Home)',
+                        subtitle: 'Inicia na galeria de cadernos e notas',
+                        isSelected: currentBehavior == AppStartupBehavior.homePage,
+                        icon: 'book',
+                        onTap: () {
+                          widget.onUpdateSettings(
+                            widget.settings.copyWith(startupBehavior: AppStartupBehavior.homePage),
+                          );
+                        },
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildStartupOption({
+    required String title,
+    required String subtitle,
+    required bool isSelected,
+    required String icon,
+    required VoidCallback onTap,
+  }) {
+    final theme = MoscaroThemeController.instance.currentTheme;
+    final accent = theme.accentPrimary;
+    final textPrimary = MoscaroTokens.textPrimary;
+    final textSecondary = MoscaroTokens.textSecondary;
+    final isLight = MoscaroTokens.isLight;
+
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      child: GestureDetector(
+        onTap: onTap,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 180),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          decoration: BoxDecoration(
+            color: isSelected
+                ? accent.withValues(alpha: isLight ? 0.15 : 0.2)
+                : (isLight ? Colors.black.withValues(alpha: 0.03) : Colors.white.withValues(alpha: 0.03)),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+              color: isSelected
+                  ? accent.withValues(alpha: 0.8)
+                  : (isLight ? Colors.black.withValues(alpha: 0.08) : Colors.white.withValues(alpha: 0.08)),
+              width: isSelected ? 1.5 : 1.0,
+            ),
+            boxShadow: isSelected
+                ? [
+                    BoxShadow(
+                      color: accent.withValues(alpha: 0.15),
+                      blurRadius: 8,
+                      offset: const Offset(0, 2),
+                    )
+                  ]
+                : null,
+          ),
+          child: Row(
+            children: [
+              SvgIcon(
+                name: icon,
+                size: 16,
+                color: isSelected ? accent : textSecondary,
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      style: TextStyle(
+                        color: isSelected ? textPrimary : textSecondary,
+                        fontSize: 12,
+                        fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      subtitle,
+                      style: TextStyle(
+                        color: textSecondary.withValues(alpha: 0.7),
+                        fontSize: 10.5,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              if (isSelected)
+                Padding(
+                  padding: const EdgeInsets.only(left: 6),
+                  child: Container(
+                    width: 8,
+                    height: 8,
+                    decoration: BoxDecoration(
+                      color: accent,
+                      shape: BoxShape.circle,
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 
@@ -1173,6 +1379,10 @@ class _SettingsPageViewState extends State<SettingsPageView> {
   }
 
   Widget _buildMeasurementSettings() {
+    final theme = MoscaroThemeController.instance.currentTheme;
+    final accent = theme.accentPrimary;
+    final isLight = MoscaroTokens.isLight;
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       key: const ValueKey('measurement_settings'),
@@ -1187,76 +1397,102 @@ class _SettingsPageViewState extends State<SettingsPageView> {
           formatValue: (val) => '${val.round()} px',
           onChanged: (val) => widget.onUpdateSettings(widget.settings.copyWith(inkSnapTolerance: val)),
         ),
-        Container(
-          margin: const EdgeInsets.only(bottom: 12),
-          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
-          decoration: BoxDecoration(
-            color: const Color(0xFF0C1422).withValues(alpha: 0.45),
+        Padding(
+          padding: const EdgeInsets.only(bottom: 12),
+          child: ClipRRect(
             borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: Colors.white.withValues(alpha: 0.08), width: 1.1),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text(
-                'Trava Magnética de Ângulo (Angle Snap)',
-                style: TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w600, letterSpacing: -0.1),
+            child: BackdropFilter(
+              filter: ui.ImageFilter.blur(
+                sigmaX: MoscaroTokens.blurSigma,
+                sigmaY: MoscaroTokens.blurSigma,
               ),
-              const SizedBox(height: 4),
-              Text(
-                'Define o intervalo de graus onde a rotação trava automaticamente.',
-                style: TextStyle(color: Colors.white.withValues(alpha: 0.55), fontSize: 12),
-              ),
-              const SizedBox(height: 14),
-              Wrap(
-                spacing: 10,
-                children: [0.0, 5.0, 15.0, 30.0, 45.0].map((step) {
-                  final isSelected = widget.settings.angleSnapStepDegrees == step;
-                  final label = step == 0.0 ? 'Livre' : '${step.round()}°';
-                  return GestureDetector(
-                    onTap: () => widget.onUpdateSettings(widget.settings.copyWith(angleSnapStepDegrees: step)),
-                    child: AnimatedContainer(
-                      duration: const Duration(milliseconds: 180),
-                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                      decoration: BoxDecoration(
-                        gradient: isSelected
-                            ? LinearGradient(
-                                colors: [
-                                  MoscaroTokens.auroraBlue.withValues(alpha: 0.3),
-                                  MoscaroTokens.auroraPurple.withValues(alpha: 0.15),
-                                ],
-                              )
-                            : null,
-                        color: isSelected ? null : Colors.white.withValues(alpha: 0.04),
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(
-                          color: isSelected
-                              ? MoscaroTokens.auroraBlue.withValues(alpha: 0.8)
-                              : Colors.white.withValues(alpha: 0.12),
-                          width: isSelected ? 1.2 : 1.0,
-                        ),
-                        boxShadow: isSelected
-                            ? [
-                                BoxShadow(
-                                  color: MoscaroTokens.auroraBlue.withValues(alpha: 0.2),
-                                  blurRadius: 8,
-                                ),
-                              ]
-                            : [],
-                      ),
-                      child: Text(
-                        label,
-                        style: TextStyle(
-                          color: isSelected ? MoscaroTokens.auroraBlue : Colors.white70,
-                          fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-                          fontSize: 12.5,
-                        ),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
+                decoration: BoxDecoration(
+                  color: isLight
+                      ? Colors.white.withValues(alpha: 0.65)
+                      : theme.backgroundSurface.withValues(alpha: 0.45),
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(
+                    color: isLight ? Colors.black12 : Colors.white.withValues(alpha: 0.08),
+                    width: 1.1,
+                  ),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Trava Magnética de Ângulo (Angle Snap)',
+                      style: TextStyle(
+                        color: isLight ? MoscaroTokens.textPrimary : Colors.white,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                        letterSpacing: -0.1,
                       ),
                     ),
-                  );
-                }).toList(),
+                    const SizedBox(height: 4),
+                    Text(
+                      'Define o intervalo de graus onde a rotação trava automaticamente.',
+                      style: TextStyle(
+                        color: isLight ? MoscaroTokens.textSecondary : Colors.white.withValues(alpha: 0.55),
+                        fontSize: 12,
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+                    Wrap(
+                      spacing: 10,
+                      children: [0.0, 5.0, 15.0, 30.0, 45.0].map((step) {
+                        final isSelected = widget.settings.angleSnapStepDegrees == step;
+                        final label = step == 0.0 ? 'Livre' : '${step.round()}°';
+                        return GestureDetector(
+                          onTap: () => widget.onUpdateSettings(widget.settings.copyWith(angleSnapStepDegrees: step)),
+                          child: AnimatedContainer(
+                            duration: const Duration(milliseconds: 180),
+                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                            decoration: BoxDecoration(
+                              gradient: isSelected
+                                  ? LinearGradient(
+                                      colors: [
+                                        accent.withValues(alpha: 0.3),
+                                        accent.withValues(alpha: 0.15),
+                                      ],
+                                    )
+                                  : null,
+                              color: isSelected
+                                  ? null
+                                  : (isLight ? Colors.black.withValues(alpha: 0.04) : Colors.white.withValues(alpha: 0.04)),
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(
+                                color: isSelected
+                                    ? accent.withValues(alpha: 0.8)
+                                    : (isLight ? Colors.black12 : Colors.white.withValues(alpha: 0.12)),
+                                width: isSelected ? 1.2 : 1.0,
+                              ),
+                              boxShadow: isSelected
+                                  ? [
+                                      BoxShadow(
+                                        color: accent.withValues(alpha: 0.2),
+                                        blurRadius: 8,
+                                      ),
+                                    ]
+                                  : [],
+                            ),
+                            child: Text(
+                              label,
+                              style: TextStyle(
+                                color: isSelected ? accent : (isLight ? MoscaroTokens.textPrimary : Colors.white70),
+                                fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                                fontSize: 12.5,
+                              ),
+                            ),
+                          ),
+                        );
+                      }).toList(),
+                    ),
+                  ],
+                ),
               ),
-            ],
+            ),
           ),
         ),
       ],
@@ -1488,101 +1724,6 @@ class _SettingsPageViewState extends State<SettingsPageView> {
 
         const SizedBox(height: 14),
 
-        // 4. Seletor de Motor de Resumo das Notas (Privacidade & Performance)
-        Padding(
-          padding: const EdgeInsets.only(left: 4, bottom: 8),
-          child: Text(
-            'RESUMO INTELIGENTE DAS NOTAS & PRIVACIDADE',
-            style: TextStyle(color: accent.withValues(alpha: 0.8), fontSize: 11, fontWeight: FontWeight.bold, letterSpacing: 1.0),
-          ),
-        ),
-
-        Padding(
-          padding: const EdgeInsets.only(bottom: 12),
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(16),
-            child: BackdropFilter(
-              filter: ui.ImageFilter.blur(
-                sigmaX: MoscaroTokens.blurSigma,
-                sigmaY: MoscaroTokens.blurSigma,
-              ),
-              child: Container(
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  color: theme.backgroundSurface.withValues(alpha: 0.45),
-                  borderRadius: BorderRadius.circular(16),
-                  border: Border.all(color: Colors.white.withValues(alpha: 0.08), width: 1.1),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        SvgIcon(name: widget.settings.noteSummaryEngine.iconName, size: 18, color: accent),
-                        const SizedBox(width: 10),
-                        const Text(
-                          'Motor de Síntese & OCR de Mídia (Privacidade)',
-                          style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: Colors.white),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 6),
-                    const Text(
-                      'Escolha como o conNotes deve processar o OCR de imagens no canvas e gerar os resumos dos cartões: via IA Multimodal na nuvem ou 100% Local e Privado no seu dispositivo.',
-                      style: TextStyle(fontSize: 12, color: Colors.white70),
-                    ),
-                    const SizedBox(height: 14),
-                    Wrap(
-                      spacing: 8,
-                      runSpacing: 8,
-                      children: NoteSummaryEngine.values.map((engine) {
-                        final isSelected = widget.settings.noteSummaryEngine == engine;
-                        return GestureDetector(
-                          onTap: () => widget.onUpdateSettings(widget.settings.copyWith(noteSummaryEngine: engine)),
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                            decoration: BoxDecoration(
-                              color: isSelected ? accent.withValues(alpha: 0.2) : Colors.white.withValues(alpha: 0.04),
-                              borderRadius: BorderRadius.circular(10),
-                              border: Border.all(
-                                color: isSelected ? accent : Colors.white.withValues(alpha: 0.1),
-                                width: isSelected ? 1.4 : 0.8,
-                              ),
-                            ),
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                SvgIcon(
-                                  name: engine.iconName,
-                                  size: 13,
-                                  color: isSelected ? accent : Colors.white70,
-                                ),
-                                const SizedBox(width: 6),
-                                Text(
-                                  engine.label,
-                                  style: TextStyle(
-                                    fontSize: 12,
-                                    fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
-                                    color: isSelected ? Colors.white : Colors.white70,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        );
-                      }).toList(),
-                    ),
-                    const SizedBox(height: 10),
-                    Text(
-                      widget.settings.noteSummaryEngine.description,
-                      style: TextStyle(fontSize: 11.5, color: accent.withValues(alpha: 0.9), fontStyle: FontStyle.italic),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ),
-        ),
       ],
     );
   }

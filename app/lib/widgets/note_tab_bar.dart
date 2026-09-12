@@ -170,65 +170,16 @@ class _NoteTabBarState extends State<NoteTabBar> {
                                   final isSelected = noteId == widget.selectedNoteId;
                                   final title = widget.noteTitles[noteId] ?? 'Nota sem título';
 
-                                  return Listener(
-                                    // Fechamento instantâneo com clique da rodinha do mouse (Middle Button)
-                                    onPointerDown: (event) {
-                                      if (event.buttons == kMiddleMouseButton) {
-                                        widget.onCloseNote(noteId);
-                                      }
-                                    },
-                                    child: GestureDetector(
-                                      onTap: () => widget.onSelectNote(noteId),
-                                      child: AnimatedContainer(
-                                        duration: const Duration(milliseconds: 200),
-                                        curve: Curves.easeOutCubic,
-                                        margin: const EdgeInsets.only(right: 6),
-                                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                                        decoration: BoxDecoration(
-                                          color: isSelected
-                                              ? (isLight ? MoscaroTokens.auroraBlue.withValues(alpha: 0.18) : Colors.white.withValues(alpha: 0.14))
-                                              : Colors.transparent,
-                                          borderRadius: BorderRadius.circular(MoscaroTokens.radiusButton),
-                                          border: Border.all(
-                                            color: isSelected
-                                                ? (isLight ? MoscaroTokens.auroraBlue.withValues(alpha: 0.6) : MoscaroTokens.borderGlow)
-                                                : Colors.transparent,
-                                            width: 1.0,
-                                          ),
-                                          boxShadow: isSelected
-                                              ? [
-                                                  BoxShadow(
-                                                    color: MoscaroTokens.auroraBlue.withValues(alpha: 0.2),
-                                                    blurRadius: 8,
-                                                    spreadRadius: 0,
-                                                  ),
-                                                ]
-                                              : null,
-                                        ),
-                                        child: Row(
-                                          mainAxisSize: MainAxisSize.min,
-                                          children: [
-                                            Text(
-                                              title,
-                                              style: TextStyle(
-                                                color: isSelected ? (isLight ? MoscaroTokens.auroraBlue : textPrimary) : textSecondary,
-                                                fontSize: 12,
-                                                fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
-                                              ),
-                                            ),
-                                            const SizedBox(width: 6),
-                                            GestureDetector(
-                                              onTap: () => widget.onCloseNote(noteId),
-                                              child: Icon(
-                                                Icons.close,
-                                                size: 12,
-                                                color: isSelected ? textSecondary : textSecondary.withValues(alpha: 0.5),
-                                              ),
-                                            ),
-                                          ],
-                                        ),
-                                      ),
-                                    ),
+                                  return _NoteTabItem(
+                                    key: ValueKey('tab_$noteId'),
+                                    noteId: noteId,
+                                    title: title,
+                                    isSelected: isSelected,
+                                    isLight: isLight,
+                                    textPrimary: textPrimary,
+                                    textSecondary: textSecondary,
+                                    onSelect: widget.onSelectNote,
+                                    onClose: widget.onCloseNote,
                                   );
                                 }).toList(),
                               ),
@@ -240,7 +191,7 @@ class _NoteTabBarState extends State<NoteTabBar> {
                 Container(width: 1, height: 14, color: dividerColor),
                 const SizedBox(width: 10),
                 IconButton(
-                  icon: Icon(Icons.add, color: iconColor, size: 18),
+                  icon: SvgIcon(name: 'plus', color: iconColor, size: 16),
                   onPressed: widget.onAddNote,
                   tooltip: 'Nova Nota',
                   padding: EdgeInsets.zero,
@@ -289,6 +240,141 @@ class _NoteTabBarState extends State<NoteTabBar> {
       borderRadius: MoscaroTokens.radiusPill,
       enableBlur: MoscaroTokens.enableToolbarBlur,
       padding: const EdgeInsets.only(left: 4, right: 4, top: 2, bottom: 2),
+    );
+  }
+}
+
+class _NoteTabItem extends StatefulWidget {
+  final String noteId;
+  final String title;
+  final bool isSelected;
+  final bool isLight;
+  final Color textPrimary;
+  final Color textSecondary;
+  final ValueChanged<String> onSelect;
+  final ValueChanged<String> onClose;
+
+  const _NoteTabItem({
+    super.key,
+    required this.noteId,
+    required this.title,
+    required this.isSelected,
+    required this.isLight,
+    required this.textPrimary,
+    required this.textSecondary,
+    required this.onSelect,
+    required this.onClose,
+  });
+
+  @override
+  State<_NoteTabItem> createState() => _NoteTabItemState();
+}
+
+class _NoteTabItemState extends State<_NoteTabItem> {
+  bool _isHovered = false;
+  bool _isCloseHovered = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return Listener(
+      onPointerDown: (event) {
+        if (event.buttons == kMiddleMouseButton) {
+          widget.onClose(widget.noteId);
+        }
+      },
+      child: MouseRegion(
+        cursor: SystemMouseCursors.click,
+        onEnter: (_) => setState(() => _isHovered = true),
+        onExit: (_) => setState(() => _isHovered = false),
+        child: GestureDetector(
+          onTap: () => widget.onSelect(widget.noteId),
+          child: AnimatedScale(
+            scale: _isHovered ? 1.025 : 1.0,
+            duration: const Duration(milliseconds: 120),
+            curve: Curves.easeOutQuad,
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 180),
+              curve: Curves.easeOutCubic,
+              margin: const EdgeInsets.only(right: 6),
+              padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 4),
+              decoration: BoxDecoration(
+                color: widget.isSelected
+                    ? (widget.isLight
+                        ? MoscaroTokens.auroraBlue.withValues(alpha: 0.18)
+                        : Colors.white.withValues(alpha: 0.14))
+                    : (_isHovered
+                        ? (widget.isLight ? Colors.black.withValues(alpha: 0.05) : Colors.white.withValues(alpha: 0.06))
+                        : Colors.transparent),
+                borderRadius: BorderRadius.circular(MoscaroTokens.radiusButton),
+                border: Border.all(
+                  color: widget.isSelected
+                      ? (widget.isLight ? MoscaroTokens.auroraBlue.withValues(alpha: 0.6) : MoscaroTokens.borderGlow)
+                      : (_isHovered
+                          ? (widget.isLight ? Colors.black.withValues(alpha: 0.12) : Colors.white.withValues(alpha: 0.12))
+                          : Colors.transparent),
+                  width: 1.0,
+                ),
+                boxShadow: widget.isSelected
+                    ? [
+                        BoxShadow(
+                          color: MoscaroTokens.auroraBlue.withValues(alpha: 0.25),
+                          blurRadius: 10,
+                          spreadRadius: 0,
+                        ),
+                      ]
+                    : null,
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    widget.title,
+                    style: TextStyle(
+                      color: widget.isSelected
+                          ? (widget.isLight ? MoscaroTokens.auroraBlue : widget.textPrimary)
+                          : widget.textSecondary,
+                      fontSize: 12,
+                      fontWeight: widget.isSelected ? FontWeight.w600 : FontWeight.normal,
+                    ),
+                  ),
+                  const SizedBox(width: 7),
+                  MouseRegion(
+                    cursor: SystemMouseCursors.click,
+                    onEnter: (_) => setState(() => _isCloseHovered = true),
+                    onExit: (_) => setState(() => _isCloseHovered = false),
+                    child: GestureDetector(
+                      onTap: () => widget.onClose(widget.noteId),
+                      child: AnimatedScale(
+                        scale: _isCloseHovered ? 1.2 : 1.0,
+                        duration: const Duration(milliseconds: 100),
+                        child: AnimatedContainer(
+                          duration: const Duration(milliseconds: 140),
+                          padding: const EdgeInsets.all(2),
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            color: _isCloseHovered
+                                ? Colors.redAccent.withValues(alpha: 0.25)
+                                : Colors.transparent,
+                          ),
+                          child: SvgIcon(
+                            name: 'close',
+                            size: 11,
+                            color: _isCloseHovered
+                                ? Colors.redAccent
+                                : (widget.isSelected
+                                    ? widget.textSecondary
+                                    : widget.textSecondary.withValues(alpha: 0.5)),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
     );
   }
 }

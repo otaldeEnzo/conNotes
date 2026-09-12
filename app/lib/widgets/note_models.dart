@@ -5,6 +5,8 @@ import 'spatial_index.dart';
 import 'selection_models.dart';
 import 'canvas_layers.dart';
 import '../models/canvas_card_model.dart';
+import 'undo_commands.dart';
+import 'canvas_dot_grid_painter.dart';
 
 /// Tipos de Documento Suportados no Ecossistema conNotes
 enum NoteType {
@@ -65,6 +67,7 @@ class NoteDocument {
   bool isFavorite;
   List<String> tags;
   String? themeId;
+  CanvasBackgroundType backgroundType;
   DateTime createdAt;
   DateTime updatedAt;
 
@@ -97,6 +100,7 @@ class NoteDocument {
     this.isFavorite = false,
     List<String>? tags,
     this.themeId,
+    this.backgroundType = CanvasBackgroundType.dotGrid,
     List<NoteDocument>? children,
     List<InkStroke>? strokes,
     List<CanvasCardModel>? cards,
@@ -274,8 +278,10 @@ class NoteDocument {
         'panX': panX,
         'panY': panY,
         'zoomScale': zoomScale,
+        'backgroundType': backgroundType.name,
         'strokes': _strokesList.map((s) => s.toJson()).toList(),
         'cards': cards.map((c) => c.toMap()).toList(),
+        'historyData': AppUndoManager.instance.serializeHistory(id, maxCommands: 50),
       },
       'childrenSubnotes': children.map((c) => c.toCnCanvasMap()).toList(),
     };
@@ -300,6 +306,17 @@ class NoteDocument {
     final panY = (canvasData['panY'] as num?)?.toDouble() ?? (map['panY'] as num?)?.toDouble() ?? 0.0;
     final zoomScale = (canvasData['zoomScale'] as num?)?.toDouble() ?? 1.0;
 
+    CanvasBackgroundType parsedBg = CanvasBackgroundType.dotGrid;
+    final bgStr = (canvasData['backgroundType'] as String?) ?? (metadata['backgroundType'] as String?);
+    if (bgStr != null) {
+      for (final b in CanvasBackgroundType.values) {
+        if (b.name == bgStr) {
+          parsedBg = b;
+          break;
+        }
+      }
+    }
+
     final rawStrokes = (canvasData['strokes'] as List<dynamic>?) ?? (map['strokes'] as List<dynamic>?) ?? [];
     final List<InkStroke> strokes = rawStrokes
         .map((s) => InkStroke.fromJson(s as Map<String, dynamic>))
@@ -314,6 +331,12 @@ class NoteDocument {
     final List<NoteDocument> children = rawChildren
         .map((c) => NoteDocument.fromCnCanvasMap(c as Map<String, dynamic>))
         .toList();
+
+    final historyData = (canvasData['historyData'] as Map<String, dynamic>?) ??
+        (map['historyData'] as Map<String, dynamic>?);
+    if (historyData != null) {
+      AppUndoManager.instance.restoreHistory(id, historyData);
+    }
 
     DateTime parseDate(dynamic val) {
       if (val is String) {
@@ -332,6 +355,7 @@ class NoteDocument {
       isFavorite: isFavorite,
       tags: tags,
       themeId: themeId,
+      backgroundType: parsedBg,
       panX: panX,
       panY: panY,
       zoomScale: zoomScale,

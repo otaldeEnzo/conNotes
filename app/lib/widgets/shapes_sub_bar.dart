@@ -72,100 +72,72 @@ class _ShapesSubBarState extends State<ShapesSubBar> {
   }
 
   @override
+  @override
   Widget build(BuildContext context) {
-    return IgnorePointer(
-      ignoring: !widget.isVisible,
-      child: AnimatedSlide(
-        duration: const Duration(milliseconds: 240),
-        curve: Curves.easeOutCubic,
-        offset: widget.isVisible ? Offset.zero : const Offset(0, 0.4),
-        child: AnimatedScale(
-          duration: const Duration(milliseconds: 240),
-          curve: Curves.easeOutCubic,
-          scale: widget.isVisible ? 1.0 : 0.88,
-          child: AnimatedOpacity(
-            duration: const Duration(milliseconds: 200),
-            opacity: widget.isVisible ? 1.0 : 0.0,
-            child: Container(
-              height: 44,
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  // 1. Categorias Principais
-                  _buildCategoryButton(ShapeCategory.lines, 'Linhas', 'shape_line'),
-                  const SizedBox(width: 3),
-                  _buildCategoryButton(ShapeCategory.circles, 'Círculos', 'shape_circle'),
-                  const SizedBox(width: 3),
-                  _buildCategoryButton(ShapeCategory.triangles, 'Triângulos', 'shape_triangle'),
-                  const SizedBox(width: 3),
-                  _buildCategoryButton(ShapeCategory.polygons, 'Polígonos', 'shape_rect'),
+    return AnimatedSize(
+      duration: const Duration(milliseconds: 220),
+      curve: Curves.easeOutCubic,
+      child: Container(
+        height: 44,
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // 1. Categorias Principais
+            _buildCategoryButton(ShapeCategory.lines, 'Linhas', 'shape_line'),
+            const SizedBox(width: 3),
+            _buildCategoryButton(ShapeCategory.circles, 'Círculos', 'shape_circle'),
+            const SizedBox(width: 3),
+            _buildCategoryButton(ShapeCategory.triangles, 'Triângulos', 'shape_triangle'),
+            const SizedBox(width: 3),
+            _buildCategoryButton(ShapeCategory.polygons, 'Polígonos', 'shape_rect'),
 
-                  const SizedBox(width: 6),
-                  Container(width: 1, height: 18, color: Colors.white24),
-                  const SizedBox(width: 6),
+            const SizedBox(width: 6),
+            Container(width: 1, height: 18, color: Colors.white24),
+            const SizedBox(width: 6),
 
-                  // 2. Sub-formas da categoria ativa
-                  ..._buildSubShapesForCategory(_activeCategory),
-                ],
+            // 2. Sub-formas com transição fluida de tamanho e cross-fade
+            AnimatedSize(
+              duration: const Duration(milliseconds: 200),
+              curve: Curves.easeOutCubic,
+              child: AnimatedSwitcher(
+                duration: const Duration(milliseconds: 180),
+                switchInCurve: Curves.easeOutCubic,
+                switchOutCurve: Curves.easeInCubic,
+                transitionBuilder: (child, animation) => FadeTransition(
+                  opacity: animation,
+                  child: child,
+                ),
+                child: Row(
+                  key: ValueKey(_activeCategory),
+                  mainAxisSize: MainAxisSize.min,
+                  children: _buildSubShapesForCategory(_activeCategory),
+                ),
               ),
-            ).moscaroV2(
-              borderRadius: MoscaroTokens.radiusPill,
-              padding: EdgeInsets.zero,
             ),
-          ),
+          ],
         ),
+      ).moscaroV2(
+        borderRadius: MoscaroTokens.radiusPill,
+        padding: EdgeInsets.zero,
       ),
     );
   }
 
   Widget _buildCategoryButton(ShapeCategory category, String label, String assetName) {
     final isSelected = _activeCategory == category;
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        borderRadius: BorderRadius.circular(16),
-        onTap: () {
-          setState(() {
-            _activeCategory = category;
-          });
-          final defaultShape = _defaultShapeForCategory(category);
-          widget.onSelectShape(defaultShape);
-        },
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 180),
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(16),
-            color: isSelected
-                ? MoscaroTokens.auroraBlue.withValues(alpha: 0.18)
-                : Colors.transparent,
-            border: Border.all(
-              color: isSelected ? MoscaroTokens.auroraBlue : Colors.transparent,
-              width: 1.0,
-            ),
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              SvgIcon(
-                assetName: assetName,
-                size: 14,
-                color: isSelected ? MoscaroTokens.auroraBlue : Colors.white70,
-              ),
-              const SizedBox(width: 4),
-              Text(
-                label,
-                style: TextStyle(
-                  color: isSelected ? Colors.white : Colors.white60,
-                  fontSize: 11,
-                  fontWeight: isSelected ? FontWeight.w600 : FontWeight.w400,
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
+    return _ShapeCategoryButton(
+      category: category,
+      label: label,
+      assetName: assetName,
+      isSelected: isSelected,
+      onTap: () {
+        setState(() {
+          _activeCategory = category;
+        });
+        final defaultShape = _defaultShapeForCategory(category);
+        widget.onSelectShape(defaultShape);
+      },
     );
   }
 
@@ -198,30 +170,76 @@ class _ShapesSubBarState extends State<ShapesSubBar> {
 
   Widget _buildShapeItem(ShapeType type, String label, String assetName) {
     final isSelected = widget.activeShape == type;
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 2),
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          borderRadius: BorderRadius.circular(14),
-          onTap: () => widget.onSelectShape(type),
+    return _ShapeItemButton(
+      type: type,
+      label: label,
+      assetName: assetName,
+      isSelected: isSelected,
+      onTap: () => widget.onSelectShape(type),
+    );
+  }
+}
+
+class _ShapeCategoryButton extends StatefulWidget {
+  final ShapeCategory category;
+  final String label;
+  final String assetName;
+  final bool isSelected;
+  final VoidCallback onTap;
+
+  const _ShapeCategoryButton({
+    required this.category,
+    required this.label,
+    required this.assetName,
+    required this.isSelected,
+    required this.onTap,
+  });
+
+  @override
+  State<_ShapeCategoryButton> createState() => _ShapeCategoryButtonState();
+}
+
+class _ShapeCategoryButtonState extends State<_ShapeCategoryButton> {
+  bool _isHovered = false;
+  bool _isPressed = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final double scale = _isPressed ? 0.92 : (_isHovered ? 1.04 : 1.0);
+
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      onEnter: (_) => setState(() => _isHovered = true),
+      onExit: (_) => setState(() => _isHovered = false),
+      child: GestureDetector(
+        onTapDown: (_) => setState(() => _isPressed = true),
+        onTapUp: (_) => setState(() => _isPressed = false),
+        onTapCancel: () {
+          if (_isPressed) setState(() => _isPressed = false);
+        },
+        onTap: widget.onTap,
+        child: AnimatedScale(
+          scale: scale,
+          duration: const Duration(milliseconds: 140),
+          curve: Curves.easeOutCubic,
           child: AnimatedContainer(
             duration: const Duration(milliseconds: 180),
-            padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3.5),
+            curve: Curves.easeOutCubic,
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
             decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(14),
-              color: isSelected
-                  ? MoscaroTokens.auroraPurple.withValues(alpha: 0.25)
-                  : Colors.transparent,
+              borderRadius: BorderRadius.circular(16),
+              color: widget.isSelected
+                  ? MoscaroTokens.auroraBlue.withValues(alpha: 0.18)
+                  : (_isHovered ? Colors.white.withValues(alpha: 0.06) : Colors.transparent),
               border: Border.all(
-                color: isSelected ? MoscaroTokens.auroraPurple : Colors.white12,
-                width: isSelected ? 1.4 : 0.8,
+                color: widget.isSelected ? MoscaroTokens.auroraBlue : Colors.transparent,
+                width: 1.0,
               ),
-              boxShadow: isSelected
+              boxShadow: widget.isSelected
                   ? [
                       BoxShadow(
-                        color: MoscaroTokens.auroraPurple.withValues(alpha: 0.3),
-                        blurRadius: 8,
+                        color: MoscaroTokens.auroraBlue.withValues(alpha: 0.3),
+                        blurRadius: 6,
                       ),
                     ]
                   : null,
@@ -230,20 +248,113 @@ class _ShapesSubBarState extends State<ShapesSubBar> {
               mainAxisSize: MainAxisSize.min,
               children: [
                 SvgIcon(
-                  assetName: assetName,
-                  size: 13,
-                  color: isSelected ? MoscaroTokens.auroraPurple : Colors.white70,
+                  assetName: widget.assetName,
+                  size: 14,
+                  color: widget.isSelected ? MoscaroTokens.auroraBlue : Colors.white70,
                 ),
                 const SizedBox(width: 4),
                 Text(
-                  label,
+                  widget.label,
                   style: TextStyle(
-                    color: isSelected ? Colors.white : Colors.white70,
-                    fontSize: 10.5,
-                    fontWeight: isSelected ? FontWeight.w600 : FontWeight.w400,
+                    color: widget.isSelected ? Colors.white : Colors.white60,
+                    fontSize: 11,
+                    fontWeight: widget.isSelected ? FontWeight.w600 : FontWeight.w400,
                   ),
                 ),
               ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ShapeItemButton extends StatefulWidget {
+  final ShapeType type;
+  final String label;
+  final String assetName;
+  final bool isSelected;
+  final VoidCallback onTap;
+
+  const _ShapeItemButton({
+    required this.type,
+    required this.label,
+    required this.assetName,
+    required this.isSelected,
+    required this.onTap,
+  });
+
+  @override
+  State<_ShapeItemButton> createState() => _ShapeItemButtonState();
+}
+
+class _ShapeItemButtonState extends State<_ShapeItemButton> {
+  bool _isHovered = false;
+  bool _isPressed = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final double scale = _isPressed ? 0.90 : (_isHovered ? 1.06 : 1.0);
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 2),
+      child: MouseRegion(
+        cursor: SystemMouseCursors.click,
+        onEnter: (_) => setState(() => _isHovered = true),
+        onExit: (_) => setState(() => _isHovered = false),
+        child: GestureDetector(
+          onTapDown: (_) => setState(() => _isPressed = true),
+          onTapUp: (_) => setState(() => _isPressed = false),
+          onTapCancel: () {
+            if (_isPressed) setState(() => _isPressed = false);
+          },
+          onTap: widget.onTap,
+          child: AnimatedScale(
+            scale: scale,
+            duration: const Duration(milliseconds: 140),
+            curve: Curves.easeOutCubic,
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 180),
+              curve: Curves.easeOutCubic,
+              padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3.5),
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(14),
+                color: widget.isSelected
+                    ? MoscaroTokens.auroraPurple.withValues(alpha: 0.25)
+                    : (_isHovered ? Colors.white.withValues(alpha: 0.06) : Colors.transparent),
+                border: Border.all(
+                  color: widget.isSelected ? MoscaroTokens.auroraPurple : Colors.white12,
+                  width: widget.isSelected ? 1.4 : 0.8,
+                ),
+                boxShadow: widget.isSelected
+                    ? [
+                        BoxShadow(
+                          color: MoscaroTokens.auroraPurple.withValues(alpha: 0.3),
+                          blurRadius: 8,
+                        ),
+                      ]
+                    : null,
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  SvgIcon(
+                    assetName: widget.assetName,
+                    size: 13,
+                    color: widget.isSelected ? MoscaroTokens.auroraPurple : Colors.white70,
+                  ),
+                  const SizedBox(width: 4),
+                  Text(
+                    widget.label,
+                    style: TextStyle(
+                      color: widget.isSelected ? Colors.white : Colors.white70,
+                      fontSize: 10.5,
+                      fontWeight: widget.isSelected ? FontWeight.w600 : FontWeight.w400,
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
         ),

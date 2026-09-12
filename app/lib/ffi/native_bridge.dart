@@ -2,6 +2,8 @@ import 'dart:convert';
 import 'dart:ffi' as ffi;
 import 'dart:io';
 import 'package:ffi/ffi.dart';
+import 'package:flutter/foundation.dart';
+
 
 // Definições de tipos C-ABI
 typedef ConnotesCreateDocumentNative = ffi.Pointer<Utf8> Function();
@@ -67,15 +69,6 @@ typedef ConnotesRedoDart = bool Function(ffi.Pointer<Utf8> docId);
 typedef ConnotesFreeStringNative = ffi.Void Function(ffi.Pointer<Utf8> ptr);
 typedef ConnotesFreeStringDart = void Function(ffi.Pointer<Utf8> ptr);
 
-typedef ConnotesInitTextureNative = ffi.Int64 Function(ffi.Pointer<Utf8> docId);
-typedef ConnotesInitTextureDart = int Function(ffi.Pointer<Utf8> docId);
-
-typedef ConnotesSendDrawEventNative = ffi.Void Function(ffi.Pointer<Utf8> docId, ffi.Pointer<Utf8> eventJson);
-typedef ConnotesSendDrawEventDart = void Function(ffi.Pointer<Utf8> docId, ffi.Pointer<Utf8> eventJson);
-
-typedef ConnotesRenderTickNative = ffi.Void Function(ffi.Pointer<Utf8> docId);
-typedef ConnotesRenderTickDart = void Function(ffi.Pointer<Utf8> docId);
-
 final class StylusNativeStateFfi extends ffi.Struct {
   @ffi.Bool()
   external bool is_contact;
@@ -125,9 +118,6 @@ class ConnotesNativeBridge {
   late final ConnotesUndoDart _undo;
   late final ConnotesRedoDart _redo;
   late final ConnotesFreeStringDart _freeString;
-  late final ConnotesInitTextureDart _initTexture;
-  late final ConnotesSendDrawEventDart _sendDrawEvent;
-  late final ConnotesRenderTickDart _renderTick;
 
   ConnotesGetStylusStateDart? _getStylusState;
   ConnotesQueryStylusCapsDart? _queryStylusCaps;
@@ -139,7 +129,42 @@ class ConnotesNativeBridge {
   void _init() {
     try {
       if (Platform.isWindows) {
-        _dylib = ffi.DynamicLibrary.open('connotes_core.dll');
+        final exeDir = File(Platform.resolvedExecutable).parent.path;
+        final onnxCandidates = [
+          '$exeDir\\onnxruntime.dll',
+          'onnxruntime.dll',
+          '../connotes_core/target/release/onnxruntime.dll',
+          '../connotes_core/target/debug/onnxruntime.dll',
+          'connotes_core/target/release/onnxruntime.dll',
+          'connotes_core/target/debug/onnxruntime.dll',
+        ];
+        for (final onnxCand in onnxCandidates) {
+          if (File(onnxCand).existsSync()) {
+            try {
+              ffi.DynamicLibrary.open(File(onnxCand).absolute.path);
+              break;
+            } catch (_) {}
+          }
+        }
+
+        final candidates = [
+          '$exeDir\\connotes_core.dll',
+          'connotes_core.dll',
+          '../connotes_core/target/release/connotes_core.dll',
+          '../connotes_core/target/debug/connotes_core.dll',
+          'connotes_core/target/release/connotes_core.dll',
+          'connotes_core/target/debug/connotes_core.dll',
+        ];
+        ffi.DynamicLibrary? loadedLib;
+        for (final cand in candidates) {
+          if (File(cand).existsSync()) {
+            try {
+              loadedLib = ffi.DynamicLibrary.open(File(cand).absolute.path);
+              break;
+            } catch (_) {}
+          }
+        }
+        _dylib = loadedLib ?? ffi.DynamicLibrary.open('connotes_core.dll');
         _processLib = ffi.DynamicLibrary.process();
       } else if (Platform.isAndroid) {
         _dylib = ffi.DynamicLibrary.open('libconnotes_core.so');
@@ -180,18 +205,6 @@ class ConnotesNativeBridge {
           .lookup<ffi.NativeFunction<ConnotesFreeStringNative>>('connotes_free_string')
           .asFunction();
 
-      _initTexture = _dylib
-          .lookup<ffi.NativeFunction<ConnotesInitTextureNative>>('connotes_init_texture')
-          .asFunction();
-
-      _sendDrawEvent = _dylib
-          .lookup<ffi.NativeFunction<ConnotesSendDrawEventNative>>('connotes_send_draw_event')
-          .asFunction();
-
-      _renderTick = _dylib
-          .lookup<ffi.NativeFunction<ConnotesRenderTickNative>>('connotes_render_tick')
-          .asFunction();
-
       try {
         if (Platform.isWindows) {
           _getStylusState = _processLib
@@ -207,6 +220,7 @@ class ConnotesNativeBridge {
 
       _isAvailable = true;
     } catch (e) {
+      debugPrint('[ConnotesNativeBridge] Falha ao carregar motor Rust: $e');
       _isAvailable = false;
     }
   }
@@ -285,30 +299,6 @@ class ConnotesNativeBridge {
     final res = _redo(docIdPtr);
     calloc.free(docIdPtr);
     return res;
-  }
-
-  int? initTexture(String docId) {
-    if (!_isAvailable) return null;
-    final docIdPtr = docId.toNativeUtf8();
-    final res = _initTexture(docIdPtr);
-    calloc.free(docIdPtr);
-    return res;
-  }
-
-  void sendDrawEvent(String docId, String eventJson) {
-    if (!_isAvailable) return;
-    final docIdPtr = docId.toNativeUtf8();
-    final eventJsonPtr = eventJson.toNativeUtf8();
-    _sendDrawEvent(docIdPtr, eventJsonPtr);
-    calloc.free(docIdPtr);
-    calloc.free(eventJsonPtr);
-  }
-
-  void renderTick(String docId) {
-    if (!_isAvailable) return;
-    final docIdPtr = docId.toNativeUtf8();
-    _renderTick(docIdPtr);
-    calloc.free(docIdPtr);
   }
 
   /// Recupera o estado em tempo real da caneta via Win32.

@@ -1,4 +1,30 @@
+import 'package:flutter/material.dart';
 import '../models/theme_models.dart';
+import 'ink_models.dart';
+
+/// Comportamento de Inicialização do Aplicativo
+enum AppStartupBehavior {
+  lastOpenedNote,
+  homePage;
+
+  String get label {
+    switch (this) {
+      case AppStartupBehavior.lastOpenedNote:
+        return 'Reabrir última nota editada';
+      case AppStartupBehavior.homePage:
+        return 'Abrir na Página Inicial (Home)';
+    }
+  }
+
+  String get description {
+    switch (this) {
+      case AppStartupBehavior.lastOpenedNote:
+        return 'Restaura imediatamente o canvas e as abas abertas da última sessão.';
+      case AppStartupBehavior.homePage:
+        return 'Inicia sempre na tela inicial com o painel de cadernos e notas recentes.';
+    }
+  }
+}
 
 /// Categorias de Configuração da SettingsTabBar
 enum SettingsCategory {
@@ -210,6 +236,21 @@ class AppSettingsState {
   final bool enableAuroraBorders;
   final bool showTelemetryHud;
   final bool enableNativeRendering;
+  final AppStartupBehavior startupBehavior;
+
+  // Presets de Caneta do Usuário
+  final List<PenSlotPreset> penSlots;
+  final String? activePenSlotId;
+
+  static List<PenSlotPreset> get defaultPenSlots => const [
+    PenSlotPreset(id: '1', name: 'Branco Técnico', color: Colors.white, strokeWidth: 2.5, toolType: InkToolType.technical, enablePressure: true),
+    PenSlotPreset(id: '2', name: 'Ciano Neon', color: Color(0xFF00E1FF), strokeWidth: 3.0, toolType: InkToolType.technical, enablePressure: true),
+    PenSlotPreset(id: '3', name: 'Rosa Neon', color: Color(0xFFFF007A), strokeWidth: 3.5, toolType: InkToolType.fountain, enablePressure: true),
+    PenSlotPreset(id: '4', name: 'Roxo Grafite', color: Color(0xFFA855F7), strokeWidth: 2.5, toolType: InkToolType.pencil, enablePressure: true),
+    PenSlotPreset(id: '5', name: 'Marca-Texto', color: Color(0xFFF59E0B), strokeWidth: 6.0, toolType: InkToolType.highlighter, enablePressure: false),
+  ];
+
+  List<PenSlotPreset> get effectivePenSlots => penSlots.isNotEmpty ? penSlots : defaultPenSlots;
 
   // 2. Canvas & Grid STEM
   final double gridSpacing;
@@ -272,6 +313,9 @@ class AppSettingsState {
     this.enableAuroraBorders = true,
     this.showTelemetryHud = true,
     this.enableNativeRendering = true,
+    this.startupBehavior = AppStartupBehavior.lastOpenedNote,
+    this.penSlots = const [],
+    this.activePenSlotId,
     this.gridSpacing = 28.0,
     this.enableMouseGlow = true,
     this.mouseGlowRadius = 120.0,
@@ -321,6 +365,9 @@ class AppSettingsState {
     bool? enableAuroraBorders,
     bool? showTelemetryHud,
     bool? enableNativeRendering,
+    AppStartupBehavior? startupBehavior,
+    List<PenSlotPreset>? penSlots,
+    String? activePenSlotId,
     double? gridSpacing,
     bool? enableMouseGlow,
     double? mouseGlowRadius,
@@ -367,6 +414,9 @@ class AppSettingsState {
       enableAuroraBorders: enableAuroraBorders ?? this.enableAuroraBorders,
       showTelemetryHud: showTelemetryHud ?? this.showTelemetryHud,
       enableNativeRendering: enableNativeRendering ?? this.enableNativeRendering,
+      startupBehavior: startupBehavior ?? this.startupBehavior,
+      penSlots: penSlots ?? this.penSlots,
+      activePenSlotId: activePenSlotId ?? this.activePenSlotId,
       gridSpacing: (gridSpacing ?? this.gridSpacing).clamp(16.0, 48.0),
       enableMouseGlow: enableMouseGlow ?? this.enableMouseGlow,
       mouseGlowRadius: (mouseGlowRadius ?? this.mouseGlowRadius).clamp(60.0, 240.0),
@@ -416,6 +466,9 @@ class AppSettingsState {
       'enableAuroraBorders': enableAuroraBorders,
       'showTelemetryHud': showTelemetryHud,
       'enableNativeRendering': enableNativeRendering,
+      'startupBehavior': startupBehavior.name,
+      'penSlots': effectivePenSlots.map((s) => s.toJson()).toList(),
+      'activePenSlotId': activePenSlotId,
       'gridSpacing': gridSpacing,
       'enableMouseGlow': enableMouseGlow,
       'mouseGlowRadius': mouseGlowRadius,
@@ -497,6 +550,25 @@ class AppSettingsState {
       orElse: () => StylusTriggerMode.hold,
     );
 
+    final startupStr = json['startupBehavior'] as String?;
+    final startupBehavior = AppStartupBehavior.values.firstWhere(
+      (e) => e.name == startupStr,
+      orElse: () => AppStartupBehavior.lastOpenedNote,
+    );
+
+    final rawPenSlots = json['penSlots'] as List<dynamic>?;
+    final List<PenSlotPreset> parsedPenSlots = <PenSlotPreset>[];
+    if (rawPenSlots != null) {
+      for (final item in rawPenSlots) {
+        if (item is Map) {
+          try {
+            final map = Map<String, dynamic>.from(item);
+            parsedPenSlots.add(PenSlotPreset.fromJson(map));
+          } catch (_) {}
+        }
+      }
+    }
+
     return AppSettingsState(
       activeThemeId: json['activeThemeId'] as String? ?? 'moscaro_cyan',
       customBgMode: json['customBgMode'] as String? ?? 'preset',
@@ -512,6 +584,9 @@ class AppSettingsState {
       enableAuroraBorders: json['enableAuroraBorders'] as bool? ?? true,
       showTelemetryHud: json['showTelemetryHud'] as bool? ?? true,
       enableNativeRendering: json['enableNativeRendering'] as bool? ?? true,
+      startupBehavior: startupBehavior,
+      penSlots: parsedPenSlots,
+      activePenSlotId: json['activePenSlotId'] as String?,
       gridSpacing: (json['gridSpacing'] as num?)?.toDouble() ?? 28.0,
       enableMouseGlow: json['enableMouseGlow'] as bool? ?? true,
       mouseGlowRadius: (json['mouseGlowRadius'] as num?)?.toDouble() ?? 120.0,

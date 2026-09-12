@@ -69,6 +69,41 @@ class MarkdownLatexBlockViewState extends State<MarkdownLatexBlockView> {
   bool _showSlashMenu = false;
   String _slashQuery = '';
 
+  // Cache para Performance O(1) de Build & Layout (Evita recriar Math.tex a cada frame)
+  String? _lastParsedContent;
+  bool? _lastIsLight;
+  Color? _lastTextPrimary;
+  Color? _lastThemeAccent;
+  String? _lastFontFamily;
+  double? _lastFontSize;
+  List<ParsedContentBlock>? _cachedParsedBlocks;
+  final Map<int, Widget> _cachedBlockWidgets = {};
+
+  bool _isCacheValid(bool isLight, Color textPrimary, Color themeAccent, String fontFamily, double fontSize) {
+    return _lastParsedContent == widget.card.content &&
+           _lastIsLight == isLight &&
+           _lastTextPrimary == textPrimary &&
+           _lastThemeAccent == themeAccent &&
+           _lastFontFamily == fontFamily &&
+           _lastFontSize == fontSize &&
+           _cachedParsedBlocks != null;
+  }
+
+  void _updateCache(bool isLight, Color textPrimary, Color themeAccent, String fontFamily, double fontSize) {
+    _lastParsedContent = widget.card.content;
+    _lastIsLight = isLight;
+    _lastTextPrimary = textPrimary;
+    _lastThemeAccent = themeAccent;
+    _lastFontFamily = fontFamily;
+    _lastFontSize = fontSize;
+    
+    _cachedParsedBlocks = _parseContentIntoBlocks(widget.card.content);
+    _cachedBlockWidgets.clear();
+    for (final block in _cachedParsedBlocks!) {
+      _cachedBlockWidgets[block.index] = _buildBlockContent(block, isLight, themeAccent, textPrimary, fontFamily, fontSize);
+    }
+  }
+
   @override
   void initState() {
     super.initState();
@@ -472,9 +507,12 @@ class MarkdownLatexBlockViewState extends State<MarkdownLatexBlockView> {
     final fontFamily = widget.card.fontFamily;
     final fontSize = widget.card.fontSize;
 
-    final blocks = _parseContentIntoBlocks(widget.card.content);
+    if (!_isCacheValid(isLight, textPrimary, themeAccent, fontFamily, fontSize)) {
+      _updateCache(isLight, textPrimary, themeAccent, fontFamily, fontSize);
+    }
+
+    final blocks = _cachedParsedBlocks!;
     final availableBodyHeight = math.max(60.0, widget.card.height - 46.0);
-    final isSingleBlock = blocks.length <= 1;
 
     if (widget.card.content.trim().isEmpty && _editingBlockIndex == null) {
       return _buildPlaceholderSuggestionView(
@@ -490,8 +528,8 @@ class MarkdownLatexBlockViewState extends State<MarkdownLatexBlockView> {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
       child: ClipRect(
-        child: Container(
-          width: double.infinity,
+        child: SingleChildScrollView(
+          physics: const ClampingScrollPhysics(),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -817,7 +855,6 @@ class MarkdownLatexBlockViewState extends State<MarkdownLatexBlockView> {
       onExit: (_) => setState(() => _hoveredBlockIndex = null),
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,
-        onTap: () => _startEditingBlock(block),
         onDoubleTap: () => _startEditingBlock(block),
         child: Stack(
           clipBehavior: Clip.none,
@@ -833,7 +870,7 @@ class MarkdownLatexBlockViewState extends State<MarkdownLatexBlockView> {
                   width: 1.0,
                 ),
               ),
-              child: _buildBlockContent(block, isLight, themeAccent, textPrimary, fontFamily, fontSize),
+              child: _cachedBlockWidgets[block.index] ?? _buildBlockContent(block, isLight, themeAccent, textPrimary, fontFamily, fontSize),
             ),
 
             // Controles de Ação de Bloco no Hover no Padrão Moscaro Glass v2 no Canto Superior Direito
@@ -889,12 +926,12 @@ class MarkdownLatexBlockViewState extends State<MarkdownLatexBlockView> {
             onTap: () => _startEditingBlock(block),
             borderRadius: BorderRadius.circular(4),
             child: Padding(
-              padding: const EdgeInsets.all(2),
+              padding: const EdgeInsets.all(3),
               child: Tooltip(
                 message: 'Editar Bloco',
-                child: Icon(
-                  Icons.edit_note_rounded,
-                  size: 14,
+                child: SvgIcon(
+                  name: 'pen',
+                  size: 12,
                   color: textPrimary.withValues(alpha: 0.85),
                 ),
               ),
@@ -905,10 +942,14 @@ class MarkdownLatexBlockViewState extends State<MarkdownLatexBlockView> {
             onTap: () => createNewBlockBelow(block.index),
             borderRadius: BorderRadius.circular(4),
             child: Padding(
-              padding: const EdgeInsets.all(2),
+              padding: const EdgeInsets.all(3),
               child: Tooltip(
                 message: 'Novo Bloco Abaixo',
-                child: Icon(Icons.add_rounded, size: 14, color: themeAccent),
+                child: SvgIcon(
+                  name: 'plus',
+                  size: 12,
+                  color: themeAccent,
+                ),
               ),
             ),
           ),
@@ -917,12 +958,12 @@ class MarkdownLatexBlockViewState extends State<MarkdownLatexBlockView> {
             onTap: () => deleteBlock(block.index),
             borderRadius: BorderRadius.circular(4),
             child: const Padding(
-              padding: EdgeInsets.all(2),
+              padding: EdgeInsets.all(3),
               child: Tooltip(
                 message: 'Excluir Bloco',
-                child: Icon(
-                  Icons.delete_outline_rounded,
-                  size: 14,
+                child: SvgIcon(
+                  name: 'trash',
+                  size: 12,
                   color: Color(0xFFFF007A),
                 ),
               ),
@@ -943,7 +984,7 @@ class MarkdownLatexBlockViewState extends State<MarkdownLatexBlockView> {
   ) {
     switch (block.type) {
       case BlockType.latexBlock:
-        return _buildLatexBlockView(block.rawText, isLight, themeAccent, textPrimary, fontSize);
+        return _buildLatexBlockView(block, isLight, themeAccent, textPrimary, fontSize);
       case BlockType.codeBlock:
         return _buildCodeBlockView(block, isLight, themeAccent, textPrimary, fontSize);
       case BlockType.mermaidBlock:
@@ -1024,33 +1065,42 @@ class MarkdownLatexBlockViewState extends State<MarkdownLatexBlockView> {
     );
   }
 
-  Widget _buildLatexBlockView(String raw, bool isLight, Color themeAccent, Color textPrimary, double fontSize) {
-    String mathStr = raw.trim();
+  Widget _buildLatexBlockView(ParsedContentBlock block, bool isLight, Color themeAccent, Color textPrimary, double fontSize) {
+    String mathStr = block.rawText.trim();
     if (mathStr.startsWith(r'$$')) mathStr = mathStr.substring(2);
     if (mathStr.endsWith(r'$$')) mathStr = mathStr.substring(0, mathStr.length - 2);
     mathStr = mathStr.trim();
 
+    // Normaliza ambientes como gathered para aligned que é suportado nativamente pelo flutter_math_fork
+    final cleanMathStr = mathStr
+        .replaceAll(r'\begin{gathered}', r'\begin{aligned}')
+        .replaceAll(r'\end{gathered}', r'\end{aligned}');
+
     return RepaintBoundary(
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-        alignment: Alignment.center,
+        alignment: Alignment.centerLeft,
         decoration: BoxDecoration(
           color: isLight ? Colors.black.withValues(alpha: 0.03) : Colors.white.withValues(alpha: 0.04),
           borderRadius: BorderRadius.circular(10),
           border: Border.all(color: themeAccent.withValues(alpha: 0.3), width: 0.8),
         ),
-        child: SingleChildScrollView(
-          scrollDirection: Axis.horizontal,
-          physics: const BouncingScrollPhysics(),
-          child: Math.tex(
-            mathStr,
-            textStyle: TextStyle(
-              color: textPrimary,
-              fontSize: fontSize * 1.15,
-            ),
-            onErrorFallback: (err) => Text(
-              raw,
-              style: TextStyle(color: const Color(0xFFFF007A), fontSize: fontSize),
+        child: GestureDetector(
+          behavior: HitTestBehavior.translucent,
+          onDoubleTap: () => _startEditingBlock(block),
+          child: SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            physics: const BouncingScrollPhysics(),
+            child: Math.tex(
+              cleanMathStr,
+              textStyle: TextStyle(
+                color: textPrimary,
+                fontSize: fontSize * 1.15,
+              ),
+              onErrorFallback: (err) => Text(
+                block.rawText,
+                style: TextStyle(color: const Color(0xFFFF007A), fontSize: fontSize),
+              ),
             ),
           ),
         ),
@@ -1397,15 +1447,7 @@ class MarkdownLatexBlockViewState extends State<MarkdownLatexBlockView> {
                 ),
               ),
             );
-          } else if ((trimmed.startsWith(r'\int') ||
-                      trimmed.startsWith(r'\frac') ||
-                      trimmed.startsWith(r'\sum') ||
-                      trimmed.startsWith(r'\sqrt') ||
-                      trimmed.startsWith(r'\lim') ||
-                      trimmed.startsWith(r'\begin') ||
-                      trimmed.startsWith(r'\vec') ||
-                      trimmed.startsWith(r'\matrix')) &&
-                     !trimmed.startsWith(r'\\')) {
+          } else if (_isMathCommandLine(trimmed)) {
             return Padding(
               padding: const EdgeInsets.symmetric(vertical: 4),
               child: Center(
@@ -1439,6 +1481,80 @@ class MarkdownLatexBlockViewState extends State<MarkdownLatexBlockView> {
     );
   }
 
+  static bool _isMathCommandLine(String trimmed) {
+    if (trimmed.isEmpty || trimmed.startsWith(r'\\')) return false;
+    const prefixes = [
+      r'\int', r'\iint', r'\iiint', r'\oint',
+      r'\frac', r'\cfrac', r'\dfrac',
+      r'\sum', r'\prod', r'\coprod',
+      r'\sqrt', r'\root',
+      r'\lim', r'\sup', r'\inf', r'\max', r'\min',
+      r'\begin', r'\matrix', r'\pmatrix', r'\bmatrix', r'\vmatrix', r'\Bmatrix',
+      r'\vec', r'\hat', r'\bar', r'\dot', r'\ddot',
+      r'\tan', r'\sin', r'\cos', r'\sec', r'\csc', r'\cot',
+      r'\arcsin', r'\arccos', r'\arctan',
+      r'\log', r'\ln', r'\exp',
+      r'\quad', r'\qquad', r'\left', r'\right',
+      r'\alpha', r'\beta', r'\gamma', r'\theta', r'\lambda', r'\pi',
+      r'\sigma', r'\omega', r'\Delta', r'\partial', r'\nabla',
+    ];
+    return prefixes.any((p) => trimmed.startsWith(p));
+  }
+
+  static String _normalizeInlineMath(String line) {
+    if (line.isEmpty || line.contains(r'$') || !line.contains(r'\')) {
+      return line;
+    }
+    // Verifica se contém comandos LaTeX
+    if (!RegExp(r'\\[a-zA-Z]+').hasMatch(line)) {
+      return line;
+    }
+
+    // Se a linha inteira for puramente uma fórmula (sem palavras naturais fora de \text{...}):
+    final textWithoutLatex = line.replaceAll(RegExp(r'\\[a-zA-Z]+'), '').replaceAll(RegExp(r'\{[^\}]*\}'), '');
+    final hasNaturalWords = RegExp(r'\b[a-zA-ZÀ-ÿ]{3,}\b').hasMatch(textWithoutLatex);
+    if (!hasNaturalWords) {
+      return '\$$line\$';
+    }
+
+    // Delimita expressões matemáticas soltas separadas por palavras conectivas comuns em STEM
+    final delimiters = RegExp(
+      r'(\b(?:Sabendo\s+que|sabendo\s+que|Dado\s+que|dado\s+que|Calcule|calcule|Determine|determine|Obtenha|obtenha|onde|Onde|para|Para|com|Com|se|Se|então|entao|Então|Entao|logo|Logo|portanto|Portanto|quando|Quando|sendo|Sendo)\b|\s+\be\b\s+|\s+\bou\b\s+)',
+    );
+
+    final parts = line.split(delimiters);
+    final matches = delimiters.allMatches(line).toList();
+    final reconstructed = <String>[];
+
+    for (int i = 0; i < parts.length; i++) {
+      final p = parts[i];
+      if (p.isNotEmpty) {
+        if (p.contains(r'\') && RegExp(r'\\[a-zA-Z]+').hasMatch(p)) {
+          final leading = p.startsWith(' ') ? ' ' : '';
+          final trailingSpace = p.endsWith(' ') ? ' ' : '';
+          var trimmed = p.trim();
+          var trailingPunct = '';
+          while (trimmed.isNotEmpty && (trimmed.endsWith('.') || trimmed.endsWith(',') || trimmed.endsWith(';') || trimmed.endsWith(':'))) {
+            trailingPunct = trimmed[trimmed.length - 1] + trailingPunct;
+            trimmed = trimmed.substring(0, trimmed.length - 1).trim();
+          }
+          if (trimmed.isNotEmpty) {
+            reconstructed.add('$leading\$$trimmed\$$trailingPunct$trailingSpace');
+          } else {
+            reconstructed.add(p);
+          }
+        } else {
+          reconstructed.add(p);
+        }
+      }
+      if (i < matches.length) {
+        reconstructed.add(matches[i].group(0)!);
+      }
+    }
+
+    return reconstructed.join('');
+  }
+
   /// Tokenizador que converte tags HTML, Markdown e KaTeX inline em InlineSpans autênticos
   List<InlineSpan> _parseRichInlineSpan(
     String text, {
@@ -1453,9 +1569,10 @@ class MarkdownLatexBlockViewState extends State<MarkdownLatexBlockView> {
   }) {
     if (text.isEmpty) return [];
 
+    final normalizedText = _normalizeInlineMath(text);
     final spans = <InlineSpan>[];
 
-    // Regex de padrões inline: KaTeX ($...$), HTML Span (<span style="...">), Underline (<u>...</u>), Highlight (==...== / <mark>...), Bold (**...**), Italic (*...*), Sub/Sup, Code (`...`)
+    // Regex de padrões inline: KaTeX ($$...$$ / $...$), HTML Span (<span style="...">), Underline (<u>...</u>), Highlight (==...== / <mark>...), Bold (**...**), Italic (*...*), Sub/Sup, Code (`...`)
     final pattern = RegExp(
       r'(<span style="font-size:\s*([0-9.]+)px">([\s\S]*?)<\/span>)|' // 1,2,3: Font Size Span
       r'(<span style="color:\s*([^"]+)">([\s\S]*?)<\/span>)|' // 4,5,6: Color Span
@@ -1469,12 +1586,13 @@ class MarkdownLatexBlockViewState extends State<MarkdownLatexBlockView> {
       r'(\*\*([\s\S]*?)\*\*)|' // 23,24: **Bold**
       r'(\*([^\*\n]+)\*)|' // 25,26: *Italic*
       r'(`([^`\n]+)`)|' // 27,28: `Code`
-      r'(\$[^$\n]+\$)', // 29: Inline Math $...$
+      r'(\$\$[\s\S]*?\$\$)|' // 29: Display Math $$...$$
+      r'(\$[^$\n]+\$)', // 30: Inline Math $...$
     );
 
     int lastMatchEnd = 0;
 
-    for (final match in pattern.allMatches(text)) {
+    for (final match in pattern.allMatches(normalizedText)) {
       if (match.start > lastMatchEnd) {
         final plain = text.substring(lastMatchEnd, match.start);
         spans.add(TextSpan(
@@ -1704,9 +1822,14 @@ class MarkdownLatexBlockViewState extends State<MarkdownLatexBlockView> {
           ),
         ));
       }
-      // 13. Inline KaTeX ($...$)
-      else if (match.group(29) != null) {
-        final mathSnippet = fullMatch.substring(1, fullMatch.length - 1);
+      // 13. KaTeX ($$...$$ ou $...$)
+      else if (match.group(29) != null || match.group(30) != null) {
+        String mathSnippet = fullMatch;
+        if (mathSnippet.startsWith(r'$$') && mathSnippet.endsWith(r'$$') && mathSnippet.length >= 4) {
+          mathSnippet = mathSnippet.substring(2, mathSnippet.length - 2).trim();
+        } else if (mathSnippet.startsWith(r'$') && mathSnippet.endsWith(r'$') && mathSnippet.length >= 2) {
+          mathSnippet = mathSnippet.substring(1, mathSnippet.length - 1).trim();
+        }
         spans.add(WidgetSpan(
           alignment: PlaceholderAlignment.middle,
           child: Math.tex(
@@ -1727,8 +1850,8 @@ class MarkdownLatexBlockViewState extends State<MarkdownLatexBlockView> {
       lastMatchEnd = match.end;
     }
 
-    if (lastMatchEnd < text.length) {
-      final remaining = text.substring(lastMatchEnd);
+    if (lastMatchEnd < normalizedText.length) {
+      final remaining = normalizedText.substring(lastMatchEnd);
       spans.add(TextSpan(
         text: remaining,
         style: TextStyle(

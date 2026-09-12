@@ -121,6 +121,7 @@ class MoscaroRichTextController extends TextEditingController {
   final List<_RichEditorHistoryState> _undoStack = [];
   final List<_RichEditorHistoryState> _redoStack = [];
   bool _isPerformingUndoRedo = false;
+  bool _isSuppressingDelta = false;
 
   MoscaroRichTextController({
     super.text,
@@ -201,7 +202,7 @@ class MoscaroRichTextController extends TextEditingController {
     }
 
     // Delta tracking automático de inserção/deleção
-    if (oldText != newText) {
+    if (oldText != newText && !_isSuppressingDelta) {
       _applyTextDelta(oldText, newText);
       if (!_isPerformingUndoRedo) {
         _saveSnapshot();
@@ -359,20 +360,21 @@ class MoscaroRichTextController extends TextEditingController {
 
     void parseRecursive(String input, RichStyleSpan currentStyle) {
       final pattern = RegExp(
-        r'(\*\*([\s\S]*?)\*\*)|' // 1,2: Bold
-        r'(\*([^\*\n]+)\*)|' // 3,4: Italic
-        r'(<u>([\s\S]*?)<\/u>)|' // 5,6: Underline
-        r'(~~([\s\S]*?)~~)|' // 7,8: Strikethrough
-        r'(`([^`\n]+)`)|' // 9,10: Inline Code
-        r'(\$([^\$\n]+)\$)|' // 11,12: Inline LaTeX
-        r'(<sub>([\s\S]*?)<\/sub>)|' // 13,14: Subscript
-        r'(<sup>([\s\S]*?)<\/sup>)|' // 15,16: Superscript
-        r'(<mark style="background:\s*([^"]+)">([\s\S]*?)<\/mark>)|' // 17,18,19: Styled Mark
-        r'(<mark>([\s\S]*?)<\/mark>)|' // 20,21: Plain Mark
-        r'(==([\s\S]*?)==)|' // 22,23: ==Mark==
-        r'(<span style="color:\s*([^"]+)">([\s\S]*?)<\/span>)|' // 24,25,26: Color Span
-        r'(<font color="([^"]+)">([\s\S]*?)<\/font>)|' // 27,28,29: Font Color
-        r'(<span style="font-size:\s*([0-9.]+)px">([\s\S]*?)<\/span>)', // 30,31,32: Font Size Span
+        r'(\$\$([\s\S]*?)\$\$)|' // 1,2: Display LaTeX ($$...$$)
+        r'(\$([^\$\n]+)\$)|' // 3,4: Inline LaTeX ($...$)
+        r'(\*\*([\s\S]*?)\*\*)|' // 5,6: Bold
+        r'(\*([^\*\n]+)\*)|' // 7,8: Italic
+        r'(<u>([\s\S]*?)<\/u>)|' // 9,10: Underline
+        r'(~~([\s\S]*?)~~)|' // 11,12: Strikethrough
+        r'(`([^`\n]+)`)|' // 13,14: Inline Code
+        r'(<sub>([\s\S]*?)<\/sub>)|' // 15,16: Subscript
+        r'(<sup>([\s\S]*?)<\/sup>)|' // 17,18: Superscript
+        r'(<mark style="background:\s*([^"]+)">([\s\S]*?)<\/mark>)|' // 19,20,21: Styled Mark
+        r'(<mark>([\s\S]*?)<\/mark>)|' // 22,23: Plain Mark
+        r'(==([\s\S]*?)==)|' // 24,25: ==Mark==
+        r'(<span style="color:\s*([^"]+)">([\s\S]*?)<\/span>)|' // 26,27,28: Color Span
+        r'(<font color="([^"]+)">([\s\S]*?)<\/font>)|' // 29,30,31: Font Color
+        r'(<span style="font-size:\s*([0-9.]+)px">([\s\S]*?)<\/span>)', // 32,33,34: Font Size Span
       );
 
       int lastEnd = 0;
@@ -391,42 +393,45 @@ class MoscaroRichTextController extends TextEditingController {
 
         if (match.group(1) != null) {
           inner = match.group(2)!;
-          nextStyle.isBold = true;
+          nextStyle.isLatex = true;
         } else if (match.group(3) != null) {
           inner = match.group(4)!;
-          nextStyle.isItalic = true;
+          nextStyle.isLatex = true;
         } else if (match.group(5) != null) {
           inner = match.group(6)!;
-          nextStyle.isUnderline = true;
+          nextStyle.isBold = true;
         } else if (match.group(7) != null) {
           inner = match.group(8)!;
-          nextStyle.isStrikethrough = true;
+          nextStyle.isItalic = true;
         } else if (match.group(9) != null) {
           inner = match.group(10)!;
-          nextStyle.isCode = true;
+          nextStyle.isUnderline = true;
         } else if (match.group(11) != null) {
           inner = match.group(12)!;
-          nextStyle.isLatex = true;
+          nextStyle.isStrikethrough = true;
         } else if (match.group(13) != null) {
           inner = match.group(14)!;
-          nextStyle.isSubscript = true;
+          nextStyle.isCode = true;
         } else if (match.group(15) != null) {
           inner = match.group(16)!;
-          nextStyle.isSuperscript = true;
+          nextStyle.isSubscript = true;
         } else if (match.group(17) != null) {
-          final hex = match.group(18) ?? '#FACC15';
-          inner = match.group(19)!;
+          inner = match.group(18)!;
+          nextStyle.isSuperscript = true;
+        } else if (match.group(19) != null) {
+          final hex = match.group(20) ?? '#FACC15';
+          inner = match.group(21)!;
           nextStyle.highlightColor = _parseHexColor(hex, defaultHighlightColor);
-        } else if (match.group(20) != null || match.group(22) != null) {
-          inner = match.group(21) ?? match.group(23) ?? '';
+        } else if (match.group(22) != null || match.group(24) != null) {
+          inner = match.group(23) ?? match.group(25) ?? '';
           nextStyle.highlightColor = defaultHighlightColor;
-        } else if (match.group(24) != null || match.group(27) != null) {
-          final hex = match.group(25) ?? match.group(28) ?? '';
-          inner = match.group(26) ?? match.group(29) ?? '';
+        } else if (match.group(26) != null || match.group(29) != null) {
+          final hex = match.group(27) ?? match.group(30) ?? '';
+          inner = match.group(28) ?? match.group(31) ?? '';
           nextStyle.textColor = _parseHexColor(hex, defaultTextColor);
-        } else if (match.group(30) != null) {
-          final sizeStr = match.group(31) ?? '';
-          inner = match.group(32) ?? '';
+        } else if (match.group(32) != null) {
+          final sizeStr = match.group(33) ?? '';
+          inner = match.group(34) ?? '';
           nextStyle.fontSize = double.tryParse(sizeStr);
         }
 
@@ -445,12 +450,14 @@ class MoscaroRichTextController extends TextEditingController {
     }
 
     parseRecursive(raw, RichStyleSpan(start: 0, end: 0));
+    _isSuppressingDelta = true;
     _isPerformingUndoRedo = true;
     text = cleanBuffer.toString();
+    _isSuppressingDelta = false;
+    _isPerformingUndoRedo = false;
     _normalizeSpans();
     _undoStack.clear();
     _redoStack.clear();
-    _isPerformingUndoRedo = false;
     _saveSnapshot();
   }
 
@@ -475,34 +482,41 @@ class MoscaroRichTextController extends TextEditingController {
       if (safeEnd > safeStart) {
         String chunk = text.substring(safeStart, safeEnd);
 
-        final lines = chunk.split('\n');
-        final formattedLines = lines.map((line) {
-          if (line.isEmpty) return line;
-          String l = line;
-          if (s.isCode) l = '`$l`';
-          if (s.isLatex) l = '\$$l\$';
-          if (s.isSubscript) l = '<sub>$l</sub>';
-          if (s.isSuperscript) l = '<sup>$l</sup>';
-          if (s.isBold) l = '**$l**';
-          if (s.isItalic) l = '*$l*';
-          if (s.isUnderline) l = '<u>$l</u>';
-          if (s.isStrikethrough) l = '~~$l~~';
-          if (s.textColor != null) {
-            final hex = '#${s.textColor!.toARGB32().toRadixString(16).padLeft(8, '0').substring(2)}';
-            l = '<span style="color: $hex">$l</span>';
+        if (s.isLatex) {
+          if (chunk.contains('\n') || chunk.trim().startsWith(r'\begin') || chunk.trim().startsWith(r'\matrix')) {
+            sb.write('\$\$\n$chunk\n\$\$');
+          } else {
+            sb.write('\$$chunk\$');
           }
-          if (s.highlightColor != null) {
-            final hex = '#${s.highlightColor!.toARGB32().toRadixString(16).padLeft(8, '0').substring(2)}';
-            l = '<mark style="background: $hex">$l</mark>';
-          }
-          if (s.fontSize != null) {
-            l = '<span style="font-size: ${s.fontSize}px">$l</span>';
-          }
-          return l;
-        });
+        } else {
+          final lines = chunk.split('\n');
+          final formattedLines = lines.map((line) {
+            if (line.isEmpty) return line;
+            String l = line;
+            if (s.isCode) l = '`$l`';
+            if (s.isSubscript) l = '<sub>$l</sub>';
+            if (s.isSuperscript) l = '<sup>$l</sup>';
+            if (s.isBold) l = '**$l**';
+            if (s.isItalic) l = '*$l*';
+            if (s.isUnderline) l = '<u>$l</u>';
+            if (s.isStrikethrough) l = '~~$l~~';
+            if (s.textColor != null) {
+              final hex = '#${s.textColor!.toARGB32().toRadixString(16).padLeft(8, '0').substring(2)}';
+              l = '<span style="color: $hex">$l</span>';
+            }
+            if (s.highlightColor != null) {
+              final hex = '#${s.highlightColor!.toARGB32().toRadixString(16).padLeft(8, '0').substring(2)}';
+              l = '<mark style="background: $hex">$l</mark>';
+            }
+            if (s.fontSize != null) {
+              l = '<span style="font-size: ${s.fontSize}px">$l</span>';
+            }
+            return l;
+          });
 
-        chunk = formattedLines.join('\n');
-        sb.write(chunk);
+          chunk = formattedLines.join('\n');
+          sb.write(chunk);
+        }
       }
       lastEnd = safeEnd;
     }

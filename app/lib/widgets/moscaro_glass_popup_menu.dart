@@ -1,6 +1,6 @@
-import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import '../theme/moscaro_v2_extension.dart';
+import '../theme/moscaro_v2_tokens.dart';
 import '../theme/moscaro_theme_controller.dart';
 import 'svg_icon.dart';
 
@@ -54,76 +54,92 @@ class MoscaroGlassPopupMenu<T> extends StatelessWidget {
 
     final offset = renderBox.localToGlobal(Offset.zero);
     final size = renderBox.size;
-    final theme = MoscaroThemeController.instance.currentTheme;
-    final accent = theme.accentPrimary;
 
     showGeneralDialog(
       context: context,
       barrierDismissible: true,
       barrierLabel: 'MoscaroGlassMenu',
-      barrierColor: Colors.black38,
+      barrierColor: Colors.transparent,
       transitionDuration: const Duration(milliseconds: 180),
       pageBuilder: (ctx, anim1, anim2) {
-        return Stack(
-          children: [
-            Positioned(
-              left: (offset.dx + size.width - 175).clamp(12.0, MediaQuery.of(context).size.width - 187.0),
-              top: offset.dy + size.height + 6,
-              child: Material(
-                type: MaterialType.transparency,
-                child: Container(
-                  width: 175,
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(16),
+        return ListenableBuilder(
+          listenable: MoscaroThemeController.instance,
+          builder: (context, _) {
+            final activeTheme = MoscaroThemeController.instance.currentTheme;
+            final activeAccent = activeTheme.accentPrimary;
+            final isBlurEnabled = activeTheme.enableModalsBlur;
+            final effectiveBlur = isBlurEnabled ? activeTheme.blurSigma : 0.0;
+
+            return Stack(
+              children: [
+                Positioned.fill(
+                  child: GestureDetector(
+                    behavior: HitTestBehavior.opaque,
+                    onTap: () => Navigator.of(ctx).pop(),
                   ),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: items.map((item) {
-                      if (item.isDivider) {
-                        return Padding(
-                          padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 8),
-                          child: Divider(
-                            height: 1,
-                            thickness: 1,
-                            color: Colors.white.withValues(alpha: 0.08),
-                          ),
-                        );
-                      }
-                      return _GlassMenuItemWidget<T>(
-                        item: item,
-                        accentColor: accent,
-                        onTap: () {
-                          Navigator.of(ctx).pop();
-                          onSelected(item.value);
-                        },
-                      );
-                    }).toList(),
-                  ),
-                ).moscaroV2(
-                  borderRadius: 16,
-                  blurSigma: 35.0,
-                  enableBlur: true,
-                  backgroundColor: theme.backgroundSurface.withValues(alpha: 0.65),
-                  padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 4),
-                  borderColor: accent.withValues(alpha: 0.5),
-                  borderWidth: 1.1,
-                  customShadows: [
-                    BoxShadow(
-                      color: Colors.black.withValues(alpha: 0.55),
-                      blurRadius: 28,
-                      spreadRadius: 2,
-                      offset: const Offset(0, 10),
-                    ),
-                    BoxShadow(
-                      color: accent.withValues(alpha: 0.2),
-                      blurRadius: 16,
-                      spreadRadius: -2,
-                    ),
-                  ],
                 ),
-              ),
-            ),
-          ],
+                Positioned(
+                  left: (offset.dx + size.width - 175).clamp(12.0, MediaQuery.of(context).size.width - 187.0),
+                  top: offset.dy + size.height + 6,
+                  child: Material(
+                    type: MaterialType.transparency,
+                    child: Container(
+                      width: 175,
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: items.map((item) {
+                          if (item.isDivider) {
+                            return Padding(
+                              padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 8),
+                              child: Divider(
+                                height: 1,
+                                thickness: 1,
+                                color: Colors.white.withValues(alpha: 0.08),
+                              ),
+                            );
+                          }
+                          return _GlassMenuItemWidget<T>(
+                            item: item,
+                            accentColor: activeAccent,
+                            onTap: () {
+                              Navigator.of(ctx).pop();
+                              onSelected(item.value);
+                            },
+                          );
+                        }).toList(),
+                      ),
+                    ).moscaroV2(
+                      borderRadius: 16,
+                      blurSigma: effectiveBlur,
+                      enableBlur: isBlurEnabled && effectiveBlur > 0,
+                      backgroundColor: MoscaroTokens.isLight
+                          ? Colors.white.withValues(alpha: 0.75)
+                          : activeTheme.backgroundSurface.withValues(alpha: 0.35),
+                      padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 4),
+                      borderColor: activeAccent.withValues(alpha: 0.5),
+                      borderWidth: 1.1,
+                      customShadows: [
+                        BoxShadow(
+                          color: Colors.black.withValues(alpha: 0.45),
+                          blurRadius: 24,
+                          spreadRadius: 2,
+                          offset: const Offset(0, 8),
+                        ),
+                        BoxShadow(
+                          color: activeAccent.withValues(alpha: 0.25),
+                          blurRadius: 14,
+                          spreadRadius: -1,
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            );
+          },
         );
       },
       transitionBuilder: (ctx, anim, secondaryAnim, child) {
@@ -142,47 +158,47 @@ class MoscaroGlassPopupMenu<T> extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = MoscaroThemeController.instance.currentTheme;
-    final accent = theme.accentPrimary;
+    return ListenableBuilder(
+      listenable: MoscaroThemeController.instance,
+      builder: (context, _) {
+        final theme = MoscaroThemeController.instance.currentTheme;
+        final accent = theme.accentPrimary;
+        final isBlurEnabled = theme.enableCardsBlur || theme.enableModalsBlur;
+        final effectiveBlur = isBlurEnabled ? theme.blurSigma : 0.0;
 
-    Widget buttonWidget = GestureDetector(
-      onTap: () => _showMenu(context),
-      behavior: HitTestBehavior.opaque,
-      child: icon ??
-          ClipRRect(
-            borderRadius: BorderRadius.circular(10),
-            child: BackdropFilter(
-              filter: ui.ImageFilter.blur(
-                sigmaX: 20.0,
-                sigmaY: 20.0,
-              ),
-              child: Container(
+        Widget buttonWidget = GestureDetector(
+          onTap: () => _showMenu(context),
+          behavior: HitTestBehavior.opaque,
+          child: icon ??
+              Container(
                 padding: const EdgeInsets.all(6),
-                decoration: BoxDecoration(
-                  color: theme.backgroundSurface.withValues(alpha: 0.35),
-                  borderRadius: BorderRadius.circular(10),
-                  border: Border.all(
-                    color: accent.withValues(alpha: 0.35),
-                    width: 0.8,
-                  ),
-                  boxShadow: [
-                    BoxShadow(
-                      color: accent.withValues(alpha: 0.1),
-                      blurRadius: 8,
-                      spreadRadius: -2,
-                    ),
-                  ],
-                ),
                 child: SvgIcon(name: 'more_vertical', color: accent.withValues(alpha: 0.85), size: 14),
+              ).moscaroV2(
+                borderRadius: 10,
+                blurSigma: effectiveBlur,
+                enableBlur: isBlurEnabled && effectiveBlur > 0,
+                backgroundColor: MoscaroTokens.isLight
+                    ? Colors.white.withValues(alpha: 0.75)
+                    : theme.backgroundSurface.withValues(alpha: 0.35),
+                borderColor: accent.withValues(alpha: 0.35),
+                borderWidth: 0.8,
+                padding: const EdgeInsets.all(6),
+                customShadows: [
+                  BoxShadow(
+                    color: accent.withValues(alpha: 0.1),
+                    blurRadius: 8,
+                    spreadRadius: -2,
+                  ),
+                ],
               ),
-            ),
-          ),
-    );
+        );
 
-    if (tooltip != null && tooltip!.isNotEmpty) {
-      return Tooltip(message: tooltip!, child: buttonWidget);
-    }
-    return buttonWidget;
+        if (tooltip != null && tooltip!.isNotEmpty) {
+          return Tooltip(message: tooltip!, child: buttonWidget);
+        }
+        return buttonWidget;
+      },
+    );
   }
 }
 

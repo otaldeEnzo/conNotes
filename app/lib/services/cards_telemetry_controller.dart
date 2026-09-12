@@ -165,16 +165,17 @@ class CardsTelemetryController extends ChangeNotifier {
           }
         }
 
-        // Barra Flutuante Superior e Subbarras Popover (quando selecionado)
-        // Ocupa o topo do card de y - 160.0 até y (com padding horizontal generoso para acomodar pílula e subbarras)
-        final floatingPillRect = Rect.fromLTWH(
-          selected.x - 100.0,
-          selected.y - 160.0,
-          math.max(selected.width, 500.0) + 200.0,
-          160.0,
-        );
-        if (floatingPillRect.contains(canvasPoint)) {
-          return (zone: CardHoverZone.body, card: selected);
+        // Barra Flutuante Superior (apenas se for card de mídia visível, cobrindo apenas a faixa exata da pílula)
+        if (selected.cardType == CardType.media && !selected.isCollapsed) {
+          final floatingPillRect = Rect.fromLTWH(
+            selected.x,
+            selected.y - 50.0,
+            selected.width,
+            50.0,
+          );
+          if (floatingPillRect.contains(canvasPoint)) {
+            return (zone: CardHoverZone.body, card: selected);
+          }
         }
 
         // Alcas ativas apenas se nao fixado e nao recolhido
@@ -227,13 +228,13 @@ class CardsTelemetryController extends ChangeNotifier {
       }
     }
 
-    // 2. Testa os demais cards em ordem reversa (topo para fundo)
+    // 2. Testa os demais cards em ordem reversa (topo para fundo) - Hitbox exata na geometria visível
     for (final card in cards.reversed) {
       if (card.id == selectedCardId) continue;
       final double minH = card.calculateMinHeight();
       final double cardH = card.isCollapsed ? 36.0 : math.max(card.height, minH);
 
-      final totalCardRect = Rect.fromLTWH(card.x, card.y - 60.0, card.width, cardH + 60.0);
+      final totalCardRect = Rect.fromLTWH(card.x, card.y, card.width, cardH);
       if (totalCardRect.contains(canvasPoint)) {
         final headerRect = Rect.fromLTWH(card.x, card.y, card.width, 36.0);
         if (headerRect.contains(canvasPoint)) {

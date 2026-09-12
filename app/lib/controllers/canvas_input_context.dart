@@ -56,6 +56,7 @@ abstract class CanvasInputContext {
   void selectCard(String? id);
   CanvasCardModel? findCardAtPoint(Offset canvasPoint);
   void attachStrokeToCard(String cardId, String strokeId) {}
+  void openMediaLightbox(String cardId);
 
   // Borracha e Laser
   LaserPointerEngine get laserEngine;

@@ -385,6 +385,10 @@ class SvgIcon extends StatelessWidget {
   <path d="M16 12h-2"/>
   <path d="M22 12h-2"/>
 </svg>''',
+    'cursor': '''<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+  <path d="m3 3 7.07 16.97 2.51-7.39 7.39-2.51L3 3z"/>
+  <path d="m13 13 6 6"/>
+</svg>''',
   };
 
   const SvgIcon({
@@ -414,10 +418,12 @@ class SvgIcon extends StatelessWidget {
       height: size,
       colorFilter: ColorFilter.mode(color, BlendMode.srcIn),
       errorBuilder: (context, error, stackTrace) {
-        return Icon(
-          Icons.lens_blur_rounded,
-          size: size,
-          color: color,
+        final fallbackSvg = _builtinSvgStrings['file'] ?? '<svg viewBox="0 0 24 24"></svg>';
+        return SvgPicture.string(
+          fallbackSvg,
+          width: size,
+          height: size,
+          colorFilter: ColorFilter.mode(color, BlendMode.srcIn),
         );
       },
     );

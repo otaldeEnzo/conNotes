@@ -70,13 +70,10 @@ class ToolbarPill extends StatefulWidget {
 }
 
 class _ToolbarPillState extends State<ToolbarPill> {
-  int _hoveredIndex = -1;
-
   @override
   Widget build(BuildContext context) {
-    const double iconSize = 22.0;
+    const double iconSize = 20.0;
     final isLight = MoscaroTokens.isLight;
-    final iconColor = MoscaroTokens.iconInactive;
     final dividerColor = isLight ? Colors.black12 : Colors.white24;
     final displayPenColor = StemInkThemeAdapter.adaptStrokeColor(
       widget.activePenPreset.color,
@@ -87,64 +84,40 @@ class _ToolbarPillState extends State<ToolbarPill> {
       mainAxisSize: MainAxisSize.min,
       children: [
         // 1. Desfazer (Undo)
-        IconButton(
-          icon: Icon(
-            Icons.undo,
-            size: 18,
-            color: widget.canUndo ? iconColor : (isLight ? Colors.black26 : Colors.white24),
-          ),
-          onPressed: widget.canUndo ? widget.onUndo : null,
+        _ToolbarActionButton(
+          assetName: 'undo',
           tooltip: 'Desfazer (Ctrl + Z)',
+          onPressed: widget.onUndo,
+          isEnabled: widget.canUndo,
+          iconSize: 18,
         ),
+        const SizedBox(width: 2),
+
         // 2. Refazer (Redo)
-        IconButton(
-          icon: Icon(
-            Icons.redo,
-            size: 18,
-            color: widget.canRedo ? iconColor : (isLight ? Colors.black26 : Colors.white24),
-          ),
-          onPressed: widget.canRedo ? widget.onRedo : null,
+        _ToolbarActionButton(
+          assetName: 'redo',
           tooltip: 'Refazer (Ctrl + Y)',
+          onPressed: widget.onRedo,
+          isEnabled: widget.canRedo,
+          iconSize: 18,
         ),
         const SizedBox(width: 4),
         Container(width: 1, height: 20, color: dividerColor),
         const SizedBox(width: 6),
 
-        // 3. Caneta STEM (SVG) com indicador da cor ativa do slot selecionado
-        Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            _buildHoverIconButton(
-              index: 0,
-              assetName: 'pen',
-              tooltip: 'Caneta STEM (${widget.activePenPreset.name})',
-              onPressed: widget.onSelectPen,
-              iconSize: iconSize,
-              customActiveColor: widget.isPenActive ? displayPenColor : null,
-            ),
-            Container(
-              width: 10,
-              height: 10,
-              margin: const EdgeInsets.only(left: 2, right: 4),
-              decoration: BoxDecoration(
-                color: displayPenColor,
-                shape: BoxShape.circle,
-                border: Border.all(color: isLight ? Colors.black38 : Colors.white, width: 1.0),
-                boxShadow: [
-                  BoxShadow(
-                    color: displayPenColor.withValues(alpha: 0.5),
-                    blurRadius: 4,
-                  ),
-                ],
-              ),
-            ),
-          ],
+        // 3. Caneta STEM (SVG) com indicador da cor ativa integrado
+        _ToolbarActionButton(
+          assetName: 'pen',
+          tooltip: 'Caneta STEM (${widget.activePenPreset.name})',
+          onPressed: widget.onSelectPen,
+          iconSize: iconSize,
+          customActiveColor: widget.isPenActive ? displayPenColor : null,
+          badgeColor: displayPenColor,
         ),
         const SizedBox(width: 4),
 
         // 4. Borracha Inteligente (SVG)
-        _buildHoverIconButton(
-          index: 1,
+        _ToolbarActionButton(
           assetName: 'eraser',
           tooltip: 'Borracha Inteligente',
           onPressed: widget.onSelectEraser,
@@ -154,8 +127,7 @@ class _ToolbarPillState extends State<ToolbarPill> {
         const SizedBox(width: 4),
 
         // 4.1 Formas Geométricas (SVG)
-        _buildHoverIconButton(
-          index: 5,
+        _ToolbarActionButton(
           assetName: 'shapes',
           tooltip: 'Formas Inteligentes',
           onPressed: widget.onSelectShapes,
@@ -165,9 +137,8 @@ class _ToolbarPillState extends State<ToolbarPill> {
         const SizedBox(width: 4),
 
         // 4.2 Seleção e Transformação (SVG)
-        _buildHoverIconButton(
-          index: 6,
-          assetName: 'select',
+        _ToolbarActionButton(
+          assetName: widget.selectionType == SelectionType.rectangle ? 'select_rect' : 'select_lasso',
           tooltip: 'Seleção e Transformação (${widget.selectionType == SelectionType.rectangle ? "Retângulo" : "Laço"})',
           onPressed: widget.onSelectTool,
           iconSize: iconSize,
@@ -176,8 +147,7 @@ class _ToolbarPillState extends State<ToolbarPill> {
         const SizedBox(width: 4),
 
         // 4.3 Ponteiro Laser STEM (SVG)
-        _buildHoverIconButton(
-          index: 7,
+        _ToolbarActionButton(
           assetName: 'laser',
           tooltip: 'Ponteiro Laser Efêmero (Apresentação STEM)',
           onPressed: widget.onSelectLaser,
@@ -187,8 +157,7 @@ class _ToolbarPillState extends State<ToolbarPill> {
         const SizedBox(width: 4),
 
         // 5. Régua & Transferidor STEM (SVG)
-        _buildHoverIconButton(
-          index: 4,
+        _ToolbarActionButton(
           assetName: 'ruler',
           tooltip: 'Instrumentos de Medição STEM (Régua / Transferidor)',
           onPressed: widget.onToggleRuler,
@@ -198,8 +167,7 @@ class _ToolbarPillState extends State<ToolbarPill> {
         const SizedBox(width: 4),
 
         // 5.1 Inserir Cards no Canvas (Card STEM)
-        _buildHoverIconButton(
-          index: 5,
+        _ToolbarActionButton(
           assetName: 'card',
           tooltip: 'Inserir Cards (Texto, Markdown, LaTeX, Mermaid)',
           onPressed: widget.onToggleCards,
@@ -211,21 +179,20 @@ class _ToolbarPillState extends State<ToolbarPill> {
         const SizedBox(width: 8),
 
         // 6. Grid / Fundo (SVG)
-        _buildHoverIconButton(
-          index: 2,
+        _ToolbarActionButton(
           assetName: 'grid',
           tooltip: 'Fundo do Canvas',
           onPressed: widget.onToggleGridMenu,
           iconSize: iconSize,
           customActiveColor: widget.isGridMenuOpen ? MoscaroTokens.auroraBlue : null,
+          rotateWhenActive: true,
         ),
         const SizedBox(width: 8),
         Container(width: 1, height: 20, color: dividerColor),
         const SizedBox(width: 8),
 
         // 7. Botão IA (SVG)
-        _buildHoverIconButton(
-          index: 3,
+        _ToolbarActionButton(
           assetName: 'ai',
           tooltip: widget.isAIOpen ? 'Fechar IA' : 'Assistente STEM IA',
           onPressed: widget.onToggleAI,
@@ -235,30 +202,157 @@ class _ToolbarPillState extends State<ToolbarPill> {
       ],
     );
   }
+}
 
-  Widget _buildHoverIconButton({
-    required int index,
-    required String assetName,
-    required String tooltip,
-    required VoidCallback onPressed,
-    required double iconSize,
-    Color? customActiveColor,
-  }) {
-    final bool isHovered = _hoveredIndex == index;
-    final Color activeColor = customActiveColor ?? MoscaroTokens.auroraBlue;
-    final defaultColor = MoscaroTokens.isLight ? MoscaroTokens.iconInactive : Colors.white;
+class _ToolbarActionButton extends StatefulWidget {
+  final String assetName;
+  final String tooltip;
+  final VoidCallback? onPressed;
+  final double iconSize;
+  final Color? customActiveColor;
+  final bool isEnabled;
+  final Color? badgeColor;
+  final bool rotateWhenActive;
+
+  const _ToolbarActionButton({
+    required this.assetName,
+    required this.tooltip,
+    required this.onPressed,
+    this.iconSize = 20,
+    this.customActiveColor,
+    this.isEnabled = true,
+    this.badgeColor,
+    this.rotateWhenActive = false,
+  });
+
+  @override
+  State<_ToolbarActionButton> createState() => _ToolbarActionButtonState();
+}
+
+class _ToolbarActionButtonState extends State<_ToolbarActionButton> {
+  bool _isHovered = false;
+  bool _isPressed = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final isLight = MoscaroTokens.isLight;
+    final bool isActive = widget.customActiveColor != null;
+    final Color activeColor = widget.customActiveColor ?? MoscaroTokens.auroraBlue;
+    final Color defaultColor = isLight ? MoscaroTokens.iconInactive : Colors.white70;
+    final Color disabledColor = isLight ? Colors.black26 : Colors.white24;
+
+    final Color currentColor = !widget.isEnabled
+        ? disabledColor
+        : (isActive ? activeColor : (_isHovered ? activeColor : defaultColor));
+
+    final double currentScale = !widget.isEnabled
+        ? 1.0
+        : (_isPressed ? 0.90 : (_isHovered ? 1.08 : 1.0));
+
+    final double currentRotation = (widget.rotateWhenActive && isActive) ? 0.125 : 0.0;
 
     return MouseRegion(
-      onEnter: (_) => setState(() => _hoveredIndex = index),
-      onExit: (_) => setState(() => _hoveredIndex = -1),
-      child: IconButton(
-        icon: SvgIcon(
-          assetName: assetName,
-          size: iconSize,
-          color: isHovered ? activeColor : (customActiveColor ?? defaultColor),
+      cursor: widget.isEnabled ? SystemMouseCursors.click : SystemMouseCursors.basic,
+      onEnter: (_) {
+        if (widget.isEnabled) setState(() => _isHovered = true);
+      },
+      onExit: (_) {
+        if (widget.isEnabled) setState(() => _isHovered = false);
+      },
+      child: GestureDetector(
+        onTapDown: widget.isEnabled && widget.onPressed != null
+            ? (_) => setState(() => _isPressed = true)
+            : null,
+        onTapUp: widget.isEnabled && widget.onPressed != null
+            ? (_) => setState(() => _isPressed = false)
+            : null,
+        onTapCancel: () {
+          if (_isPressed) setState(() => _isPressed = false);
+        },
+        onTap: widget.isEnabled ? widget.onPressed : null,
+        child: Tooltip(
+          message: widget.tooltip,
+          child: AnimatedScale(
+            scale: currentScale,
+            duration: const Duration(milliseconds: 140),
+            curve: Curves.easeOutCubic,
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 180),
+              curve: Curves.easeOutCubic,
+              padding: const EdgeInsets.all(7),
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: isActive
+                    ? activeColor.withValues(alpha: 0.18)
+                    : (_isHovered && widget.isEnabled
+                        ? (isLight ? Colors.black.withValues(alpha: 0.05) : Colors.white.withValues(alpha: 0.08))
+                        : Colors.transparent),
+                border: Border.all(
+                  color: isActive
+                      ? activeColor.withValues(alpha: 0.45)
+                      : Colors.transparent,
+                  width: 1,
+                ),
+                boxShadow: isActive
+                    ? [
+                        BoxShadow(
+                          color: activeColor.withValues(alpha: 0.35),
+                          blurRadius: 8,
+                          spreadRadius: 1,
+                        ),
+                      ]
+                    : null,
+              ),
+              child: Stack(
+                clipBehavior: Clip.none,
+                alignment: Alignment.center,
+                children: [
+                  AnimatedRotation(
+                    turns: currentRotation,
+                    duration: const Duration(milliseconds: 180),
+                    curve: Curves.easeOutCubic,
+                    child: AnimatedSwitcher(
+                      duration: const Duration(milliseconds: 180),
+                      switchInCurve: Curves.easeOutCubic,
+                      switchOutCurve: Curves.easeInCubic,
+                      transitionBuilder: (child, anim) => ScaleTransition(scale: anim, child: child),
+                      child: SvgIcon(
+                        key: ValueKey(widget.assetName),
+                        name: widget.assetName,
+                        size: widget.iconSize,
+                        color: currentColor,
+                      ),
+                    ),
+                  ),
+                  if (widget.badgeColor != null)
+                    Positioned(
+                      right: -3,
+                      bottom: -3,
+                      child: AnimatedContainer(
+                        duration: const Duration(milliseconds: 180),
+                        width: 9,
+                        height: 9,
+                        decoration: BoxDecoration(
+                          color: widget.badgeColor,
+                          shape: BoxShape.circle,
+                          border: Border.all(
+                            color: isLight ? Colors.black45 : Colors.white,
+                            width: 1.0,
+                          ),
+                          boxShadow: [
+                            BoxShadow(
+                              color: widget.badgeColor!.withValues(alpha: 0.6),
+                              blurRadius: 4,
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ),
         ),
-        onPressed: onPressed,
-        tooltip: tooltip,
       ),
     );
   }

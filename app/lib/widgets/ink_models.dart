@@ -327,4 +327,45 @@ class PenSlotPreset {
       enablePressure: enablePressure ?? this.enablePressure,
     );
   }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'name': name,
+      'color': color.toARGB32(),
+      'strokeWidth': strokeWidth,
+      'toolType': toolType.name,
+      'enablePressure': enablePressure,
+    };
+  }
+
+  factory PenSlotPreset.fromJson(Map<String, dynamic> json) {
+    InkToolType parsedToolType = InkToolType.technical;
+    final toolTypeStr = json['toolType'] as String?;
+    if (toolTypeStr != null) {
+      for (final t in InkToolType.values) {
+        if (t.name == toolTypeStr) {
+          parsedToolType = t;
+          break;
+        }
+      }
+    }
+
+    final colorVal = json['color'];
+    Color parsedColor = Colors.white;
+    if (colorVal is int) {
+      parsedColor = Color(colorVal);
+    } else if (colorVal is num) {
+      parsedColor = Color(colorVal.toInt());
+    }
+
+    return PenSlotPreset(
+      id: json['id'] as String? ?? 'slot_${DateTime.now().millisecondsSinceEpoch}',
+      name: json['name'] as String? ?? 'Caneta',
+      color: parsedColor,
+      strokeWidth: (json['strokeWidth'] as num?)?.toDouble() ?? 2.5,
+      toolType: parsedToolType,
+      enablePressure: json['enablePressure'] as bool? ?? true,
+    );
+  }
 }

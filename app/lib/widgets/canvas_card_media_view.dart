@@ -1,9 +1,12 @@
 import 'dart:convert';
+import 'dart:math' as math;
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import '../models/canvas_card_model.dart';
 import 'media_lightbox_modal.dart';
 import 'svg_icon.dart';
+import 'ink_models.dart';
+import 'canvas_layers.dart';
 
 /// Renderizador Visual do Conteudo do Card de Midia (Imagens estaticas e GIFs).
 /// Otimizado com cache de texturas sob demanda (ResizeImage / cacheWidth) para economizar VRAM.
@@ -12,6 +15,9 @@ class CanvasCardMediaView extends StatefulWidget {
   final bool isSelected;
   final ValueChanged<CanvasCardModel> onUpdateCard;
   final double zoomScale;
+  final List<InkStroke> Function(Set<String> ids)? getAttachedStrokes;
+  final String activeTool;
+  final void Function(List<InkStroke> finalStrokes, String cardId)? onSyncCardStrokes;
 
   const CanvasCardMediaView({
     super.key,
@@ -19,6 +25,9 @@ class CanvasCardMediaView extends StatefulWidget {
     required this.isSelected,
     required this.onUpdateCard,
     this.zoomScale = 1.0,
+    this.getAttachedStrokes,
+    this.activeTool = 'pen',
+    this.onSyncCardStrokes,
   });
 
   @override
@@ -43,11 +52,18 @@ class _CanvasCardMediaViewState extends State<CanvasCardMediaView> {
     }
   }
 
+  static final Map<String, Uint8List> _globalMediaCache = {};
+
   void _decodeMediaData() {
     final mediaData = widget.card.mediaData;
     _lastDataUri = mediaData;
     if (mediaData == null || mediaData.isEmpty) {
       _cachedBytes = null;
+      return;
+    }
+
+    if (_globalMediaCache.containsKey(mediaData)) {
+      _cachedBytes = _globalMediaCache[mediaData];
       return;
     }
 
@@ -57,6 +73,7 @@ class _CanvasCardMediaViewState extends State<CanvasCardMediaView> {
         try {
           final b64 = mediaData.substring(commaIndex + 1);
           _cachedBytes = base64Decode(b64);
+          _globalMediaCache[mediaData] = _cachedBytes!;
         } catch (e) {
           debugPrint('[CanvasCardMediaView] Erro ao decodificar Base64: $e');
           _cachedBytes = null;
@@ -65,13 +82,7 @@ class _CanvasCardMediaViewState extends State<CanvasCardMediaView> {
     }
   }
 
-  void _openLightbox() {
-    MediaLightboxModal.show(
-      context,
-      mediaData: widget.card.mediaData,
-      title: widget.card.title.isNotEmpty ? widget.card.title : 'Visualizacao de Midia',
-    );
-  }
+
 
   static const ColorFilter _invertLuminanceFilter = ColorFilter.matrix(<double>[
     -1, 0, 0, 0, 255,
@@ -121,23 +132,44 @@ class _CanvasCardMediaViewState extends State<CanvasCardMediaView> {
         );
       }
 
-      imageContent = GestureDetector(
-        onDoubleTap: card.isDrawOverMode ? null : _openLightbox,
-        child: RepaintBoundary(
-          child: img,
-        ),
+      imageContent = RepaintBoundary(
+        child: img,
       );
     } else {
       imageContent = _buildPlaceholder('Nenhuma midia carregada');
     }
 
+    final attachedStrokes = widget.getAttachedStrokes != null && card.attachedStrokeIds.isNotEmpty
+        ? widget.getAttachedStrokes!(card.attachedStrokeIds.toSet())
+        : <InkStroke>[];
+
+    Widget finalContent = imageContent;
+    if (attachedStrokes.isNotEmpty) {
+      finalContent = Stack(
+        fit: StackFit.expand,
+        children: [
+          imageContent,
+          IgnorePointer(
+            child: RepaintBoundary(
+              child: CustomPaint(
+                painter: _CardMediaStrokesPainter(
+                  strokes: attachedStrokes,
+                  cardX: card.x,
+                  cardY: card.y,
+                  baseWidth: card.width,
+                  baseHeight: card.height,
+                ),
+              ),
+            ),
+          ),
+        ],
+      );
+    }
+
     return ClipRRect(
       borderRadius: BorderRadius.circular(14.0),
-      child: IgnorePointer(
-        ignoring: card.isDrawOverMode,
-        child: SizedBox.expand(
-          child: imageContent,
-        ),
+      child: SizedBox.expand(
+        child: finalContent,
       ),
     );
   }
@@ -166,5 +198,59 @@ class _CanvasCardMediaViewState extends State<CanvasCardMediaView> {
         ),
       ),
     );
+  }
+}
+
+class _CardMediaStrokesPainter extends CustomPainter {
+  final List<InkStroke> strokes;
+  final double cardX;
+  final double cardY;
+  final double baseWidth;
+  final double baseHeight;
+  final Paint _reusablePaint = Paint();
+
+  _CardMediaStrokesPainter({
+    required this.strokes,
+    required this.cardX,
+    required this.cardY,
+    required this.baseWidth,
+    required this.baseHeight,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (strokes.isEmpty) return;
+    
+    final actualBaseHeight = math.max(1.0, baseHeight - 28.0);
+    final scaleX = (baseWidth > 0 && size.width > 0) ? (size.width / baseWidth) : 1.0;
+    final scaleY = (actualBaseHeight > 0 && size.height > 0) ? (size.height / actualBaseHeight) : 1.0;
+
+    canvas.save();
+    if (scaleX != 1.0 || scaleY != 1.0) {
+      canvas.scale(scaleX, scaleY);
+    }
+    // O corpo da imagem do card começa em cardY + 28.0 por conta do cabeçalho de 28px
+    canvas.translate(-cardX, -(cardY + 28.0));
+
+    // 1. Marca-textos primeiro
+    for (final s in strokes) {
+      if (s.toolType == InkToolType.highlighter) {
+        StrokePictureCache.drawSingleStroke(canvas, s, _reusablePaint);
+      }
+    }
+
+    // 2. Traços regulares
+    for (final s in strokes) {
+      if (s.toolType != InkToolType.highlighter) {
+        StrokePictureCache.drawSingleStroke(canvas, s, _reusablePaint);
+      }
+    }
+
+    canvas.restore();
+  }
+
+  @override
+  bool shouldRepaint(covariant _CardMediaStrokesPainter oldDelegate) {
+    return true; // Repaint whenever size or card changes (real-time 144 FPS)
   }
 }

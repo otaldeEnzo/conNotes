@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../models/canvas_card_model.dart';
 import 'canvas_card_widget.dart';
 import 'selection_models.dart';
+import 'ink_models.dart';
 import 'infinite_hit_test_stack.dart';
 export 'infinite_hit_test_stack.dart';
 
@@ -28,10 +29,16 @@ class CanvasCardsLayer extends StatefulWidget {
   final double gridSpacing;
   final ValueChanged<CanvasCardModel>? onSolveWithAi;
   final ValueChanged<CanvasCardModel>? onExtractLatex;
+  final List<InkStroke> Function(Set<String> ids)? getAttachedStrokes;
+  final String activeTool;
+  final void Function(List<InkStroke> finalStrokes, String cardId)? onSyncCardStrokes;
 
   const CanvasCardsLayer({
     super.key,
     required this.cards,
+    this.getAttachedStrokes,
+    this.activeTool = 'pen',
+    this.onSyncCardStrokes,
     required this.selectedCardId,
     this.selectionState = const SelectionState(),
     this.getSelectionState,
@@ -52,6 +59,44 @@ class CanvasCardsLayer extends StatefulWidget {
 }
 
 class _CanvasCardsLayerState extends State<CanvasCardsLayer> {
+  final ValueNotifier<int> _selectionIdsNotifier = ValueNotifier<int>(0);
+  Set<String>? _lastSelectedCardIds;
+  String? _lastSelectedCardId;
+
+  @override
+  void initState() {
+    super.initState();
+    widget.selectionUpdateNotifier?.addListener(_onSelectionChanged);
+  }
+
+  @override
+  void didUpdateWidget(covariant CanvasCardsLayer oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.selectionUpdateNotifier != widget.selectionUpdateNotifier) {
+      oldWidget.selectionUpdateNotifier?.removeListener(_onSelectionChanged);
+      widget.selectionUpdateNotifier?.addListener(_onSelectionChanged);
+    }
+  }
+
+  @override
+  void dispose() {
+    widget.selectionUpdateNotifier?.removeListener(_onSelectionChanged);
+    _selectionIdsNotifier.dispose();
+    super.dispose();
+  }
+
+  void _onSelectionChanged() {
+    final sel = widget.getSelectionState?.call() ?? widget.selectionState;
+    final ids = sel.selectedCardIds;
+    final cardId = widget.selectedCardId;
+    if (cardId != _lastSelectedCardId ||
+        _lastSelectedCardIds?.length != ids.length ||
+        (_lastSelectedCardIds != null && !_lastSelectedCardIds!.containsAll(ids))) {
+      _lastSelectedCardId = cardId;
+      _lastSelectedCardIds = Set<String>.from(ids);
+      _selectionIdsNotifier.value++;
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -74,12 +119,10 @@ class _CanvasCardsLayerState extends State<CanvasCardsLayer> {
                 child: child,
               );
             },
-            child: widget.selectionUpdateNotifier != null
-                ? ListenableBuilder(
-                    listenable: widget.selectionUpdateNotifier!,
-                    builder: (context, _) => _buildCardsStack(),
-                  )
-                : _buildCardsStack(),
+            child: ListenableBuilder(
+              listenable: _selectionIdsNotifier,
+              builder: (context, _) => _buildCardsStack(),
+            ),
           ),
         ),
       ),
@@ -110,25 +153,44 @@ class _CanvasCardsLayerState extends State<CanvasCardsLayer> {
       children: sortedCards.map((card) {
         final isSelected = widget.selectedCardId == card.id ||
             currentSelectionState.selectedCardIds.contains(card.id);
-        final bool isDragging = isSelected && currentSelectionState.isDraggingSelection;
-        final Offset offset = isDragging ? currentSelectionState.dragOffset : Offset.zero;
+
+        Widget cardChild = CanvasCardWidget(
+          key: ValueKey('card_${card.id}'),
+          card: card,
+          isSelected: isSelected,
+          zoomNotifier: widget.zoomNotifier,
+          onUpdateCard: widget.onUpdateCard,
+          onSelectCard: widget.onSelectCard,
+          onDeleteCard: widget.onDeleteCard,
+          onDuplicateCard: widget.onDuplicateCard,
+          allCards: widget.cards,
+          gridSpacing: widget.gridSpacing,
+          onSolveWithAi: widget.onSolveWithAi != null ? () => widget.onSolveWithAi!(card) : null,
+          onExtractLatex: widget.onExtractLatex != null ? () => widget.onExtractLatex!(card) : null,
+          getAttachedStrokes: widget.getAttachedStrokes,
+          activeTool: widget.activeTool,
+          onSyncCardStrokes: widget.onSyncCardStrokes,
+        );
+
+        if (isSelected && widget.selectionUpdateNotifier != null) {
+          cardChild = ListenableBuilder(
+            listenable: widget.selectionUpdateNotifier!,
+            builder: (context, child) {
+              final sel = widget.getSelectionState?.call() ?? widget.selectionState;
+              final isDragging = sel.isDraggingSelection;
+              final offset = isDragging ? sel.dragOffset : Offset.zero;
+              if (offset == Offset.zero) return child!;
+              return Transform.translate(offset: offset, child: child);
+            },
+            child: cardChild,
+          );
+        }
+
         return Positioned(
           key: ValueKey('pos_${card.id}'),
-          left: card.x + offset.dx,
-          top: card.y + offset.dy - 60.0,
-          child: CanvasCardWidget(
-              card: card,
-              isSelected: isSelected,
-              zoomNotifier: widget.zoomNotifier,
-              onUpdateCard: widget.onUpdateCard,
-              onSelectCard: widget.onSelectCard,
-              onDeleteCard: widget.onDeleteCard,
-              onDuplicateCard: widget.onDuplicateCard,
-              allCards: widget.cards,
-              gridSpacing: widget.gridSpacing,
-              onSolveWithAi: widget.onSolveWithAi != null ? () => widget.onSolveWithAi!(card) : null,
-              onExtractLatex: widget.onExtractLatex != null ? () => widget.onExtractLatex!(card) : null,
-            ),
+          left: card.x,
+          top: card.y - 60.0,
+          child: cardChild,
         );
       }).toList(),
     );

@@ -53,6 +53,7 @@ class WorkspaceStorageService extends ChangeNotifier {
   Timer? _autosaveDebounceTimer;
   Timer? _watcherDebounceTimer;
   final Set<String> _pendingSaveDocIds = {};
+  final Map<String, NoteDocument> _pendingDocs = {};
 
   /// Retorna o caminho padrão de Documentos do usuário no Windows / SO
   static String getDefaultWorkspacePath() {
@@ -231,11 +232,26 @@ class WorkspaceStorageService extends ChangeNotifier {
   /// Agenda o salvamento contínuo (Autosave com debounce de ~400ms) de uma nota ativa
   void queueAutosave(NoteDocument doc, {String? targetFolderName}) {
     _pendingSaveDocIds.add(doc.id);
+    _pendingDocs[doc.id] = doc;
     _autosaveDebounceTimer?.cancel();
     _autosaveDebounceTimer = Timer(const Duration(milliseconds: 400), () async {
       await saveNoteNow(doc, targetFolderName: targetFolderName);
       _pendingSaveDocIds.remove(doc.id);
+      _pendingDocs.remove(doc.id);
     });
+  }
+
+  /// Descarrega imediatamente todas as notas com autosave pendente diretamente no disco
+  Future<void> flushPendingSaves() async {
+    _autosaveDebounceTimer?.cancel();
+    if (_pendingDocs.isNotEmpty) {
+      final docsToSave = List<NoteDocument>.from(_pendingDocs.values);
+      _pendingDocs.clear();
+      _pendingSaveDocIds.clear();
+      for (final doc in docsToSave) {
+        await saveNoteNow(doc);
+      }
+    }
   }
 
   /// Alias para queueAutosave

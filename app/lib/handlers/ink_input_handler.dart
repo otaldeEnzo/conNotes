@@ -28,6 +28,13 @@ class InkInputHandler {
     required this.onInteracting,
   });
 
+  void cancelActiveStroke() {
+    isDrawing = false;
+    activeStroke = null;
+    drawAndHoldTimer?.cancel();
+    activeStrokeUpdateNotifier.value++;
+  }
+
   void startStroke({
     required Offset canvasPoint,
     required double pressure,

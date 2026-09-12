@@ -119,7 +119,6 @@ class _CanvasInputRouterState extends State<CanvasInputRouter> {
   final Set<int> _activePalmPointerIds = {};
 
   // Estado dos botões do stylus (Hold vs Toggle) para Botão Inferior (Primário) e Superior (Secundário)
-  int _lastButtons = 0;
   bool _lastButtonsPrimaryPressed = false;
   bool _lastButtonsSecondaryPressed = false;
   bool _isPrimaryBarrelToggleActive = false;
@@ -139,6 +138,9 @@ class _CanvasInputRouterState extends State<CanvasInputRouter> {
 
   bool _isInteractingWithCard = false;
   String? _activeDrawOverCardId;
+  int _lastMediaClickTime = 0;
+  String? _lastMediaClickCardId;
+  Offset? _lastMediaClickPos;
   final ValueNotifier<MouseCursor> _cursorNotifier = ValueNotifier(SystemMouseCursors.basic);
 
   @override
@@ -190,7 +192,6 @@ class _CanvasInputRouterState extends State<CanvasInputRouter> {
     _lastButtonsSecondaryPressed = false;
     _isActionExecuting = false;
     _currentActiveAction = null;
-    _lastButtons = 0;
     if (_cursorNotifier.value != SystemMouseCursors.basic) {
       _cursorNotifier.value = SystemMouseCursors.basic;
     }
@@ -285,8 +286,6 @@ class _CanvasInputRouterState extends State<CanvasInputRouter> {
       }
     }
     _lastButtonsSecondaryPressed = isSecondaryPressed;
-
-    _lastButtons = currentButtons;
   }
 
   StylusBarrelAction _getEffectiveStylusAction(int buttons, PointerDeviceKind? kind) {
@@ -440,6 +439,9 @@ class _CanvasInputRouterState extends State<CanvasInputRouter> {
         onPointerHover: (event) {
           _handleButtonTransitions(event.buttons);
           ctx.updateMousePos(event.localPosition);
+          if (globalIsHoveringFloatingPill && ctx.selectedCardId == null) {
+            globalIsHoveringFloatingPill = false;
+          }
 
           final rawCanvasPoint = (event.localPosition - ctx.panOffset) / ctx.zoomScale;
           final canvasPoint = Offset(math.max(0.0, rawCanvasPoint.dx), math.max(0.0, rawCanvasPoint.dy));
@@ -505,10 +507,52 @@ class _CanvasInputRouterState extends State<CanvasInputRouter> {
               : (zone: CardHoverZone.none, card: null);
 
           final cardUnderPointer = cardHit.card ?? ctx.findCardAtPoint(canvasPoint);
-          final bool isDrawOverMediaCard = cardUnderPointer != null &&
+          final bool isOverMediaImage = cardUnderPointer != null &&
               cardUnderPointer.cardType == CardType.media &&
-              cardUnderPointer.isDrawOverMode == true &&
-              (ctx.activeTool == 'pen' || ctx.activeTool == 'laser');
+              canvasPoint.dy >= (cardUnderPointer.y + 28.0) &&
+              (cardHit.zone == CardHoverZone.none || cardHit.zone == CardHoverZone.body);
+
+          if (isOverMediaImage) {
+            final now = DateTime.now().millisecondsSinceEpoch;
+            final isDoubleTap = _lastMediaClickCardId == cardUnderPointer.id &&
+                (now - _lastMediaClickTime) < 400 &&
+                _lastMediaClickPos != null &&
+                (event.localPosition - _lastMediaClickPos!).distance < 35.0;
+
+            _lastMediaClickTime = now;
+            _lastMediaClickCardId = cardUnderPointer.id;
+            _lastMediaClickPos = event.localPosition;
+
+            if (isDoubleTap) {
+              _lastMediaClickTime = 0;
+              _lastMediaClickCardId = null;
+              _lastMediaClickPos = null;
+              _activeDrawOverCardId = null;
+              _isInteractingWithCard = false;
+              _inkHandler.cancelActiveStroke();
+              if (note != null && note.strokes.isNotEmpty) {
+                final lastStroke = note.strokes.last;
+                if (lastStroke.parentCardId == cardUnderPointer.id && lastStroke.points.length <= 4) {
+                  note.removeStroke(lastStroke.id);
+                  cardUnderPointer.attachedStrokeIds.remove(lastStroke.id);
+                  ctx.incrementStrokesVersion();
+                }
+              }
+              ctx.openMediaLightbox(cardUnderPointer.id);
+              return;
+            }
+          } else {
+            _lastMediaClickTime = 0;
+            _lastMediaClickCardId = null;
+            _lastMediaClickPos = null;
+          }
+
+          final bool isDrawOverMediaCard = isOverMediaImage &&
+              (ctx.activeTool == 'pen' ||
+                  ctx.activeTool == 'eraser' ||
+                  ctx.activeTool == 'laser' ||
+                  ctx.activeTool == 'shapes' ||
+                  cardUnderPointer.isDrawOverMode == true);
 
           if (isDrawOverMediaCard) {
             _activeDrawOverCardId = cardUnderPointer.id;
@@ -550,7 +594,10 @@ class _CanvasInputRouterState extends State<CanvasInputRouter> {
           if (isTouchingCard) {
             final clickedCard = cardUnderPointer;
             if (clickedCard != null) {
-              if (ctx.selectedCardId != clickedCard.id) {
+              final bool isMediaImageArea = clickedCard.cardType == CardType.media &&
+                  canvasPoint.dy >= (clickedCard.y + 28.0) &&
+                  (cardHit.zone == CardHoverZone.none || cardHit.zone == CardHoverZone.body);
+              if (!isMediaImageArea && ctx.selectedCardId != clickedCard.id) {
                 WidgetsBinding.instance.addPostFrameCallback((_) {
                   ctx.selectCard(clickedCard.id);
                   ctx.updateSelectionState(SelectionState.empty());
@@ -653,14 +700,13 @@ class _CanvasInputRouterState extends State<CanvasInputRouter> {
             if (ctx.selectedCardId != null && note != null) {
               for (final card in note.cards) {
                 if (card.id == ctx.selectedCardId) {
-                  // A pílula flutuante fica posicionada acima do card, numa faixa de ~150px
-                  // Horizontal: largura do card + margem de 100px de cada lado
-                  // Vertical: do topo do card até 150px acima (para acomodar popover de rotação)
+                  // A pílula flutuante e seus popovers superiores (LaTeX, Mermaid, Callouts, Paletas)
+                  // ficam posicionados acima do card numa faixa de até ~480px
                   final pillRect = Rect.fromLTWH(
-                    card.x - 100.0,
-                    card.y - 150.0,
-                    math.max(card.width, 500.0) + 200.0,
-                    150.0,
+                    card.x - 200.0,
+                    card.y - 480.0,
+                    math.max(card.width, 600.0) + 400.0,
+                    500.0,
                   );
                   if (pillRect.contains(canvasPoint)) {
                     isInFloatingPillZone = true;
@@ -683,7 +729,7 @@ class _CanvasInputRouterState extends State<CanvasInputRouter> {
               });
             }
 
-            // Se o clique está na zona da pílula flutuante, deixar o Flutter processar
+            // Se o clique está na zona da pílula flutuante ou menus expansíveis, deixar o Flutter processar
             // os InkWell/GestureDetectors do popover sem iniciar traços ou outras ações do canvas.
             if (isInFloatingPillZone) {
               return;
@@ -777,6 +823,12 @@ class _CanvasInputRouterState extends State<CanvasInputRouter> {
           }
 
           ctx.updateMousePos(event.localPosition);
+
+          if (_lastMediaClickPos != null && (event.localPosition - _lastMediaClickPos!).distance > 6.0) {
+            _lastMediaClickTime = 0;
+            _lastMediaClickCardId = null;
+            _lastMediaClickPos = null;
+          }
 
           final rawCanvasPoint = (event.localPosition - ctx.panOffset) / ctx.zoomScale;
           final canvasPoint = Offset(math.max(0.0, rawCanvasPoint.dx), math.max(0.0, rawCanvasPoint.dy));
@@ -1072,16 +1124,23 @@ class _CanvasInputRouterState extends State<CanvasInputRouter> {
           if (ctx.activeTool == 'pen' || ctx.activeTool == 'shapes') {
             final finishedStroke = _inkHandler.finishStroke();
             if (finishedStroke != null) {
-              if (_activeDrawOverCardId != null) {
-                ctx.attachStrokeToCard(_activeDrawOverCardId!, finishedStroke.id);
-              } else if (finishedStroke.points.isNotEmpty) {
+              String? targetCardId = _activeDrawOverCardId;
+              if (targetCardId == null && finishedStroke.points.isNotEmpty) {
                 final firstPoint = finishedStroke.points.first.point;
                 final cardAtPoint = ctx.findCardAtPoint(firstPoint);
-                if (cardAtPoint != null && cardAtPoint.cardType == CardType.media && cardAtPoint.isDrawOverMode) {
-                  ctx.attachStrokeToCard(cardAtPoint.id, finishedStroke.id);
+                if (cardAtPoint != null && cardAtPoint.cardType == CardType.media) {
+                  targetCardId = cardAtPoint.id;
                 }
               }
-              widget.onCommitStroke(finishedStroke);
+
+              final strokeToCommit = targetCardId != null
+                  ? finishedStroke.copyWith(parentCardId: targetCardId)
+                  : finishedStroke;
+
+              if (targetCardId != null) {
+                ctx.attachStrokeToCard(targetCardId, strokeToCommit.id);
+              }
+              widget.onCommitStroke(strokeToCommit);
             }
           } else if (ctx.activeTool == 'eraser') {
             ctx.scheduleEraseCommit();
@@ -1120,7 +1179,6 @@ class _CanvasInputRouterState extends State<CanvasInputRouter> {
           }
           _isActionExecuting = false;
           _currentActiveAction = null;
-          _lastButtons = 0;
         },
         child: Stack(
           fit: StackFit.passthrough,

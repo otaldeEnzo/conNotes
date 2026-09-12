@@ -56,6 +56,7 @@ class CanvasLayerStack extends StatelessWidget {
   final VoidCallback onCloseProtractor;
   final ValueChanged<CanvasCardModel>? onSolveWithAi;
   final ValueChanged<CanvasCardModel>? onExtractLatex;
+  final void Function(List<InkStroke> finalStrokes, String cardId)? onSyncCardStrokes;
 
   const CanvasLayerStack({
     super.key,
@@ -95,6 +96,7 @@ class CanvasLayerStack extends StatelessWidget {
     required this.onCloseProtractor,
     this.onSolveWithAi,
     this.onExtractLatex,
+    this.onSyncCardStrokes,
   });
 
   @override
@@ -187,49 +189,21 @@ class CanvasLayerStack extends StatelessWidget {
           ),
 
 
-        // Camada 2: Traços Confirmados
-        if (!isSettingsOpen && note != null)
-          ListenableBuilder(
-            listenable: Listenable.merge([
-              panNotifier,
-              zoomNotifier,
-              committedStrokesNotifier,
-              isInteractingNotifier,
-              selectionUpdateNotifier,
-            ]),
-            builder: (context, _) {
-              final pan = panNotifier.value;
-              final zoom = zoomNotifier.value;
-              final isInteracting = isInteractingNotifier.value;
-              final activeSel = getSelectionState?.call() ?? selectionState;
-              final hideSelected = activeSel.isDraggingSelection || activeSel.isTransforming;
-
-              return IgnorePointer(
-                child: RepaintBoundary(
-                  child: CustomPaint(
-                    size: Size.infinite,
-                    isComplex: true,
-                    willChange: false,
-                    painter: CommittedStrokesPainter(
-                      strokes: note!.strokes,
-                      strokesCount: note!.strokes.length,
-                      strokesVersion: committedStrokesNotifier.value,
-                      hiddenStrokeIds: hideSelected ? activeSel.selectedStrokeIds : null,
-                      panOffset: pan,
-                      zoomScale: zoom,
-                      pictureCache: note!.pictureCache,
-                      isInteracting: isInteracting,
-                      repaint: committedStrokesNotifier,
-                    ),
-                  ),
-                ),
-              );
-            },
+        // Camada 2: Traços Confirmados (Otimizada para 144 FPS constante com isolamento de drag)
+        if (note != null)
+          _OptimizedCommittedStrokesLayer(
+            note: note!,
+            panNotifier: panNotifier,
+            zoomNotifier: zoomNotifier,
+            committedStrokesNotifier: committedStrokesNotifier,
+            isInteractingNotifier: isInteractingNotifier,
+            selectionUpdateNotifier: selectionUpdateNotifier,
+            getSelectionState: getSelectionState,
+            selectionState: selectionState,
           ),
 
         // Camada 2.5: Traços Transitórios
-        if (!isSettingsOpen)
-          ListenableBuilder(
+        ListenableBuilder(
             listenable: Listenable.merge([panNotifier, zoomNotifier, transientUpdateNotifier]),
             builder: (context, _) {
               final pan = panNotifier.value;
@@ -250,28 +224,6 @@ class CanvasLayerStack extends StatelessWidget {
             },
           ),
 
-        // Camada 3: Traço Ativo da Caneta
-        if (!isSettingsOpen && note != null)
-          ListenableBuilder(
-            listenable: Listenable.merge([panNotifier, zoomNotifier, activeStrokeUpdateNotifier]),
-            builder: (context, _) {
-              final pan = panNotifier.value;
-              final zoom = zoomNotifier.value;
-              return IgnorePointer(
-                child: RepaintBoundary(
-                  child: CustomPaint(
-                    size: Size.infinite,
-                    painter: ActiveStrokePainter(
-                      activeStroke: getActiveStroke?.call() ?? activeStroke,
-                      updateNotifier: activeStrokeUpdateNotifier,
-                      panOffset: pan,
-                      zoomScale: zoom,
-                    ),
-                  ),
-                ),
-              );
-            },
-          ),
 
         // Camada 4: Overlay de Seleção
         if (!isSettingsOpen && note != null)
@@ -342,37 +294,58 @@ class CanvasLayerStack extends StatelessWidget {
             builder: (context, _) {
               final pan = panNotifier.value;
               final zoom = zoomNotifier.value;
-              return StemRulerWidget(
-                state: rulerState,
-                panOffset: pan,
-                zoomScale: zoom,
-                onStateChanged: onRulerStateChanged,
-                onClose: onCloseRuler,
+              return TweenAnimationBuilder<double>(
+                key: const ValueKey('ruler_fade_entrance'),
+                tween: Tween<double>(begin: 0.0, end: 1.0),
+                duration: const Duration(milliseconds: 180),
+                curve: Curves.easeOutCubic,
+                builder: (context, opacity, child) => Opacity(
+                  opacity: opacity,
+                  child: child,
+                ),
+                child: StemRulerWidget(
+                  state: rulerState,
+                  panOffset: pan,
+                  zoomScale: zoom,
+                  onStateChanged: onRulerStateChanged,
+                  onClose: onCloseRuler,
+                ),
               );
             },
           ),
 
         // Camada 7.1: Transferidor STEM
-        if (!isSettingsOpen && protractorState.isVisible)
+        if (protractorState.isVisible)
           ListenableBuilder(
             listenable: Listenable.merge([panNotifier, zoomNotifier, rulerUpdateNotifier]),
             builder: (context, _) {
               final pan = panNotifier.value;
               final zoom = zoomNotifier.value;
-              return StemProtractorWidget(
-                state: protractorState,
-                panOffset: pan,
-                zoomScale: zoom,
-                onStateChanged: onProtractorStateChanged,
-                onClose: onCloseProtractor,
+              return TweenAnimationBuilder<double>(
+                key: const ValueKey('protractor_fade_entrance'),
+                tween: Tween<double>(begin: 0.0, end: 1.0),
+                duration: const Duration(milliseconds: 180),
+                curve: Curves.easeOutCubic,
+                builder: (context, opacity, child) => Opacity(
+                  opacity: opacity,
+                  child: child,
+                ),
+                child: StemProtractorWidget(
+                  state: protractorState,
+                  panOffset: pan,
+                  zoomScale: zoom,
+                  onStateChanged: onProtractorStateChanged,
+                  onClose: onCloseProtractor,
+                ),
               );
             },
           ),
 
-        // Camada 8: Cards Interativos no Canvas (Topo do Stack para Hit-Testing Prioritário)
-        if (!isSettingsOpen && note != null)
+        if (note != null)
           CanvasCardsLayer(
             cards: note!.cards,
+            getAttachedStrokes: (ids) => note!.strokes.where((s) => ids.contains(s.id)).toList(),
+            activeTool: activeTool,
             selectedCardId: selectedCardId,
             selectionState: selectionState,
             getSelectionState: getSelectionState ?? (() => selectionState),
@@ -385,6 +358,30 @@ class CanvasLayerStack extends StatelessWidget {
             onDuplicateCard: onDuplicateCard,
             onSolveWithAi: onSolveWithAi,
             onExtractLatex: onExtractLatex,
+            onSyncCardStrokes: onSyncCardStrokes,
+          ),
+
+        // Camada 8.5: Traço Ativo da Caneta (Renderizado no topo dos cards para feedback visual instantâneo)
+        if (!isSettingsOpen && note != null)
+          ListenableBuilder(
+            listenable: Listenable.merge([panNotifier, zoomNotifier, activeStrokeUpdateNotifier]),
+            builder: (context, _) {
+              final pan = panNotifier.value;
+              final zoom = zoomNotifier.value;
+              return IgnorePointer(
+                child: RepaintBoundary(
+                  child: CustomPaint(
+                    size: Size.infinite,
+                    painter: ActiveStrokePainter(
+                      activeStroke: getActiveStroke?.call() ?? activeStroke,
+                      updateNotifier: activeStrokeUpdateNotifier,
+                      panOffset: pan,
+                      zoomScale: zoom,
+                    ),
+                  ),
+                ),
+              );
+            },
           ),
       ],
     );
@@ -413,5 +410,125 @@ class _EraserHaloPainter extends CustomPainter {
   @override
   bool shouldRepaint(covariant _EraserHaloPainter oldDelegate) {
     return oldDelegate.mousePosition != mousePosition || oldDelegate.radius != radius;
+  }
+}
+
+class _OptimizedCommittedStrokesLayer extends StatefulWidget {
+  final NoteDocument note;
+  final ValueNotifier<Offset> panNotifier;
+  final ValueNotifier<double> zoomNotifier;
+  final ValueNotifier<int> committedStrokesNotifier;
+  final ValueNotifier<bool> isInteractingNotifier;
+  final ValueNotifier<int>? selectionUpdateNotifier;
+  final SelectionState Function()? getSelectionState;
+  final SelectionState selectionState;
+
+  const _OptimizedCommittedStrokesLayer({
+    required this.note,
+    required this.panNotifier,
+    required this.zoomNotifier,
+    required this.committedStrokesNotifier,
+    required this.isInteractingNotifier,
+    this.selectionUpdateNotifier,
+    this.getSelectionState,
+    required this.selectionState,
+  });
+
+  @override
+  State<_OptimizedCommittedStrokesLayer> createState() => _OptimizedCommittedStrokesLayerState();
+}
+
+class _OptimizedCommittedStrokesLayerState extends State<_OptimizedCommittedStrokesLayer> {
+  final ValueNotifier<int> _hideStateNotifier = ValueNotifier<int>(0);
+  bool _lastHideSelected = false;
+  Set<String>? _lastSelectedIds;
+
+  @override
+  void initState() {
+    super.initState();
+    widget.selectionUpdateNotifier?.addListener(_onSelectionUpdate);
+  }
+
+  @override
+  void didUpdateWidget(covariant _OptimizedCommittedStrokesLayer oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.selectionUpdateNotifier != widget.selectionUpdateNotifier) {
+      oldWidget.selectionUpdateNotifier?.removeListener(_onSelectionUpdate);
+      widget.selectionUpdateNotifier?.addListener(_onSelectionUpdate);
+    }
+  }
+
+  @override
+  void dispose() {
+    widget.selectionUpdateNotifier?.removeListener(_onSelectionUpdate);
+    _hideStateNotifier.dispose();
+    super.dispose();
+  }
+
+  void _onSelectionUpdate() {
+    final activeSel = widget.getSelectionState?.call() ?? widget.selectionState;
+    final hideSelected = activeSel.isDraggingSelection || activeSel.isTransforming;
+    final selectedIds = activeSel.selectedStrokeIds;
+
+    // Só dispara rebuild da Camada 2 se o status de ocultação mudou ou os IDs selecionados mudaram,
+    // garantindo ZERO rebuilds da lista inteira de traços durante o arrasto contínuo do mouse.
+    if (hideSelected != _lastHideSelected ||
+        (_lastSelectedIds?.length != selectedIds.length) ||
+        (_lastSelectedIds != null && !_lastSelectedIds!.containsAll(selectedIds))) {
+      _lastHideSelected = hideSelected;
+      _lastSelectedIds = Set<String>.from(selectedIds);
+      _hideStateNotifier.value++;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return ListenableBuilder(
+      listenable: Listenable.merge([
+        widget.panNotifier,
+        widget.zoomNotifier,
+        widget.committedStrokesNotifier,
+        widget.isInteractingNotifier,
+        _hideStateNotifier,
+      ]),
+      builder: (context, _) {
+        final pan = widget.panNotifier.value;
+        final zoom = widget.zoomNotifier.value;
+        final isInteracting = widget.isInteractingNotifier.value;
+        final activeSel = widget.getSelectionState?.call() ?? widget.selectionState;
+        final hideSelected = activeSel.isDraggingSelection || activeSel.isTransforming;
+
+        return IgnorePointer(
+          child: RepaintBoundary(
+            child: CustomPaint(
+              size: Size.infinite,
+              isComplex: true,
+              willChange: false,
+              painter: CommittedStrokesPainter(
+                strokes: widget.note.strokes,
+                strokesCount: widget.note.strokes.length,
+                strokesVersion: widget.committedStrokesNotifier.value,
+                hiddenStrokeIds: () {
+                  final attachedIds = <String>{};
+                  for (final card in widget.note.cards) {
+                    if (card.attachedStrokeIds.isNotEmpty) {
+                      attachedIds.addAll(card.attachedStrokeIds);
+                    }
+                  }
+                  return hideSelected 
+                      ? {...activeSel.selectedStrokeIds, ...attachedIds} 
+                      : (attachedIds.isNotEmpty ? attachedIds : null);
+                }(),
+                panOffset: pan,
+                zoomScale: zoom,
+                pictureCache: widget.note.pictureCache,
+                isInteracting: isInteracting,
+                repaint: widget.committedStrokesNotifier,
+              ),
+            ),
+          ),
+        );
+      },
+    );
   }
 }

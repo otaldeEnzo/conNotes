@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import '../models/ai_provider_models.dart';
 import '../widgets/settings_models.dart';
@@ -73,9 +74,11 @@ class AiServiceBridge {
     String? scopeContext,
     String? imageBase64,
     List<String>? imagesBase64,
+    String? customSystemPrompt,
+    int? maxOutputTokens,
   }) {
     final settings = SettingsService.instance.settings;
-    final systemPrompt = buildStemSystemPrompt(settings, scopeContext: scopeContext);
+    final systemPrompt = customSystemPrompt ?? buildStemSystemPrompt(settings, scopeContext: scopeContext);
 
     final allImages = <String>[];
     if (imageBase64 != null && imageBase64.isNotEmpty) {
@@ -91,11 +94,32 @@ class AiServiceBridge {
 
     switch (model.provider) {
       case AiProviderType.gemini:
-        return _streamGemini(userPrompt, model.id, systemPrompt, settings.geminiApiKey, imagesBase64: allImages);
+        return _streamGemini(
+          userPrompt,
+          model.id,
+          systemPrompt,
+          settings.geminiApiKey,
+          imagesBase64: allImages,
+          maxOutputTokens: maxOutputTokens,
+        );
       case AiProviderType.openAi:
-        return _streamOpenAi(userPrompt, model.id, systemPrompt, settings.openAiApiKey, imageBase64: allImages.isNotEmpty ? allImages.first : null);
+        return _streamOpenAi(
+          userPrompt,
+          model.id,
+          systemPrompt,
+          settings.openAiApiKey,
+          imageBase64: allImages.isNotEmpty ? allImages.first : null,
+          maxOutputTokens: maxOutputTokens,
+        );
       case AiProviderType.claude:
-        return _streamClaude(userPrompt, model.id, systemPrompt, settings.claudeApiKey, imageBase64: allImages.isNotEmpty ? allImages.first : null);
+        return _streamClaude(
+          userPrompt,
+          model.id,
+          systemPrompt,
+          settings.claudeApiKey,
+          imageBase64: allImages.isNotEmpty ? allImages.first : null,
+          maxOutputTokens: maxOutputTokens,
+        );
       case AiProviderType.ollama:
         return _streamOllama(userPrompt, model.id, systemPrompt, settings.ollamaEndpointUrl);
     }
@@ -127,6 +151,8 @@ class AiServiceBridge {
     String systemPrompt,
     String apiKey, {
     List<String>? imagesBase64,
+    int? maxOutputTokens,
+    bool isFallback = false,
   }) async* {
     if (apiKey.isEmpty) {
       yield 'Erro: Chave de API do Gemini não configurada. Insira sua chave nas Configurações.';
@@ -142,14 +168,15 @@ class AiServiceBridge {
       for (final img in imagesBase64) {
         final sanitized = _sanitizeBase64Image(img);
         parts.add({
-          'inline_data': {
-            'mime_type': sanitized.mimeType,
+          'inlineData': {
+            'mimeType': sanitized.mimeType,
             'data': sanitized.cleanBase64,
           }
         });
       }
     }
     parts.add({'text': userPrompt});
+
 
     final requestBody = jsonEncode({
       'contents': [
@@ -164,8 +191,8 @@ class AiServiceBridge {
         ]
       },
       'generationConfig': {
-        'temperature': 0.3,
-        'maxOutputTokens': 8192,
+        'temperature': 0.1,
+        'maxOutputTokens': maxOutputTokens ?? 8192,
       }
     });
 
@@ -177,6 +204,39 @@ class AiServiceBridge {
     try {
       final response = await client.send(request);
       if (response.statusCode != 200) {
+        // Fallback automático transparente dentro do provedor (se não estiver já em fallback)
+        if (!isFallback && (response.statusCode == 429 || response.statusCode == 503 || response.statusCode == 404)) {
+          final candidateFallbacks = ['gemini-3.5-flash-lite', 'gemini-2.5-flash', 'gemini-3.5-flash', 'gemini-3.6-flash'];
+          for (final fbModel in candidateFallbacks) {
+            if (fbModel == modelId) continue;
+            debugPrint('[AiServiceBridge] Tentando fallback automático para $fbModel devido a status ${response.statusCode} em $modelId...');
+            await Future.delayed(const Duration(milliseconds: 300));
+            bool succeeded = false;
+            final chunkBuffer = StringBuffer();
+            await for (final chunk in _streamGemini(
+              userPrompt,
+              fbModel,
+              systemPrompt,
+              apiKey,
+              imagesBase64: imagesBase64,
+              maxOutputTokens: maxOutputTokens,
+              isFallback: true,
+            )) {
+              if (!chunk.startsWith('Não foi possível') &&
+                  !chunk.startsWith('Limite de requisições') &&
+                  !chunk.startsWith('O servidor da IA está temporariamente sobrecarregado') &&
+                  !chunk.startsWith('O modelo')) {
+                succeeded = true;
+                chunkBuffer.write(chunk);
+                yield chunk;
+              }
+            }
+            if (succeeded && chunkBuffer.isNotEmpty) {
+              return;
+            }
+          }
+        }
+
         final errBody = await response.stream.bytesToString();
         String userFriendlyError = 'Não foi possível obter resposta da IA (Código ${response.statusCode}).';
         try {
@@ -237,13 +297,14 @@ class AiServiceBridge {
     }
   }
 
-  /// Streaming da OpenAI (GPT-4o com suporte Multimodal a imagens)
+  /// Streaming da OpenAI (GPT-4o / GPT-4o-mini com suporte Multimodal a imagens)
   Stream<String> _streamOpenAi(
     String userPrompt,
     String modelId,
     String systemPrompt,
     String apiKey, {
     String? imageBase64,
+    int? maxOutputTokens,
   }) async* {
     if (apiKey.isEmpty) {
       yield 'Erro: Chave da OpenAI não configurada nas Configurações.';
@@ -266,15 +327,20 @@ class AiServiceBridge {
       userContent = userPrompt;
     }
 
-    final requestBody = jsonEncode({
+    final requestMap = <String, dynamic>{
       'model': modelId,
       'messages': [
         {'role': 'system', 'content': systemPrompt},
         {'role': 'user', 'content': userContent},
       ],
       'stream': true,
-      'temperature': 0.3,
-    });
+      'temperature': 0.2,
+    };
+    if (maxOutputTokens != null && maxOutputTokens > 0) {
+      requestMap['max_tokens'] = maxOutputTokens;
+    }
+
+    final requestBody = jsonEncode(requestMap);
 
     final request = http.Request('POST', url)
       ..headers['Content-Type'] = 'application/json'
@@ -333,6 +399,7 @@ class AiServiceBridge {
     String systemPrompt,
     String apiKey, {
     String? imageBase64,
+    int? maxOutputTokens,
   }) async* {
     if (apiKey.isEmpty) {
       yield 'Erro: Chave da Anthropic Claude não configurada nas Configurações.';
@@ -365,7 +432,7 @@ class AiServiceBridge {
       'messages': [
         {'role': 'user', 'content': userContent}
       ],
-      'max_tokens': 4096,
+      'max_tokens': maxOutputTokens ?? 4096,
       'stream': true,
     });
 

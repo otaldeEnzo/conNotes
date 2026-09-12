@@ -87,6 +87,16 @@ if(PLUGIN_BUNDLED_LIBRARIES)
     COMPONENT Runtime)
 endif()
 
+# Copia automaticamente as bibliotecas nativas de Rust e ONNX Runtime para o bundle do executável
+set(RUST_CORE_DLL "${CMAKE_CURRENT_SOURCE_DIR}/../connotes_core/target/release/connotes_core.dll")
+set(ONNX_RUNTIME_DLL "${CMAKE_CURRENT_SOURCE_DIR}/../connotes_core/target/release/onnxruntime.dll")
+if(EXISTS "${RUST_CORE_DLL}")
+  install(FILES "${RUST_CORE_DLL}" DESTINATION "${INSTALL_BUNDLE_LIB_DIR}" COMPONENT Runtime)
+endif()
+if(EXISTS "${ONNX_RUNTIME_DLL}")
+  install(FILES "${ONNX_RUNTIME_DLL}" DESTINATION "${INSTALL_BUNDLE_LIB_DIR}" COMPONENT Runtime)
+endif()
+
 # Copy the native assets provided by the build.dart from all packages.
 set(NATIVE_ASSETS_DIR "${PROJECT_BUILD_DIR}native_assets/windows/")
 install(DIRECTORY "${NATIVE_ASSETS_DIR}"

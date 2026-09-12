@@ -1,12 +1,14 @@
 import 'dart:ui';
-import 'dart:math' as math;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter/gestures.dart';
 import '../theme/moscaro_v2_tokens.dart';
+import '../theme/moscaro_v2_extension.dart';
 import '../theme/moscaro_theme_controller.dart';
 import '../models/canvas_card_model.dart';
 import '../services/custom_font_manager.dart';
 import 'latex_stem_symbols_palette.dart';
+import 'svg_icon.dart';
 
 bool globalIsHoveringFloatingPill = false;
 
@@ -236,7 +238,6 @@ class _CardFormatFloatingPillState extends State<CardFormatFloatingPill> {
                     onSelectSymbol: (snippet) {
                       final formatted = snippet.startsWith(r'$') ? snippet : '\$$snippet\$';
                       widget.onInsertSnippet(formatted);
-                      setState(() => _isLatexPaletteOpen = false);
                     },
                     onClose: () => setState(() => _isLatexPaletteOpen = false),
                   ),
@@ -918,22 +919,24 @@ class _CardFormatFloatingPillState extends State<CardFormatFloatingPill> {
       children: [
         _buildPillButton(
           label: r'f(x) LaTeX',
-          icon: Icons.functions_rounded,
+          svgIconName: 'math',
           isActive: _isLatexPaletteOpen,
           tooltip: 'Paleta Categorizada de Fórmulas LaTeX',
           onTap: () {
             setState(() {
               _isLatexPaletteOpen = !_isLatexPaletteOpen;
               _isMermaidMenuOpen = false;
+              _isCalloutMenuOpen = false;
               _isFontMenuOpen = false;
               _isColorPaletteOpen = false;
+              _isHighlightMenuOpen = false;
             });
           },
         ),
         const SizedBox(width: 4),
         _buildPillButton(
           label: 'Mermaid',
-          icon: Icons.account_tree_rounded,
+          svgIconName: 'code',
           isActive: _isMermaidMenuOpen,
           tooltip: 'Templates de Diagramas Mermaid',
           onTap: () {
@@ -950,7 +953,7 @@ class _CardFormatFloatingPillState extends State<CardFormatFloatingPill> {
         const SizedBox(width: 4),
         _buildPillButton(
           label: 'Callouts',
-          icon: Icons.style_outlined,
+          svgIconName: 'tag',
           isActive: _isCalloutMenuOpen,
           tooltip: 'Caixas de Destaque STEM (Dica, Teorema, Alerta, Conceito)',
           onTap: () {
@@ -968,10 +971,35 @@ class _CardFormatFloatingPillState extends State<CardFormatFloatingPill> {
     );
   }
 
+  bool _isCopiedRecently = false;
+
+  void _handleCopyContent() async {
+    final text = widget.card.content;
+    if (text.isNotEmpty) {
+      await Clipboard.setData(ClipboardData(text: text));
+      if (mounted) {
+        setState(() => _isCopiedRecently = true);
+        Future.delayed(const Duration(milliseconds: 1400), () {
+          if (mounted) setState(() => _isCopiedRecently = false);
+        });
+      }
+    }
+  }
+
   Widget _buildActionControls() {
+    final theme = MoscaroThemeController.instance.currentTheme;
+    final themeAccent = theme.accentPrimary;
+
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
+        _buildPillSvgButton(
+          iconName: _isCopiedRecently ? 'check' : 'copy',
+          isActive: _isCopiedRecently,
+          activeColor: _isCopiedRecently ? const Color(0xFF10B981) : themeAccent,
+          tooltip: _isCopiedRecently ? 'Conteúdo copiado!' : 'Copiar Conteúdo (LaTeX/Texto)',
+          onTap: _handleCopyContent,
+        ),
         _buildPillIconButton(
           icon: widget.card.isPinned ? Icons.push_pin_rounded : Icons.push_pin_outlined,
           isActive: widget.card.isPinned,
@@ -999,6 +1027,45 @@ class _CardFormatFloatingPillState extends State<CardFormatFloatingPill> {
       width: 1,
       height: 18,
       color: isLight ? Colors.black12 : Colors.white12,
+    );
+  }
+
+  Widget _buildPillSvgButton({
+    required String iconName,
+    bool isActive = false,
+    Color? activeColor,
+    required String tooltip,
+    required VoidCallback onTap,
+  }) {
+    final themeAccent = activeColor ?? MoscaroTokens.auroraBlue;
+    final isLight = MoscaroTokens.isLight;
+
+    return Tooltip(
+      message: tooltip,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(6),
+        child: Container(
+          width: 24,
+          height: 24,
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            color: isActive
+                ? themeAccent.withValues(alpha: 0.2)
+                : Colors.transparent,
+            borderRadius: BorderRadius.circular(6),
+            border: Border.all(
+              color: isActive ? themeAccent : Colors.transparent,
+              width: 1.0,
+            ),
+          ),
+          child: SvgIcon(
+            name: iconName,
+            size: 13,
+            color: isActive ? themeAccent : (isLight ? Colors.black87 : Colors.white70),
+          ),
+        ),
+      ),
     );
   }
 
@@ -1043,7 +1110,8 @@ class _CardFormatFloatingPillState extends State<CardFormatFloatingPill> {
 
   Widget _buildPillButton({
     required String label,
-    required IconData icon,
+    IconData? icon,
+    String? svgIconName,
     bool isActive = false,
     required String tooltip,
     required VoidCallback onTap,
@@ -1071,8 +1139,19 @@ class _CardFormatFloatingPillState extends State<CardFormatFloatingPill> {
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(icon, size: 13, color: isActive ? themeAccent : (isLight ? Colors.black87 : Colors.white70)),
-              const SizedBox(width: 3),
+              if (svgIconName != null)
+                SvgIcon(
+                  name: svgIconName,
+                  size: 13,
+                  color: isActive ? themeAccent : (isLight ? Colors.black87 : Colors.white70),
+                )
+              else if (icon != null)
+                Icon(
+                  icon,
+                  size: 13,
+                  color: isActive ? themeAccent : (isLight ? Colors.black87 : Colors.white70),
+                ),
+              const SizedBox(width: 4),
               Text(
                 label,
                 style: TextStyle(
@@ -1114,172 +1193,10 @@ class _CardFormatFloatingPillState extends State<CardFormatFloatingPill> {
       },
     ];
 
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(14),
-      child: blur > 0
-          ? BackdropFilter(
-              filter: ImageFilter.blur(sigmaX: blur, sigmaY: blur),
-              child: Container(
-                width: 260,
-                decoration: BoxDecoration(
-                  color: isLight ? Colors.white.withValues(alpha: 0.94) : glassTint,
-                  borderRadius: BorderRadius.circular(14),
-                  border: Border.all(color: themeAccent.withValues(alpha: 0.5), width: 1.2),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withValues(alpha: 0.4),
-                      blurRadius: 20,
-                      offset: const Offset(0, 8),
-                    ),
-                  ],
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Text(
-                            'Inserir Diagrama Mermaid',
-                            style: TextStyle(color: textPrimary, fontSize: 11.5, fontWeight: FontWeight.bold),
-                          ),
-                          IconButton(
-                            icon: Icon(Icons.close, size: 14, color: textPrimary.withValues(alpha: 0.7)),
-                            padding: EdgeInsets.zero,
-                            constraints: const BoxConstraints(minWidth: 20, minHeight: 20),
-                            onPressed: () => setState(() => _isMermaidMenuOpen = false),
-                          ),
-                        ],
-                      ),
-                    ),
-                    Divider(height: 1, color: isLight ? Colors.black12 : Colors.white12),
-                    for (final t in templates)
-                      InkWell(
-                        onTap: () {
-                          widget.onInsertSnippet(t['snippet']!);
-                          setState(() => _isMermaidMenuOpen = false);
-                        },
-                        child: Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                          child: Text(
-                            t['title']!,
-                            style: TextStyle(color: textPrimary, fontSize: 11.5),
-                          ),
-                        ),
-                      ),
-                  ],
-                ),
-              ),
-            )
-          : Container(
-              width: 260,
-              decoration: BoxDecoration(
-                color: isLight ? Colors.white.withValues(alpha: 0.94) : glassTint,
-                borderRadius: BorderRadius.circular(14),
-                border: Border.all(color: themeAccent.withValues(alpha: 0.5), width: 1.2),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.4),
-                    blurRadius: 20,
-                    offset: const Offset(0, 8),
-                  ),
-                ],
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Text(
-                          'Inserir Diagrama Mermaid',
-                          style: TextStyle(color: textPrimary, fontSize: 11.5, fontWeight: FontWeight.bold),
-                        ),
-                        IconButton(
-                          icon: Icon(Icons.close, size: 14, color: textPrimary.withValues(alpha: 0.7)),
-                          padding: EdgeInsets.zero,
-                          constraints: const BoxConstraints(minWidth: 20, minHeight: 20),
-                          onPressed: () => setState(() => _isMermaidMenuOpen = false),
-                        ),
-                      ],
-                    ),
-                  ),
-                  Divider(height: 1, color: isLight ? Colors.black12 : Colors.white12),
-                  for (final t in templates)
-                    InkWell(
-                      onTap: () {
-                        widget.onInsertSnippet(t['snippet']!);
-                        setState(() => _isMermaidMenuOpen = false);
-                      },
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                        child: Text(
-                          t['title']!,
-                          style: TextStyle(color: textPrimary, fontSize: 11.5),
-                        ),
-                      ),
-                    ),
-                ],
-              ),
-            ),
-    );
-  }
-
-  Widget _buildCalloutMenu(
-    bool isLight,
-    Color glassTint,
-    Color themeAccent,
-    Color textPrimary,
-    double blur,
-  ) {
-    final callouts = [
-      {
-        'title': 'Dica / Insight STEM',
-        'subtitle': 'Caixa ciano com ícone de lâmpada',
-        'icon': Icons.lightbulb_outline_rounded,
-        'color': MoscaroTokens.calloutTipColor,
-        'snippet': "\n> [!TIP]\n> Insira a dica ou insight STEM aqui.\n",
-      },
-      {
-        'title': 'Teorema / Fórmula-Chave',
-        'subtitle': 'Caixa púrpura para matemática e física',
-        'icon': Icons.functions_rounded,
-        'color': MoscaroTokens.calloutTheoremColor,
-        'snippet': "\n> [!THEOREM]\n> Para todo triângulo retângulo: \$a^2 + b^2 = c^2\$.\n",
-      },
-      {
-        'title': 'Atenção / Ponto Crítico',
-        'subtitle': 'Caixa âmbar de aviso e cuidados',
-        'icon': Icons.warning_amber_rounded,
-        'color': MoscaroTokens.calloutWarningColor,
-        'snippet': "\n> [!WARNING]\n> Cuidado com condições de contorno e singularidades.\n",
-      },
-      {
-        'title': 'Definição / Conceito',
-        'subtitle': 'Caixa verde de conceito fundamental',
-        'icon': Icons.menu_book_rounded,
-        'color': MoscaroTokens.calloutConceptColor,
-        'snippet': "\n> [!CONCEPT]\n> Definição formal do conceito científico.\n",
-      },
-    ];
-
-    Widget content = Container(
-      width: 250,
+    return Container(
+      width: 265,
       decoration: BoxDecoration(
-        color: isLight ? Colors.white.withValues(alpha: 0.94) : glassTint,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: themeAccent.withValues(alpha: 0.5), width: 1.2),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.4),
-            blurRadius: 20,
-            offset: const Offset(0, 8),
-          ),
-        ],
+        borderRadius: BorderRadius.circular(16),
       ),
       child: Column(
         mainAxisSize: MainAxisSize.min,
@@ -1290,63 +1207,322 @@ class _CardFormatFloatingPillState extends State<CardFormatFloatingPill> {
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Text(
-                  'Callouts & Caixas STEM',
-                  style: TextStyle(color: textPrimary, fontSize: 11.5, fontWeight: FontWeight.bold),
+                Row(
+                  children: [
+                    SvgIcon(name: 'code', size: 15, color: themeAccent),
+                    const SizedBox(width: 7),
+                    Text(
+                      'Inserir Diagrama Mermaid',
+                      style: TextStyle(color: textPrimary, fontSize: 11.5, fontWeight: FontWeight.bold),
+                    ),
+                  ],
                 ),
-                IconButton(
-                  icon: Icon(Icons.close, size: 14, color: textPrimary.withValues(alpha: 0.7)),
-                  padding: EdgeInsets.zero,
-                  constraints: const BoxConstraints(minWidth: 20, minHeight: 20),
-                  onPressed: () => setState(() => _isCalloutMenuOpen = false),
+                GestureDetector(
+                  onTap: () => setState(() => _isMermaidMenuOpen = false),
+                  behavior: HitTestBehavior.opaque,
+                  child: Padding(
+                    padding: const EdgeInsets.all(4),
+                    child: SvgIcon(name: 'close', size: 12, color: textPrimary.withValues(alpha: 0.7)),
+                  ),
                 ),
               ],
             ),
           ),
-          Divider(height: 1, color: isLight ? Colors.black12 : Colors.white12),
+          Divider(
+            height: 1,
+            color: isLight ? Colors.black.withValues(alpha: 0.08) : Colors.white.withValues(alpha: 0.08),
+          ),
+          for (final t in templates)
+            _MenuItemHoverTile(
+              title: t['title']!,
+              textPrimary: textPrimary,
+              themeAccent: themeAccent,
+              onTap: () {
+                widget.onInsertSnippet(t['snippet']!);
+              },
+            ),
+        ],
+      ),
+    ).moscaroV2(
+      borderRadius: 16,
+      blurSigma: blur,
+      enableBlur: blur > 0,
+      backgroundColor: isLight
+          ? const Color(0xFFF8FAFC).withValues(alpha: 0.95)
+          : glassTint,
+      borderColor: isLight ? MoscaroTokens.borderSubtle : MoscaroTokens.borderGlow,
+      borderWidth: 1.0,
+      padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 4),
+      customShadows: [
+        BoxShadow(
+          color: Colors.black.withValues(alpha: 0.35),
+          blurRadius: 18,
+          offset: const Offset(0, 6),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildCalloutMenu(
+    bool isLight,
+    Color glassTint,
+    Color themeAccent,
+    Color textPrimary,
+    double blur,
+  ) {
+    final activeTheme = MoscaroThemeController.instance.currentTheme;
+    final callouts = [
+      {
+        'title': 'Dica / Insight STEM',
+        'subtitle': 'Caixa de destaque para dicas e macetes',
+        'svgIcon': 'sparkle',
+        'color': activeTheme.calloutTipColor,
+        'snippet': "\n> [!TIP]\n> Insira a dica ou insight STEM aqui.\n",
+      },
+      {
+        'title': 'Teorema / Fórmula-Chave',
+        'subtitle': 'Caixa de destaque para teoremas e leis',
+        'svgIcon': 'math',
+        'color': activeTheme.calloutTheoremColor,
+        'snippet': "\n> [!THEOREM]\n> Para todo triângulo retângulo: \$a^2 + b^2 = c^2\$.\n",
+      },
+      {
+        'title': 'Atenção / Ponto Crítico',
+        'subtitle': 'Caixa de aviso sobre restrições e singularidades',
+        'svgIcon': 'target',
+        'color': activeTheme.calloutWarningColor,
+        'snippet': "\n> [!WARNING]\n> Cuidado com condições de contorno e singularidades.\n",
+      },
+      {
+        'title': 'Definição / Conceito',
+        'subtitle': 'Caixa de definição formal de conceito científico',
+        'svgIcon': 'book',
+        'color': activeTheme.calloutConceptColor,
+        'snippet': "\n> [!CONCEPT]\n> Definição formal do conceito científico.\n",
+      },
+    ];
+
+    return Container(
+      width: 275,
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Row(
+                  children: [
+                    SvgIcon(name: 'tag', size: 15, color: themeAccent),
+                    const SizedBox(width: 7),
+                    Text(
+                      'Callouts & Caixas STEM',
+                      style: TextStyle(color: textPrimary, fontSize: 11.5, fontWeight: FontWeight.bold),
+                    ),
+                  ],
+                ),
+                GestureDetector(
+                  onTap: () => setState(() => _isCalloutMenuOpen = false),
+                  behavior: HitTestBehavior.opaque,
+                  child: Padding(
+                    padding: const EdgeInsets.all(4),
+                    child: SvgIcon(name: 'close', size: 12, color: textPrimary.withValues(alpha: 0.7)),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Divider(
+            height: 1,
+            color: isLight ? Colors.black.withValues(alpha: 0.08) : Colors.white.withValues(alpha: 0.08),
+          ),
           for (final c in callouts)
-            InkWell(
+            _CalloutItemHoverTile(
+              title: c['title'] as String,
+              subtitle: c['subtitle'] as String,
+              svgIcon: c['svgIcon'] as String,
+              iconColor: c['color'] as Color,
+              textPrimary: textPrimary,
+              themeAccent: themeAccent,
               onTap: () {
                 widget.onInsertSnippet(c['snippet'] as String);
-                setState(() => _isCalloutMenuOpen = false);
               },
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                child: Row(
+            ),
+        ],
+      ),
+    ).moscaroV2(
+      borderRadius: 16,
+      blurSigma: blur,
+      enableBlur: blur > 0,
+      backgroundColor: isLight
+          ? const Color(0xFFF8FAFC).withValues(alpha: 0.95)
+          : glassTint,
+      borderColor: isLight ? MoscaroTokens.borderSubtle : MoscaroTokens.borderGlow,
+      borderWidth: 1.0,
+      padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 4),
+      customShadows: [
+        BoxShadow(
+          color: Colors.black.withValues(alpha: 0.35),
+          blurRadius: 18,
+          offset: const Offset(0, 6),
+        ),
+      ],
+    );
+  }
+}
+
+class _MenuItemHoverTile extends StatefulWidget {
+  final String title;
+  final Color textPrimary;
+  final Color themeAccent;
+  final VoidCallback onTap;
+
+  const _MenuItemHoverTile({
+    required this.title,
+    required this.textPrimary,
+    required this.themeAccent,
+    required this.onTap,
+  });
+
+  @override
+  State<_MenuItemHoverTile> createState() => _MenuItemHoverTileState();
+}
+
+class _MenuItemHoverTileState extends State<_MenuItemHoverTile> {
+  bool _isHovered = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return MouseRegion(
+      onEnter: (_) => setState(() => _isHovered = true),
+      onExit: (_) => setState(() => _isHovered = false),
+      cursor: SystemMouseCursors.click,
+      child: GestureDetector(
+        onTap: widget.onTap,
+        behavior: HitTestBehavior.opaque,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 140),
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+          margin: const EdgeInsets.symmetric(horizontal: 2, vertical: 1.5),
+          decoration: BoxDecoration(
+            color: _isHovered
+                ? widget.themeAccent.withValues(alpha: 0.14)
+                : Colors.transparent,
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(
+              color: _isHovered
+                  ? widget.themeAccent.withValues(alpha: 0.35)
+                  : Colors.transparent,
+              width: 0.8,
+            ),
+          ),
+          child: Text(
+            widget.title,
+            style: TextStyle(
+              color: _isHovered ? widget.themeAccent : widget.textPrimary,
+              fontSize: 11.5,
+              fontWeight: _isHovered ? FontWeight.w600 : FontWeight.normal,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _CalloutItemHoverTile extends StatefulWidget {
+  final String title;
+  final String subtitle;
+  final String svgIcon;
+  final Color iconColor;
+  final Color textPrimary;
+  final Color themeAccent;
+  final VoidCallback onTap;
+
+  const _CalloutItemHoverTile({
+    required this.title,
+    required this.subtitle,
+    required this.svgIcon,
+    required this.iconColor,
+    required this.textPrimary,
+    required this.themeAccent,
+    required this.onTap,
+  });
+
+  @override
+  State<_CalloutItemHoverTile> createState() => _CalloutItemHoverTileState();
+}
+
+class _CalloutItemHoverTileState extends State<_CalloutItemHoverTile> {
+  bool _isHovered = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return MouseRegion(
+      onEnter: (_) => setState(() => _isHovered = true),
+      onExit: (_) => setState(() => _isHovered = false),
+      cursor: SystemMouseCursors.click,
+      child: GestureDetector(
+        onTap: widget.onTap,
+        behavior: HitTestBehavior.opaque,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 140),
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+          margin: const EdgeInsets.symmetric(horizontal: 2, vertical: 1.5),
+          decoration: BoxDecoration(
+            color: _isHovered
+                ? widget.themeAccent.withValues(alpha: 0.14)
+                : Colors.transparent,
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(
+              color: _isHovered
+                  ? widget.themeAccent.withValues(alpha: 0.35)
+                  : Colors.transparent,
+              width: 0.8,
+            ),
+          ),
+          child: Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(5),
+                decoration: BoxDecoration(
+                  color: widget.iconColor.withValues(alpha: 0.15),
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: SvgIcon(name: widget.svgIcon, size: 14, color: widget.iconColor),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Icon(c['icon'] as IconData, size: 16, color: c['color'] as Color),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            c['title'] as String,
-                            style: TextStyle(color: textPrimary, fontSize: 11.5, fontWeight: FontWeight.bold),
-                          ),
-                          Text(
-                            c['subtitle'] as String,
-                            style: TextStyle(color: textPrimary.withValues(alpha: 0.6), fontSize: 9.5),
-                          ),
-                        ],
+                    Text(
+                      widget.title,
+                      style: TextStyle(
+                        color: _isHovered ? widget.themeAccent : widget.textPrimary,
+                        fontSize: 11.5,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    Text(
+                      widget.subtitle,
+                      style: TextStyle(
+                        color: widget.textPrimary.withValues(alpha: 0.6),
+                        fontSize: 9.5,
                       ),
                     ),
                   ],
                 ),
               ),
-            ),
-        ],
+            ],
+          ),
+        ),
       ),
-    );
-
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(14),
-      child: blur > 0
-          ? BackdropFilter(
-              filter: ImageFilter.blur(sigmaX: blur, sigmaY: blur),
-              child: content,
-            )
-          : content,
     );
   }
 }

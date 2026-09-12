@@ -33,7 +33,15 @@ class AiModelDefinition {
 
   /// Lista de Modelos STEM Curados Oficiais
   static const List<AiModelDefinition> allModels = [
-    // Google Gemini (Endpoints Oficiais Google AI Studio - Agosto 2026)
+    // Google Gemini (Endpoints Oficiais Google AI Studio)
+    AiModelDefinition(
+      id: 'gemini-2.5-flash',
+      displayName: 'Gemini 2.5 Flash',
+      provider: AiProviderType.gemini,
+      description: 'Ultrarrápido, altamente eficiente em visão multimodal e com cota generosa.',
+      badge: 'Mais Rápido',
+      contextWindow: '1M tokens',
+    ),
     AiModelDefinition(
       id: 'gemini-3.7-flash',
       displayName: 'Gemini 3.7 Flash',

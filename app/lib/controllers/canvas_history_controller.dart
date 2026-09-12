@@ -1,13 +1,12 @@
 import 'package:flutter/foundation.dart';
 import '../widgets/undo_commands.dart';
-import '../widgets/ink_models.dart';
-import '../models/canvas_card_model.dart';
+import '../widgets/note_models.dart';
 
 class CanvasHistoryController extends ChangeNotifier {
   static final CanvasHistoryController instance = CanvasHistoryController._internal();
   CanvasHistoryController._internal();
 
-  final AppUndoManager _undoManager = AppUndoManager();
+  final AppUndoManager _undoManager = AppUndoManager.instance;
   AppUndoManager get undoManager => _undoManager;
 
   int _strokesVersion = 0;
@@ -18,21 +17,21 @@ class CanvasHistoryController extends ChangeNotifier {
     notifyListeners();
   }
 
-  void pushCommand(Command command) {
-    _undoManager.push(command);
+  void pushCommand(UndoCommand command, NoteDocument note, {bool execute = true}) {
+    _undoManager.pushCommand(command, execute: execute, note: note);
     notifyListeners();
   }
 
-  void undo() {
-    if (_undoManager.canUndo) {
-      _undoManager.undo();
+  void undo(NoteDocument note) {
+    if (_undoManager.canUndo(note)) {
+      _undoManager.undo(note);
       notifyListeners();
     }
   }
 
-  void redo() {
-    if (_undoManager.canRedo) {
-      _undoManager.redo();
+  void redo(NoteDocument note) {
+    if (_undoManager.canRedo(note)) {
+      _undoManager.redo(note);
       notifyListeners();
     }
   }

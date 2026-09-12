@@ -62,7 +62,7 @@ class TileSubChunk {
     for (var i = 0; i < strokes.length; i++) {
       final s = strokes[i];
       if (s.toolType == InkToolType.highlighter) {
-        StrokePictureCache._drawSingleStroke(canvas, s, reusablePaint);
+        StrokePictureCache.drawSingleStroke(canvas, s, reusablePaint);
       }
     }
 
@@ -70,7 +70,7 @@ class TileSubChunk {
     for (var i = 0; i < strokes.length; i++) {
       final s = strokes[i];
       if (s.toolType != InkToolType.highlighter) {
-        StrokePictureCache._drawSingleStroke(canvas, s, reusablePaint);
+        StrokePictureCache.drawSingleStroke(canvas, s, reusablePaint);
       }
     }
 
@@ -89,7 +89,7 @@ class TileSubChunk {
       for (var i = 0; i < strokes.length; i++) {
         final s = strokes[i];
         if (!hiddenIds.contains(s.id)) {
-          StrokePictureCache._drawSingleStroke(canvas, s, paint);
+          StrokePictureCache.drawSingleStroke(canvas, s, paint);
         }
       }
       canvas.restore();
@@ -485,7 +485,7 @@ class StrokePictureCache {
     clear();
   }
 
-  static void _drawSingleStroke(Canvas canvas, InkStroke stroke, Paint reusablePaint) {
+  static void drawSingleStroke(Canvas canvas, InkStroke stroke, Paint reusablePaint) {
     if (stroke.points.isEmpty) return;
 
     final hasTransform = stroke.transform != Offset.zero;
