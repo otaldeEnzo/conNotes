@@ -101,6 +101,9 @@ class CanvasCardModel {
     if (isCollapsed) return 36.0;
 
     if (cardType == CardType.media) {
+      if (lockAspectRatio && originalAspectRatio != null && originalAspectRatio! > 0) {
+        return math.max(100.0, width / originalAspectRatio!);
+      }
       return 100.0;
     }
 

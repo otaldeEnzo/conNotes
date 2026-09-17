@@ -247,6 +247,7 @@ class ThemeDefinition {
   final bool enableCardsBlur;
 
   // 5. Cores Específicas de Cards STEM (Callouts & Progresso)
+  final Color calloutNoteColor;
   final Color calloutTipColor;
   final Color calloutTheoremColor;
   final Color calloutWarningColor;
@@ -280,6 +281,7 @@ class ThemeDefinition {
     this.enableModalsBlur = true,
     this.enableInstrumentsBlur = true,
     this.enableCardsBlur = true,
+    this.calloutNoteColor = const Color(0xFF3B82F6),
     this.calloutTipColor = const Color(0xFF00E1FF),
     this.calloutTheoremColor = const Color(0xFFA855F7),
     this.calloutWarningColor = const Color(0xFFF59E0B),
@@ -576,6 +578,7 @@ class ThemeDefinition {
     bool? enableModalsBlur,
     bool? enableInstrumentsBlur,
     bool? enableCardsBlur,
+    Color? calloutNoteColor,
     Color? calloutTipColor,
     Color? calloutTheoremColor,
     Color? calloutWarningColor,
@@ -609,6 +612,7 @@ class ThemeDefinition {
       enableModalsBlur: enableModalsBlur ?? this.enableModalsBlur,
       enableInstrumentsBlur: enableInstrumentsBlur ?? this.enableInstrumentsBlur,
       enableCardsBlur: enableCardsBlur ?? this.enableCardsBlur,
+      calloutNoteColor: calloutNoteColor ?? this.calloutNoteColor,
       calloutTipColor: calloutTipColor ?? this.calloutTipColor,
       calloutTheoremColor: calloutTheoremColor ?? this.calloutTheoremColor,
       calloutWarningColor: calloutWarningColor ?? this.calloutWarningColor,
@@ -644,6 +648,7 @@ class ThemeDefinition {
       'enableModalsBlur': enableModalsBlur,
       'enableInstrumentsBlur': enableInstrumentsBlur,
       'enableCardsBlur': enableCardsBlur,
+      'calloutNoteColor': '#${calloutNoteColor.toARGB32().toRadixString(16).padLeft(8, '0')}',
       'calloutTipColor': '#${calloutTipColor.toARGB32().toRadixString(16).padLeft(8, '0')}',
       'calloutTheoremColor': '#${calloutTheoremColor.toARGB32().toRadixString(16).padLeft(8, '0')}',
       'calloutWarningColor': '#${calloutWarningColor.toARGB32().toRadixString(16).padLeft(8, '0')}',
@@ -703,6 +708,7 @@ class ThemeDefinition {
       enableModalsBlur: json['enableModalsBlur'] as bool? ?? true,
       enableInstrumentsBlur: json['enableInstrumentsBlur'] as bool? ?? true,
       enableCardsBlur: json['enableCardsBlur'] as bool? ?? true,
+      calloutNoteColor: parseHex(json['calloutNoteColor'] as String?, const Color(0xFF3B82F6)),
       calloutTipColor: parseHex(json['calloutTipColor'] as String?, const Color(0xFF00E1FF)),
       calloutTheoremColor: parseHex(json['calloutTheoremColor'] as String?, const Color(0xFFA855F7)),
       calloutWarningColor: parseHex(json['calloutWarningColor'] as String?, const Color(0xFFF59E0B)),

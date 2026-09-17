@@ -25,6 +25,7 @@ class CanvasCardWidget extends StatefulWidget {
   final bool isSelected;
   final double zoomScale;
   final ValueNotifier<double>? zoomNotifier;
+  final ValueNotifier<Offset>? panNotifier;
   final ValueChanged<CanvasCardModel> onUpdateCard;
   final ValueChanged<String> onSelectCard;
   final ValueChanged<String> onDeleteCard;
@@ -43,6 +44,7 @@ class CanvasCardWidget extends StatefulWidget {
     required this.isSelected,
     this.zoomScale = 1.0,
     this.zoomNotifier,
+    this.panNotifier,
     required this.onUpdateCard,
     required this.onSelectCard,
     required this.onDeleteCard,
@@ -67,6 +69,8 @@ class _CanvasCardWidgetState extends State<CanvasCardWidget> {
   }
 
   Offset? _dragStartPos;
+  Offset? _currentMouseGlobalPos;
+  Offset? _grabOffset;
   double? _initialCardX;
   double? _initialCardY;
   bool _isEditingTitle = false;
@@ -97,10 +101,22 @@ class _CanvasCardWidgetState extends State<CanvasCardWidget> {
     if (oldWidget.card.rotation != widget.card.rotation) {
       _dragRotationNotifier.value = widget.card.rotation;
     }
+    if (_dragStartPos != null) {
+      if (oldWidget.panNotifier != widget.panNotifier) {
+        oldWidget.panNotifier?.removeListener(_onCanvasTransformDuringDrag);
+        widget.panNotifier?.addListener(_onCanvasTransformDuringDrag);
+      }
+      if (oldWidget.zoomNotifier != widget.zoomNotifier) {
+        oldWidget.zoomNotifier?.removeListener(_onCanvasTransformDuringDrag);
+        widget.zoomNotifier?.addListener(_onCanvasTransformDuringDrag);
+      }
+    }
   }
 
   @override
   void dispose() {
+    widget.panNotifier?.removeListener(_onCanvasTransformDuringDrag);
+    widget.zoomNotifier?.removeListener(_onCanvasTransformDuringDrag);
     CanvasCardWidget.actualHeights.remove(widget.card.id);
     _titleController.dispose();
     _titleFocusNode.dispose();
@@ -120,26 +136,52 @@ class _CanvasCardWidgetState extends State<CanvasCardWidget> {
     if (_isEditingTitle) return;
     widget.onSelectCard(widget.card.id);
     if (widget.card.isPinned) return;
+    final pan = widget.panNotifier?.value ?? Offset.zero;
+    final zoom = _currentZoom;
+    final startCanvasPoint = (details.globalPosition - pan) / zoom;
     _dragStartPos = details.globalPosition;
+    _currentMouseGlobalPos = details.globalPosition;
     _initialCardX = widget.card.x;
     _initialCardY = widget.card.y;
+    _grabOffset = startCanvasPoint - Offset(widget.card.x, widget.card.y);
     _dragOffsetNotifier.value = Offset.zero;
     CardsTelemetryController.instance.startCardDrag(cardId: widget.card.id);
+    widget.panNotifier?.addListener(_onCanvasTransformDuringDrag);
+    widget.zoomNotifier?.addListener(_onCanvasTransformDuringDrag);
   }
 
   void _onHeaderPanUpdate(DragUpdateDetails details) {
     if (_isEditingTitle || widget.card.isPinned || _dragStartPos == null) return;
-    final rawDelta = (details.globalPosition - _dragStartPos!) / _currentZoom;
-    
-    _dragOffsetNotifier.value = rawDelta;
-    CardsTelemetryController.instance.updateCardDragDelta(_dragOffsetNotifier.value);
+    _currentMouseGlobalPos = details.globalPosition;
+    _updateCardDragPosition();
+  }
+
+  void _onCanvasTransformDuringDrag() {
+    if (_dragStartPos != null && _currentMouseGlobalPos != null && _grabOffset != null) {
+      _updateCardDragPosition();
+    }
+  }
+
+  void _updateCardDragPosition() {
+    if (_currentMouseGlobalPos == null || _grabOffset == null || _initialCardX == null || _initialCardY == null) return;
+    final pan = widget.panNotifier?.value ?? Offset.zero;
+    final zoom = _currentZoom;
+    final currentCanvasPoint = (_currentMouseGlobalPos! - pan) / zoom;
+    final targetCardPos = currentCanvasPoint - _grabOffset!;
+    final delta = targetCardPos - Offset(_initialCardX!, _initialCardY!);
+    _dragOffsetNotifier.value = delta;
+    CardsTelemetryController.instance.updateCardDragDelta(delta);
   }
 
   void _onHeaderPanEnd(DragEndDetails details) {
+    widget.panNotifier?.removeListener(_onCanvasTransformDuringDrag);
+    widget.zoomNotifier?.removeListener(_onCanvasTransformDuringDrag);
     CardsTelemetryController.instance.endCardDrag();
     final finalDelta = _dragOffsetNotifier.value;
     _dragOffsetNotifier.value = Offset.zero;
     _dragStartPos = null;
+    _currentMouseGlobalPos = null;
+    _grabOffset = null;
     if (finalDelta != Offset.zero && _initialCardX != null && _initialCardY != null) {
       widget.onUpdateCard(widget.card.copyWith(
         x: _initialCardX! + finalDelta.dx,
@@ -149,9 +191,13 @@ class _CanvasCardWidgetState extends State<CanvasCardWidget> {
   }
 
   void _onHeaderPanCancel() {
+    widget.panNotifier?.removeListener(_onCanvasTransformDuringDrag);
+    widget.zoomNotifier?.removeListener(_onCanvasTransformDuringDrag);
     CardsTelemetryController.instance.endCardDrag();
     _dragOffsetNotifier.value = Offset.zero;
     _dragStartPos = null;
+    _currentMouseGlobalPos = null;
+    _grabOffset = null;
   }
 
   @override
@@ -214,6 +260,8 @@ class _CanvasCardWidgetState extends State<CanvasCardWidget> {
                       : MarkdownLatexBlockView(
                           key: _blockViewKey,
                           card: widget.card,
+                          isSelected: isSelected,
+                          onSelectCard: () => widget.onSelectCard(widget.card.id),
                           onEditingModeChanged: (editing) {
                             if (mounted && _isEditingBlock != editing) {
                               setState(() => _isEditingBlock = editing);
@@ -249,6 +297,9 @@ class _CanvasCardWidgetState extends State<CanvasCardWidget> {
                 child: TapRegion(
                     groupId: 'card_block_editor_${widget.card.id}',
                     onTapOutside: (_) {
+                      if (globalIsHoveringFloatingPill || CardFormatFloatingPill.hasActivePopover) {
+                        return;
+                      }
                       if (_blockViewKey.currentState?.isEditing == true) {
                         _blockViewKey.currentState?.commitBlockEdit();
                       }
@@ -302,17 +353,20 @@ class _CanvasCardWidgetState extends State<CanvasCardWidget> {
                       if (showFloatingPill)
                         Positioned(
                           key: const ValueKey('floating_pill'),
-                          left: localPillCenterX - 400.0,
-                          top: localPillCenterY - 450.0,
-                          width: 800.0,
-                          height: 480.0,
-                          child: Align(
-                            alignment: Alignment.bottomCenter,
-                            child: Transform.rotate(
-                              angle: -currentRotation,
-                              alignment: Alignment.center,
-                              child: Padding(
-                                padding: const EdgeInsets.only(bottom: 6.0),
+                          left: localPillCenterX - 450.0,
+                          top: localPillCenterY - 650.0,
+                          width: 900.0,
+                          height: 680.0,
+                          child: TapRegion(
+                            groupId: 'card_block_editor_${widget.card.id}',
+                            behavior: HitTestBehavior.opaque,
+                            child: Align(
+                              alignment: Alignment.bottomCenter,
+                              child: Transform.rotate(
+                                angle: -currentRotation,
+                                alignment: Alignment.center,
+                                child: Padding(
+                                  padding: const EdgeInsets.only(bottom: 6.0),
                                 child: isMediaCard
                                     ? ValueListenableBuilder<double>(
                                         valueListenable: widget.zoomNotifier ?? ValueNotifier(1.0),
@@ -375,11 +429,23 @@ class _CanvasCardWidgetState extends State<CanvasCardWidget> {
                                             widget.onUpdateCard(widget.card.copyWith(textColor: color));
                                           }
                                         },
+                                        onApplyHighlightColor: (color) {
+                                          if (_blockViewKey.currentState != null && _blockViewKey.currentState!.isEditing) {
+                                            _blockViewKey.currentState!.applyHighlightColor(color);
+                                          }
+                                        },
                                         onApplyFontSize: (size) {
                                           if (_blockViewKey.currentState != null && _blockViewKey.currentState!.isEditing) {
                                             _blockViewKey.currentState!.applyFontSize(size);
                                           } else {
                                             widget.onUpdateCard(widget.card.copyWith(fontSize: size));
+                                          }
+                                        },
+                                        onApplyFontFamily: (family) {
+                                          if (_blockViewKey.currentState != null && _blockViewKey.currentState!.isEditing) {
+                                            _blockViewKey.currentState!.applyFontFamily(family);
+                                          } else {
+                                            widget.onUpdateCard(widget.card.copyWith(fontFamily: family));
                                           }
                                         },
                                         onDeleteCard: () => widget.onDeleteCard(widget.card.id),
@@ -389,6 +455,8 @@ class _CanvasCardWidgetState extends State<CanvasCardWidget> {
                             ),
                           ),
                         ),
+                      ),
+
                     ],
                   );
             },
@@ -439,6 +507,7 @@ class _CanvasCardWidgetState extends State<CanvasCardWidget> {
                 behavior: HitTestBehavior.opaque,
                 onTap: () => widget.onSelectCard(widget.card.id),
                 onDoubleTap: () {
+                  widget.onSelectCard(widget.card.id);
                   globalIsEditingText = true;
                   setState(() {
                     _isEditingTitle = true;
@@ -538,6 +607,7 @@ class _CanvasCardWidgetState extends State<CanvasCardWidget> {
               behavior: HitTestBehavior.opaque,
               onTap: () => widget.onSelectCard(widget.card.id),
               onDoubleTap: () {
+                widget.onSelectCard(widget.card.id);
                 globalIsEditingText = true;
                 setState(() {
                   _isEditingTitle = true;

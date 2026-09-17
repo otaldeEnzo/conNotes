@@ -16,6 +16,7 @@ class RichStyleSpan {
   Color? textColor;
   Color? highlightColor;
   double? fontSize;
+  String? fontFamily;
 
   RichStyleSpan({
     required this.start,
@@ -31,6 +32,7 @@ class RichStyleSpan {
     this.textColor,
     this.highlightColor,
     this.fontSize,
+    this.fontFamily,
   });
 
   bool get isEmptyStyle =>
@@ -44,7 +46,8 @@ class RichStyleSpan {
       !isLatex &&
       textColor == null &&
       highlightColor == null &&
-      fontSize == null;
+      fontSize == null &&
+      fontFamily == null;
 
   bool hasSameStyleAs(RichStyleSpan other) {
     return isBold == other.isBold &&
@@ -57,7 +60,8 @@ class RichStyleSpan {
         isLatex == other.isLatex &&
         textColor == other.textColor &&
         highlightColor == other.highlightColor &&
-        fontSize == other.fontSize;
+        fontSize == other.fontSize &&
+        fontFamily == other.fontFamily;
   }
 
   RichStyleSpan copyWith({
@@ -74,6 +78,7 @@ class RichStyleSpan {
     Color? textColor,
     Color? highlightColor,
     double? fontSize,
+    String? fontFamily,
   }) {
     return RichStyleSpan(
       start: start ?? this.start,
@@ -89,6 +94,7 @@ class RichStyleSpan {
       textColor: textColor ?? this.textColor,
       highlightColor: highlightColor ?? this.highlightColor,
       fontSize: fontSize ?? this.fontSize,
+      fontFamily: fontFamily ?? this.fontFamily,
     );
   }
 }
@@ -374,7 +380,8 @@ class MoscaroRichTextController extends TextEditingController {
         r'(==([\s\S]*?)==)|' // 24,25: ==Mark==
         r'(<span style="color:\s*([^"]+)">([\s\S]*?)<\/span>)|' // 26,27,28: Color Span
         r'(<font color="([^"]+)">([\s\S]*?)<\/font>)|' // 29,30,31: Font Color
-        r'(<span style="font-size:\s*([0-9.]+)px">([\s\S]*?)<\/span>)', // 32,33,34: Font Size Span
+        r'(<span style="font-size:\s*([0-9.]+)px">([\s\S]*?)<\/span>)|' // 32,33,34: Font Size Span
+        r'(<span style="font-family:\s*([^"]+)">([\s\S]*?)<\/span>)', // 35,36,37: Font Family Span
       );
 
       int lastEnd = 0;
@@ -433,6 +440,10 @@ class MoscaroRichTextController extends TextEditingController {
           final sizeStr = match.group(33) ?? '';
           inner = match.group(34) ?? '';
           nextStyle.fontSize = double.tryParse(sizeStr);
+        } else if (match.group(35) != null) {
+          final familyStr = match.group(36) ?? '';
+          inner = match.group(37) ?? '';
+          nextStyle.fontFamily = familyStr;
         }
 
         parseRecursive(inner, nextStyle);
@@ -483,39 +494,62 @@ class MoscaroRichTextController extends TextEditingController {
         String chunk = text.substring(safeStart, safeEnd);
 
         if (s.isLatex) {
-          if (chunk.contains('\n') || chunk.trim().startsWith(r'\begin') || chunk.trim().startsWith(r'\matrix')) {
-            sb.write('\$\$\n$chunk\n\$\$');
-          } else {
-            sb.write('\$$chunk\$');
+          final isBlock = chunk.contains('\n') || chunk.trim().startsWith(r'\begin') || chunk.trim().startsWith(r'\matrix');
+          String mathCode = isBlock ? '\$\$\n$chunk\n\$\$' : '\$$chunk\$';
+          if (s.fontSize != null) {
+            mathCode = '<span style="font-size: ${s.fontSize}px">$mathCode</span>';
           }
+          if (s.textColor != null) {
+            final hex = '#${s.textColor!.toARGB32().toRadixString(16).padLeft(8, '0').substring(2)}';
+            mathCode = '<span style="color: $hex">$mathCode</span>';
+          }
+          sb.write(mathCode);
         } else {
-          final lines = chunk.split('\n');
-          final formattedLines = lines.map((line) {
-            if (line.isEmpty) return line;
-            String l = line;
-            if (s.isCode) l = '`$l`';
-            if (s.isSubscript) l = '<sub>$l</sub>';
-            if (s.isSuperscript) l = '<sup>$l</sup>';
-            if (s.isBold) l = '**$l**';
-            if (s.isItalic) l = '*$l*';
-            if (s.isUnderline) l = '<u>$l</u>';
-            if (s.isStrikethrough) l = '~~$l~~';
+          final trimmedChunk = chunk.trim();
+          final isRawMath = (trimmedChunk.startsWith(r'$$') && trimmedChunk.endsWith(r'$$') && trimmedChunk.length >= 4) ||
+              (trimmedChunk.startsWith(r'$') && trimmedChunk.endsWith(r'$') && trimmedChunk.length >= 2);
+          if (isRawMath) {
+            String mathFormatted = chunk;
+            if (s.fontSize != null) {
+              mathFormatted = '<span style="font-size: ${s.fontSize}px">$mathFormatted</span>';
+            }
             if (s.textColor != null) {
               final hex = '#${s.textColor!.toARGB32().toRadixString(16).padLeft(8, '0').substring(2)}';
-              l = '<span style="color: $hex">$l</span>';
+              mathFormatted = '<span style="color: $hex">$mathFormatted</span>';
             }
-            if (s.highlightColor != null) {
-              final hex = '#${s.highlightColor!.toARGB32().toRadixString(16).padLeft(8, '0').substring(2)}';
-              l = '<mark style="background: $hex">$l</mark>';
-            }
-            if (s.fontSize != null) {
-              l = '<span style="font-size: ${s.fontSize}px">$l</span>';
-            }
-            return l;
-          });
+            sb.write(mathFormatted);
+          } else {
+            final lines = chunk.split('\n');
+            final formattedLines = lines.map((line) {
+              if (line.isEmpty) return line;
+              String l = line;
+              if (s.isCode) l = '`$l`';
+              if (s.isSubscript) l = '<sub>$l</sub>';
+              if (s.isSuperscript) l = '<sup>$l</sup>';
+              if (s.isBold) l = '**$l**';
+              if (s.isItalic) l = '*$l*';
+              if (s.isUnderline) l = '<u>$l</u>';
+              if (s.isStrikethrough) l = '~~$l~~';
+              if (s.textColor != null) {
+                final hex = '#${s.textColor!.toARGB32().toRadixString(16).padLeft(8, '0').substring(2)}';
+                l = '<span style="color: $hex">$l</span>';
+              }
+              if (s.highlightColor != null) {
+                final hex = '#${s.highlightColor!.toARGB32().toRadixString(16).padLeft(8, '0').substring(2)}';
+                l = '<mark style="background: $hex">$l</mark>';
+              }
+              if (s.fontSize != null) {
+                l = '<span style="font-size: ${s.fontSize}px">$l</span>';
+              }
+              if (s.fontFamily != null) {
+                l = '<span style="font-family: ${s.fontFamily}">$l</span>';
+              }
+              return l;
+            });
 
-          chunk = formattedLines.join('\n');
-          sb.write(chunk);
+            chunk = formattedLines.join('\n');
+            sb.write(chunk);
+          }
         }
       }
       lastEnd = safeEnd;
@@ -571,6 +605,7 @@ class MoscaroRichTextController extends TextEditingController {
       textColor: matchingSpans.where((s) => s.textColor != null).firstOrNull?.textColor,
       highlightColor: matchingSpans.where((s) => s.highlightColor != null).firstOrNull?.highlightColor,
       fontSize: matchingSpans.where((s) => s.fontSize != null).firstOrNull?.fontSize,
+      fontFamily: matchingSpans.where((s) => s.fontFamily != null).firstOrNull?.fontFamily,
     );
   }
 
@@ -587,6 +622,7 @@ class MoscaroRichTextController extends TextEditingController {
     Color? setTextColor,
     Color? setHighlightColor,
     double? setFontSize,
+    String? setFontFamily,
   }) {
     final sel = selection;
     final bool hasSelection = sel.isValid && sel.start >= 0 && sel.end >= 0 && sel.start != sel.end;
@@ -614,6 +650,7 @@ class MoscaroRichTextController extends TextEditingController {
       if (setTextColor != null) typingStyle.textColor = setTextColor;
       if (setHighlightColor != null) typingStyle.highlightColor = setHighlightColor;
       if (setFontSize != null) typingStyle.fontSize = setFontSize;
+      if (setFontFamily != null) typingStyle.fontFamily = setFontFamily;
 
       hasActiveTypingStyle = true;
       notifyListeners();
@@ -639,6 +676,7 @@ class MoscaroRichTextController extends TextEditingController {
     final allLatex = spansInRange.isNotEmpty && spansInRange.every((s) => s.isLatex);
     final allSameHighlight = setHighlightColor != null && spansInRange.isNotEmpty && spansInRange.every((s) => s.highlightColor == setHighlightColor);
     final allSameTextColor = setTextColor != null && spansInRange.isNotEmpty && spansInRange.every((s) => s.textColor == setTextColor);
+    final allSameFontFamily = setFontFamily != null && spansInRange.isNotEmpty && spansInRange.every((s) => s.fontFamily == setFontFamily);
 
     _fillGapsInRange(start, end);
 
@@ -665,6 +703,7 @@ class MoscaroRichTextController extends TextEditingController {
         s.textColor = allSameTextColor ? null : setTextColor;
       }
       if (setFontSize != null) s.fontSize = setFontSize;
+      if (setFontFamily != null) s.fontFamily = allSameFontFamily ? null : setFontFamily;
     }
 
     _normalizeSpans();
@@ -744,6 +783,9 @@ class MoscaroRichTextController extends TextEditingController {
           spanStyle = spanStyle.copyWith(
             backgroundColor: s.highlightColor!.withValues(alpha: 0.38),
           );
+        }
+        if (s.fontFamily != null) {
+          spanStyle = spanStyle.copyWith(fontFamily: s.fontFamily);
         }
         if (s.isSubscript || s.isSuperscript) {
           spanStyle = spanStyle.copyWith(

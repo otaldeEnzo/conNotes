@@ -190,39 +190,41 @@ class _HomeNotesGridState extends State<HomeNotesGrid> with SingleTickerProvider
             // Header da SeÃ§Ã£o
             Row(
               children: [
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        SvgIcon(
-                          name: 'book',
-                          size: 20,
-                          color: MoscaroTokens.auroraBlue,
-                        ),
-                        const SizedBox(width: 8),
-                        Text(
-                          'Biblioteca de Notas',
-                          style: TextStyle(
-                            fontSize: 20,
-                            fontWeight: FontWeight.w700,
-                            letterSpacing: -0.4,
-                            color: isLight ? const Color(0xFF0F172A) : Colors.white,
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          SvgIcon(
+                            name: 'book',
+                            size: 20,
+                            color: MoscaroTokens.auroraBlue,
                           ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      'Acesse suas anotações STEM com renderização vetorial e suporte nativo a caneta.',
-                      style: TextStyle(
-                        fontSize: 13,
-                        color: isLight ? const Color(0xFF64748B) : const Color(0xFF94A3B8),
+                          const SizedBox(width: 8),
+                          Text(
+                            'Biblioteca de Notas',
+                            style: TextStyle(
+                              fontSize: 20,
+                              fontWeight: FontWeight.w700,
+                              letterSpacing: -0.4,
+                              color: isLight ? const Color(0xFF0F172A) : Colors.white,
+                            ),
+                          ),
+                        ],
                       ),
-                    ),
-                  ],
+                      const SizedBox(height: 4),
+                      Text(
+                        'Acesse suas anotações STEM com renderização vetorial e suporte nativo a caneta.',
+                        style: TextStyle(
+                          fontSize: 13,
+                          color: isLight ? const Color(0xFF64748B) : const Color(0xFF94A3B8),
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
-                const Spacer(),
+                const SizedBox(width: 16),
                 // Ações de Criação: Secundária (Novo Caderno) + Hero Primária (Nova Nota)
                 Row(
                   children: [

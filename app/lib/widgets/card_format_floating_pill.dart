@@ -1,14 +1,14 @@
 import 'dart:ui';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter/gestures.dart';
 import '../theme/moscaro_v2_tokens.dart';
-import '../theme/moscaro_v2_extension.dart';
 import '../theme/moscaro_theme_controller.dart';
 import '../models/canvas_card_model.dart';
-import '../services/custom_font_manager.dart';
-import 'latex_stem_symbols_palette.dart';
 import 'svg_icon.dart';
+import 'stem_insert_hub_popover.dart';
+import 'card_color_picker_popover.dart';
+import 'card_typography_popover.dart';
+import 'card_latex_editor_popover.dart';
 
 bool globalIsHoveringFloatingPill = false;
 
@@ -22,9 +22,11 @@ class CardActiveTextStyles {
   final bool isSuperscript;
   final bool isCode;
   final bool isLatex;
+  final String? selectedText;
   final Color? textColor;
   final Color? highlightColor;
   final double? fontSize;
+  final String? fontFamily;
 
   const CardActiveTextStyles({
     this.isBold = false,
@@ -35,13 +37,26 @@ class CardActiveTextStyles {
     this.isSuperscript = false,
     this.isCode = false,
     this.isLatex = false,
+    this.selectedText,
     this.textColor,
     this.highlightColor,
     this.fontSize,
+    this.fontFamily,
   });
 }
 
-/// Pílula Flutuante de Formatação Rica de Texto, LaTeX, Diagramas e Estilo do Card (100% Moscaro Glass).
+/// Enum para controle exclusivo dos popovers abertos da pílula flutuante.
+enum ActivePillPopover {
+  none,
+  typography,
+  textColor,
+  highlightColor,
+  stemHub,
+  latexEditor,
+}
+
+/// Pílula Flutuante de Formatação Rica e Inserção STEM (100% Moscaro v2 Glass).
+/// Totalmente modular, limpa e padronizada com ícones SVG vetoriais.
 class CardFormatFloatingPill extends StatefulWidget {
   final CanvasCardModel card;
   final double cardWidth;
@@ -50,7 +65,9 @@ class CardFormatFloatingPill extends StatefulWidget {
   final Function(String snippet) onInsertSnippet;
   final Function(String prefix, String suffix) onWrapSelection;
   final Function(Color color) onApplyTextColor;
+  final Function(Color? color)? onApplyHighlightColor;
   final Function(double size) onApplyFontSize;
+  final Function(String family)? onApplyFontFamily;
   final VoidCallback onDeleteCard;
   final VoidCallback onDuplicateCard;
 
@@ -63,962 +80,372 @@ class CardFormatFloatingPill extends StatefulWidget {
     required this.onInsertSnippet,
     required this.onWrapSelection,
     required this.onApplyTextColor,
+    this.onApplyHighlightColor,
     required this.onApplyFontSize,
+    this.onApplyFontFamily,
     required this.onDeleteCard,
     required this.onDuplicateCard,
   });
+
+  static bool hasActivePopover = false;
+  static VoidCallback? closeActivePopover;
 
   @override
   State<CardFormatFloatingPill> createState() => _CardFormatFloatingPillState();
 }
 
 class _CardFormatFloatingPillState extends State<CardFormatFloatingPill> {
-  bool _isLatexPaletteOpen = false;
-  bool _isMermaidMenuOpen = false;
-  bool _isCalloutMenuOpen = false;
-  bool _isFontMenuOpen = false;
-  bool _isColorPaletteOpen = false;
-  bool _isHighlightMenuOpen = false;
-  bool _isEditingFontSize = false;
+  ActivePillPopover _activePopover = ActivePillPopover.none;
   final ScrollController _pillScrollController = ScrollController();
-  late TextEditingController _fontSizeController;
-  final FocusNode _fontSizeFocusNode = FocusNode();
-
-  double get _currentEffectiveFontSize => widget.activeStyles.fontSize ?? widget.card.fontSize;
-
-  @override
-  void initState() {
-    super.initState();
-    final size = _currentEffectiveFontSize;
-    _fontSizeController = TextEditingController(
-      text: size.toStringAsFixed(
-        size.truncateToDouble() == size ? 0 : 1,
-      ),
-    );
-  }
-
-  @override
-  void didUpdateWidget(covariant CardFormatFloatingPill oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    final oldSize = oldWidget.activeStyles.fontSize ?? oldWidget.card.fontSize;
-    final newSize = _currentEffectiveFontSize;
-    if (oldSize != newSize && !_isEditingFontSize) {
-      _fontSizeController.text = newSize.toStringAsFixed(
-        newSize.truncateToDouble() == newSize ? 0 : 1,
-      );
-    }
-  }
 
   @override
   void dispose() {
+    globalIsHoveringFloatingPill = false;
+    if (CardFormatFloatingPill.closeActivePopover == _closePopover) {
+      CardFormatFloatingPill.hasActivePopover = false;
+      CardFormatFloatingPill.closeActivePopover = null;
+    }
     _pillScrollController.dispose();
-    _fontSizeController.dispose();
-    _fontSizeFocusNode.dispose();
     super.dispose();
   }
 
-  void _updateFontSize(double newSize) {
-    final clamped = newSize.clamp(6.0, 160.0);
-    widget.onApplyFontSize(clamped);
+  void _togglePopover(ActivePillPopover popover) {
+    setState(() {
+      if (_activePopover == popover) {
+        _activePopover = ActivePillPopover.none;
+        CardFormatFloatingPill.hasActivePopover = false;
+        CardFormatFloatingPill.closeActivePopover = null;
+      } else {
+        _activePopover = popover;
+        CardFormatFloatingPill.hasActivePopover = true;
+        CardFormatFloatingPill.closeActivePopover = _closePopover;
+      }
+    });
   }
 
-  Widget _buildPillContainer({
-    required Widget child,
-    required bool isLight,
-    required Color glassTint,
-    required double blur,
-  }) {
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(MoscaroTokens.radiusPill),
-      child: blur > 0
-          ? BackdropFilter(
-              filter: ImageFilter.blur(
-                sigmaX: blur,
-                sigmaY: blur,
-              ),
-              child: Container(
-                height: 38,
-                constraints: BoxConstraints(maxWidth: widget.cardWidth),
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                decoration: BoxDecoration(
-                  color: isLight
-                      ? const Color(0xFFF8FAFC).withValues(alpha: 0.95)
-                      : glassTint,
-                  borderRadius: BorderRadius.circular(MoscaroTokens.radiusPill),
-                  border: Border.all(
-                    color: isLight ? MoscaroTokens.borderSubtle : MoscaroTokens.borderGlow,
-                    width: 1.0,
-                  ),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withValues(alpha: 0.35),
-                      blurRadius: 18,
-                      offset: const Offset(0, 6),
-                    ),
-                  ],
-                ),
-                child: child,
-              ),
-            )
-          : Container(
-              height: 38,
-              constraints: BoxConstraints(maxWidth: widget.cardWidth),
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-              decoration: BoxDecoration(
-                color: isLight
-                    ? const Color(0xFFF8FAFC).withValues(alpha: 0.95)
-                    : glassTint,
-                borderRadius: BorderRadius.circular(MoscaroTokens.radiusPill),
-                border: Border.all(
-                  color: isLight ? MoscaroTokens.borderSubtle : MoscaroTokens.borderGlow,
-                  width: 1.0,
-                ),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.35),
-                    blurRadius: 18,
-                    offset: const Offset(0, 6),
-                  ),
-                ],
-              ),
-              child: child,
-            ),
-    );
+  void _closePopover() {
+    if (_activePopover != ActivePillPopover.none) {
+      setState(() {
+        _activePopover = ActivePillPopover.none;
+        CardFormatFloatingPill.hasActivePopover = false;
+        CardFormatFloatingPill.closeActivePopover = null;
+      });
+    }
   }
 
   @override
   Widget build(BuildContext context) {
-    return TapRegion(
-      groupId: 'card_block_editor_${widget.card.id}',
-      child: FocusScope(
-        canRequestFocus: false,
-        child: ListenableBuilder(
-          listenable: Listenable.merge([
-            MoscaroThemeController.instance,
-            CustomFontManager.instance,
-          ]),
-          builder: (context, _) {
-            final isLight = MoscaroTokens.isLight;
-            final themeAccent = MoscaroTokens.auroraBlue;
-            final textPrimary = MoscaroTokens.textPrimary;
-            final textSecondary = MoscaroTokens.textSecondary;
-            final glassTint = MoscaroTokens.glassTint;
-            final blur = (MoscaroTokens.enableToolbarBlur && MoscaroTokens.blurSigma > 0) ? MoscaroTokens.blurSigma : 0.0;
-            final popoverBlur = (MoscaroTokens.enableSubBarsBlur && MoscaroTokens.blurSigma > 0) ? MoscaroTokens.blurSigma : 0.0;
-            final fonts = CustomFontManager.instance.availableFonts;
+    return ListenableBuilder(
+      listenable: MoscaroThemeController.instance,
+      builder: (context, _) {
+        final isLight = MoscaroTokens.isLight;
+        final themeAccent = MoscaroTokens.auroraBlue;
+        final textPrimary = MoscaroTokens.textPrimary;
+        final glassTint = MoscaroTokens.glassTint;
+        final blur = (MoscaroTokens.enableToolbarBlur && MoscaroTokens.blurSigma > 0)
+            ? MoscaroTokens.blurSigma
+            : 0.0;
 
-            return MouseRegion(
-              onEnter: (_) => globalIsHoveringFloatingPill = true,
-              onExit: (_) => globalIsHoveringFloatingPill = false,
+        return MouseRegion(
+          hitTestBehavior: HitTestBehavior.opaque,
+          onEnter: (_) => globalIsHoveringFloatingPill = true,
+          onHover: (_) => globalIsHoveringFloatingPill = true,
+          onExit: (_) => globalIsHoveringFloatingPill = false,
+          child: Listener(
+            behavior: HitTestBehavior.opaque,
+            onPointerDown: (_) {
+              globalIsHoveringFloatingPill = true;
+            },
+            child: GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: () {},
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
-                // 1. Popover do Menu de Fontes Moscaro
-                if (_isFontMenuOpen) ...[
-                  _buildMoscaroFontPopover(fonts, isLight, glassTint, themeAccent, textPrimary, textSecondary, popoverBlur),
-                  const SizedBox(height: 6),
-                ],
+                  // Popover Ativo (Ancorado acima da pílula)
+                  if (_activePopover != ActivePillPopover.none) ...[
+                    _buildActivePopover(isLight, themeAccent, textPrimary),
+                    const SizedBox(height: 6),
+                  ],
 
-                // 2. Popover da Paleta de Cores de Texto
-                if (_isColorPaletteOpen) ...[
-                  _buildTextColorPalettePopover(isLight, glassTint, themeAccent, textPrimary, popoverBlur),
-                  const SizedBox(height: 6),
-                ],
-
-                // 2.1 Popover da Paleta de Marca-Texto
-                if (_isHighlightMenuOpen) ...[
-                  _buildHighlightPalettePopover(isLight, glassTint, themeAccent, textPrimary, popoverBlur),
-                  const SizedBox(height: 6),
-                ],
-
-                // 3. Menu Suspenso de Símbolos LaTeX
-                if (_isLatexPaletteOpen) ...[
-                  LatexStemSymbolsPalette(
-                    onSelectSymbol: (snippet) {
-                      final formatted = snippet.startsWith(r'$') ? snippet : '\$$snippet\$';
-                      widget.onInsertSnippet(formatted);
-                    },
-                    onClose: () => setState(() => _isLatexPaletteOpen = false),
+                  // Barra Horizontal de Ações (Pílula Compacta) - FocusScope(canRequestFocus: false) apenas aqui
+                  // para que cliques nos botões de formatação não roubem foco do editor de texto
+                  FocusScope(
+                    canRequestFocus: false,
+                    child: _buildPillBar(isLight, glassTint, themeAccent, textPrimary, blur),
                   ),
-                  const SizedBox(height: 6),
                 ],
-
-                // 4. Menu Suspenso de Templates Mermaid
-                if (_isMermaidMenuOpen) ...[
-                  _buildMermaidMenu(isLight, glassTint, themeAccent, textPrimary, popoverBlur),
-                  const SizedBox(height: 6),
-                ],
-
-                // 5. Menu Suspenso de Callouts STEM
-                if (_isCalloutMenuOpen) ...[
-                  _buildCalloutMenu(isLight, glassTint, themeAccent, textPrimary, popoverBlur),
-                  const SizedBox(height: 6),
-                ],
-
-                // Pílula Única e Confortável de Ações e Formatação do Card
-                _buildPillContainer(
-                  isLight: isLight,
-                  glassTint: glassTint,
-                  blur: blur,
-                  child: Listener(
-                    onPointerSignal: (pointerSignal) {
-                      if (pointerSignal is PointerScrollEvent && _pillScrollController.hasClients) {
-                        GestureBinding.instance.pointerSignalResolver.register(pointerSignal, (event) {
-                          if (event is PointerScrollEvent && _pillScrollController.hasClients) {
-                            final delta = event.scrollDelta.dx != 0 ? event.scrollDelta.dx : event.scrollDelta.dy;
-                            final target = (_pillScrollController.offset + delta * 1.3).clamp(
-                              0.0,
-                              _pillScrollController.position.maxScrollExtent,
-                            );
-                            _pillScrollController.animateTo(
-                              target,
-                              duration: const Duration(milliseconds: 120),
-                              curve: Curves.easeOutCubic,
-                            );
-                          }
-                        });
-                      }
-                    },
-                    child: SingleChildScrollView(
-                      controller: _pillScrollController,
-                      scrollDirection: Axis.horizontal,
-                      physics: const BouncingScrollPhysics(),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          _buildMoscaroFontSelectorButton(isLight, textPrimary, textSecondary, themeAccent),
-                          const SizedBox(width: 5),
-                          _buildDivider(isLight),
-                          const SizedBox(width: 5),
-                          _buildFontSizeControls(textPrimary, themeAccent, isLight),
-                          const SizedBox(width: 5),
-                          _buildDivider(isLight),
-                          const SizedBox(width: 5),
-                          _buildRichFormattingControls(),
-                          const SizedBox(width: 5),
-                          _buildDivider(isLight),
-                          const SizedBox(width: 5),
-                          _buildAlignmentControls(),
-                          const SizedBox(width: 5),
-                          _buildDivider(isLight),
-                          const SizedBox(width: 5),
-                          _buildListControls(),
-                          const SizedBox(width: 5),
-                          _buildDivider(isLight),
-                          const SizedBox(width: 5),
-                          _buildLatexMermaidButtons(),
-                          const SizedBox(width: 5),
-                          _buildDivider(isLight),
-                          const SizedBox(width: 5),
-                          _buildActionControls(),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-                ],
-              ),
-            );
-          },
-        ),
-      ),
-    );
-  }
-
-  // ==========================================
-  // Botão e Popover de Fontes Moscaro v2
-  // ==========================================
-
-  Widget _buildMoscaroFontSelectorButton(bool isLight, Color textPrimary, Color textSecondary, Color themeAccent) {
-    final currentFont = widget.card.fontFamily;
-    return Tooltip(
-      message: 'Selecionar Tipografia / Fonte',
-      child: InkWell(
-        onTap: () {
-          setState(() {
-            _isFontMenuOpen = !_isFontMenuOpen;
-            _isColorPaletteOpen = false;
-            _isLatexPaletteOpen = false;
-            _isMermaidMenuOpen = false;
-          });
-        },
-        borderRadius: BorderRadius.circular(8),
-        child: Container(
-          height: 24,
-          padding: const EdgeInsets.symmetric(horizontal: 7),
-          decoration: BoxDecoration(
-            color: _isFontMenuOpen
-                ? themeAccent.withValues(alpha: 0.2)
-                : (isLight ? Colors.black.withValues(alpha: 0.04) : Colors.white.withValues(alpha: 0.06)),
-            borderRadius: BorderRadius.circular(8),
-            border: Border.all(
-              color: _isFontMenuOpen ? themeAccent : (isLight ? Colors.black12 : Colors.white12),
-              width: 1.0,
-            ),
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                currentFont.length > 10 ? '${currentFont.substring(0, 9)}…' : currentFont,
-                style: TextStyle(
-                  color: _isFontMenuOpen ? themeAccent : textPrimary,
-                  fontSize: 10.5,
-                  fontWeight: FontWeight.bold,
-                  fontFamily: currentFont,
-                ),
-              ),
-              const SizedBox(width: 3),
-              Icon(
-                _isFontMenuOpen ? Icons.arrow_drop_up_rounded : Icons.arrow_drop_down_rounded,
-                size: 14,
-                color: _isFontMenuOpen ? themeAccent : textSecondary,
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildMoscaroFontPopover(
-    List<String> fonts,
-    bool isLight,
-    Color glassTint,
-    Color themeAccent,
-    Color textPrimary,
-    Color textSecondary,
-    double blur,
-  ) {
-    Widget content = Container(
-      width: 220,
-      constraints: const BoxConstraints(maxHeight: 260),
-      decoration: BoxDecoration(
-        color: isLight ? Colors.white.withValues(alpha: 0.94) : glassTint,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: themeAccent.withValues(alpha: 0.5), width: 1.2),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.4),
-            blurRadius: 20,
-            offset: const Offset(0, 8),
-          ),
-        ],
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Text(
-                  'Tipografias STEM',
-                  style: TextStyle(color: textPrimary, fontSize: 11.5, fontWeight: FontWeight.bold),
-                ),
-                IconButton(
-                  icon: Icon(Icons.close, size: 14, color: textSecondary),
-                  padding: EdgeInsets.zero,
-                  constraints: const BoxConstraints(minWidth: 20, minHeight: 20),
-                  onPressed: () => setState(() => _isFontMenuOpen = false),
-                ),
-              ],
-            ),
-          ),
-          Divider(height: 1, color: isLight ? Colors.black12 : Colors.white12),
-          Flexible(
-            child: ListView.builder(
-              shrinkWrap: true,
-              padding: const EdgeInsets.symmetric(vertical: 4),
-              itemCount: fonts.length,
-              itemBuilder: (ctx, idx) {
-                final font = fonts[idx];
-                final isSelected = widget.card.fontFamily == font;
-                return InkWell(
-                  onTap: () {
-                    widget.onUpdateCard(widget.card.copyWith(fontFamily: font));
-                    Future.delayed(const Duration(milliseconds: 50), () {
-                      if (mounted) setState(() => _isFontMenuOpen = false);
-                    });
-                  },
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                    color: isSelected ? themeAccent.withValues(alpha: 0.15) : Colors.transparent,
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Text(
-                          font,
-                          style: TextStyle(
-                            fontFamily: font,
-                            color: isSelected ? themeAccent : textPrimary,
-                            fontSize: 11.5,
-                            fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-                          ),
-                        ),
-                        if (isSelected)
-                          Icon(Icons.check_rounded, size: 14, color: themeAccent),
-                      ],
-                    ),
-                  ),
-                );
-              },
-            ),
-          ),
-        ],
-      ),
-    );
-
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(14),
-      child: blur > 0
-          ? BackdropFilter(
-              filter: ImageFilter.blur(sigmaX: blur, sigmaY: blur),
-              child: content,
-            )
-          : content,
-    );
-  }
-
-  // ==========================================
-  // Formatação Rica (Negrito, Itálico, Sublinhado, Marca-texto, Cor)
-  // ==========================================
-
-  Widget _buildRichFormattingControls() {
-    final active = widget.activeStyles;
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        _buildPillIconButton(
-          icon: Icons.format_bold_rounded,
-          isActive: active.isBold,
-          tooltip: 'Negrito (**texto**)',
-          onTap: () => widget.onWrapSelection('**', '**'),
-        ),
-        _buildPillIconButton(
-          icon: Icons.format_italic_rounded,
-          isActive: active.isItalic,
-          tooltip: 'Itálico (*texto*)',
-          onTap: () => widget.onWrapSelection('*', '*'),
-        ),
-        _buildPillIconButton(
-          icon: Icons.format_underlined_rounded,
-          isActive: active.isUnderline,
-          tooltip: 'Sublinhado (<u>texto</u>)',
-          onTap: () => widget.onWrapSelection('<u>', '</u>'),
-        ),
-        _buildPillIconButton(
-          icon: Icons.format_strikethrough_rounded,
-          isActive: active.isStrikethrough,
-          tooltip: 'Tachado (~~texto~~)',
-          onTap: () => widget.onWrapSelection('~~', '~~'),
-        ),
-        const SizedBox(width: 3),
-        _buildPillIconButton(
-          icon: Icons.subscript_rounded,
-          isActive: active.isSubscript,
-          tooltip: 'Subscrito (X₂)',
-          onTap: () => widget.onWrapSelection('<sub>', '</sub>'),
-        ),
-        _buildPillIconButton(
-          icon: Icons.superscript_rounded,
-          isActive: active.isSuperscript,
-          tooltip: 'Sobrescrito (X²)',
-          onTap: () => widget.onWrapSelection('<sup>', '</sup>'),
-        ),
-        _buildPillIconButton(
-          icon: Icons.code_rounded,
-          isActive: active.isCode,
-          tooltip: 'Código Inline (`código`)',
-          onTap: () => widget.onWrapSelection('`', '`'),
-        ),
-        _buildPillIconButton(
-          icon: Icons.functions_rounded,
-          isActive: active.isLatex,
-          tooltip: r'Fórmula Inline ($x$)',
-          onTap: () => widget.onWrapSelection(r'$', r'$'),
-        ),
-        const SizedBox(width: 3),
-        _buildPillIconButton(
-          icon: Icons.highlight_rounded,
-          isActive: _isHighlightMenuOpen || active.highlightColor != null,
-          tooltip: 'Cor do Marca-Texto / Destaque',
-          onTap: () {
-            setState(() {
-              _isHighlightMenuOpen = !_isHighlightMenuOpen;
-              _isColorPaletteOpen = false;
-              _isFontMenuOpen = false;
-              _isLatexPaletteOpen = false;
-              _isMermaidMenuOpen = false;
-              _isCalloutMenuOpen = false;
-            });
-          },
-        ),
-        _buildPillIconButton(
-          icon: Icons.format_color_text_rounded,
-          isActive: _isColorPaletteOpen || active.textColor != null,
-          tooltip: 'Cor do Texto',
-          onTap: () {
-            setState(() {
-              _isColorPaletteOpen = !_isColorPaletteOpen;
-              _isHighlightMenuOpen = false;
-              _isFontMenuOpen = false;
-              _isLatexPaletteOpen = false;
-              _isMermaidMenuOpen = false;
-              _isCalloutMenuOpen = false;
-            });
-          },
-        ),
-      ],
-    );
-  }
-
-  Widget _buildHighlightPalettePopover(
-    bool isLight,
-    Color glassTint,
-    Color themeAccent,
-    Color textPrimary,
-    double blur,
-  ) {
-    final highlightColors = [
-      {'name': 'Amarelo', 'hex': '#FACC15', 'color': const Color(0xFFFACC15)},
-      {'name': 'Ciano', 'hex': '#00E1FF', 'color': const Color(0xFF00E1FF)},
-      {'name': 'Verde', 'hex': '#10B981', 'color': const Color(0xFF10B981)},
-      {'name': 'Rosa', 'hex': '#FF007A', 'color': const Color(0xFFFF007A)},
-      {'name': 'Laranja', 'hex': '#FB923C', 'color': const Color(0xFFFB923C)},
-      {'name': 'Roxo', 'hex': '#A855F7', 'color': const Color(0xFFA855F7)},
-    ];
-
-    Widget content = Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
-      decoration: BoxDecoration(
-        color: isLight ? Colors.white.withValues(alpha: 0.96) : glassTint,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: themeAccent.withValues(alpha: 0.5), width: 1.0),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.35),
-            blurRadius: 16,
-            offset: const Offset(0, 4),
-          ),
-        ],
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          InkWell(
-            onTap: () {
-              widget.onWrapSelection('==', '==');
-              setState(() => _isHighlightMenuOpen = false);
-            },
-            borderRadius: BorderRadius.circular(6),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 3),
-              child: Text(
-                'Padrão',
-                style: TextStyle(color: themeAccent, fontSize: 10.5, fontWeight: FontWeight.bold),
               ),
             ),
           ),
-          const SizedBox(width: 6),
-          ...highlightColors.map((hc) {
-            final c = hc['color'] as Color;
-            final hex = hc['hex'] as String;
-            return Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 3),
-              child: InkWell(
-                onTap: () {
-                  widget.onWrapSelection('<mark style="background: $hex">', '</mark>');
-                  Future.delayed(const Duration(milliseconds: 50), () {
-                    if (mounted) setState(() => _isHighlightMenuOpen = false);
-                  });
-                },
-                borderRadius: BorderRadius.circular(6),
-                child: Container(
-                  width: 20,
-                  height: 20,
-                  decoration: BoxDecoration(
-                    color: c,
-                    borderRadius: BorderRadius.circular(6),
-                    border: Border.all(color: Colors.white.withValues(alpha: 0.6), width: 1.0),
-                    boxShadow: [
-                      BoxShadow(
-                        color: c.withValues(alpha: 0.4),
-                        blurRadius: 4,
-                        offset: const Offset(0, 1),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            );
-          }),
-          const SizedBox(width: 4),
-          InkWell(
-            onTap: () => setState(() => _isHighlightMenuOpen = false),
-            borderRadius: BorderRadius.circular(10),
-            child: Icon(Icons.close, size: 14, color: textPrimary.withValues(alpha: 0.6)),
-          ),
-        ],
-      ),
-    );
-
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(12),
-      child: blur > 0
-          ? BackdropFilter(
-              filter: ImageFilter.blur(sigmaX: blur, sigmaY: blur),
-              child: content,
-            )
-          : content,
+        );
+      },
     );
   }
 
-  Widget _buildTextColorPalettePopover(
-    bool isLight,
-    Color glassTint,
-    Color themeAccent,
-    Color textPrimary,
-    double blur,
-  ) {
-    final colors = [
-      const Color(0xFFFFFFFF),
-      const Color(0xFF00E1FF),
-      const Color(0xFFA855F7),
-      const Color(0xFFFF007A),
-      const Color(0xFF10B981),
-      const Color(0xFFF59E0B),
-      const Color(0xFFEF4444),
-      const Color(0xFF60A5FA),
-      const Color(0xFFE2E8F0),
-    ];
-
-    Widget content = Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
-      decoration: BoxDecoration(
-        color: isLight ? Colors.white.withValues(alpha: 0.96) : glassTint,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: themeAccent.withValues(alpha: 0.5), width: 1.0),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.35),
-            blurRadius: 16,
-            offset: const Offset(0, 4),
-          ),
-        ],
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          ...colors.map((c) {
-            return Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 3),
-              child: InkWell(
-                onTap: () {
-                  widget.onApplyTextColor(c);
-                  Future.delayed(const Duration(milliseconds: 50), () {
-                    if (mounted) setState(() => _isColorPaletteOpen = false);
-                  });
-                },
-                borderRadius: BorderRadius.circular(6),
-                child: Container(
-                  width: 20,
-                  height: 20,
-                  decoration: BoxDecoration(
-                    color: c,
-                    borderRadius: BorderRadius.circular(6),
-                    border: Border.all(color: Colors.white.withValues(alpha: 0.4), width: 1.0),
-                    boxShadow: [
-                      BoxShadow(
-                        color: c.withValues(alpha: 0.3),
-                        blurRadius: 4,
-                        offset: const Offset(0, 1),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            );
-          }),
-          const SizedBox(width: 4),
-          InkWell(
-            onTap: () => setState(() => _isColorPaletteOpen = false),
-            borderRadius: BorderRadius.circular(10),
-            child: Icon(Icons.close, size: 14, color: textPrimary.withValues(alpha: 0.6)),
-          ),
-        ],
-      ),
-    );
-
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(12),
-      child: blur > 0
-          ? BackdropFilter(
-              filter: ImageFilter.blur(sigmaX: blur, sigmaY: blur),
-              child: content,
-            )
-          : content,
-    );
-  }
-
-  // ==========================================
-  // Controles de Tamanho de Fonte
-  // ==========================================
-
-  Widget _buildFontSizeControls(Color textPrimary, Color themeAccent, bool isLight) {
-    final effectiveSize = _currentEffectiveFontSize;
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        _buildPillIconButton(
-          icon: Icons.remove,
-          tooltip: 'Diminuir Fonte',
-          onTap: () => _updateFontSize(effectiveSize - 1),
-        ),
-        GestureDetector(
-          onDoubleTap: () {
-            setState(() => _isEditingFontSize = true);
-            _fontSizeFocusNode.requestFocus();
+  Widget _buildActivePopover(bool isLight, Color themeAccent, Color textPrimary) {
+    switch (_activePopover) {
+      case ActivePillPopover.typography:
+        return CardTypographyPopover(
+          currentFontFamily: widget.activeStyles.fontFamily ?? widget.card.fontFamily,
+          currentFontSize: widget.activeStyles.fontSize ?? widget.card.fontSize,
+          onSelectFontFamily: (family) {
+            if (widget.onApplyFontFamily != null) {
+              widget.onApplyFontFamily!(family);
+            } else {
+              widget.onUpdateCard(widget.card.copyWith(fontFamily: family));
+            }
           },
-          child: Container(
-            width: 32,
-            height: 22,
-            margin: const EdgeInsets.symmetric(horizontal: 2),
-            padding: const EdgeInsets.symmetric(horizontal: 2),
-            decoration: BoxDecoration(
-              color: _isEditingFontSize
-                  ? themeAccent.withValues(alpha: 0.15)
-                  : (isLight ? Colors.black.withValues(alpha: 0.04) : Colors.white.withValues(alpha: 0.05)),
-              borderRadius: BorderRadius.circular(6),
-              border: Border.all(
-                color: _isEditingFontSize ? themeAccent : (isLight ? Colors.black12 : Colors.white12),
-                width: 1.0,
-              ),
-            ),
-            alignment: Alignment.center,
-            child: _isEditingFontSize
-                ? FocusScope(
-                    canRequestFocus: true,
-                    child: TextField(
-                      controller: _fontSizeController,
-                      focusNode: _fontSizeFocusNode,
-                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                      textAlign: TextAlign.center,
-                      style: TextStyle(color: themeAccent, fontSize: 10.5, fontWeight: FontWeight.bold),
-                      decoration: const InputDecoration(
-                        isDense: true,
-                        contentPadding: EdgeInsets.zero,
-                        border: InputBorder.none,
-                      ),
-                      onSubmitted: (val) {
-                        final parsed = double.tryParse(val.trim());
-                        if (parsed != null && parsed > 4 && parsed < 200) {
-                          _updateFontSize(parsed);
-                        }
-                        setState(() => _isEditingFontSize = false);
-                      },
-                      onTapOutside: (_) {
-                        final parsed = double.tryParse(_fontSizeController.text.trim());
-                        if (parsed != null && parsed > 4 && parsed < 200) {
-                          _updateFontSize(parsed);
-                        }
-                        setState(() => _isEditingFontSize = false);
-                      },
-                    ),
-                  )
-                : Tooltip(
-                    message: 'Clique duplo para digitar o tamanho',
-                    child: Text(
-                      effectiveSize.toStringAsFixed(
-                        effectiveSize.truncateToDouble() == effectiveSize ? 0 : 1,
-                      ),
-                      textAlign: TextAlign.center,
-                      style: TextStyle(
-                        color: textPrimary,
-                        fontSize: 10.5,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                  ),
-          ),
-        ),
-        _buildPillIconButton(
-          icon: Icons.add,
-          tooltip: 'Aumentar Fonte',
-          onTap: () => _updateFontSize(effectiveSize + 1),
-        ),
-      ],
-    );
-  }
+          onSelectFontSize: widget.onApplyFontSize,
+          onClose: _closePopover,
+        );
 
-  // ==========================================
-  // Alinhamento & Listas
-  // ==========================================
-
-  Widget _buildAlignmentControls() {
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        _buildPillIconButton(
-          icon: Icons.format_align_left_rounded,
-          isActive: widget.card.textAlign == TextAlign.left,
-          tooltip: 'Alinhar à Esquerda',
-          onTap: () => widget.onUpdateCard(widget.card.copyWith(textAlign: TextAlign.left)),
-        ),
-        _buildPillIconButton(
-          icon: Icons.format_align_center_rounded,
-          isActive: widget.card.textAlign == TextAlign.center,
-          tooltip: 'Centralizar',
-          onTap: () => widget.onUpdateCard(widget.card.copyWith(textAlign: TextAlign.center)),
-        ),
-        _buildPillIconButton(
-          icon: Icons.format_align_right_rounded,
-          isActive: widget.card.textAlign == TextAlign.right,
-          tooltip: 'Alinhar à Direita',
-          onTap: () => widget.onUpdateCard(widget.card.copyWith(textAlign: TextAlign.right)),
-        ),
-        _buildPillIconButton(
-          icon: Icons.format_align_justify_rounded,
-          isActive: widget.card.textAlign == TextAlign.justify,
-          tooltip: 'Justificar',
-          onTap: () => widget.onUpdateCard(widget.card.copyWith(textAlign: TextAlign.justify)),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildListControls() {
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        _buildPillIconButton(
-          icon: Icons.format_list_bulleted_rounded,
-          tooltip: 'Lista com Marcadores',
-          onTap: () => widget.onInsertSnippet('\n- '),
-        ),
-        _buildPillIconButton(
-          icon: Icons.format_list_numbered_rounded,
-          tooltip: 'Lista Numerada',
-          onTap: () => widget.onInsertSnippet('\n1. '),
-        ),
-        _buildPillIconButton(
-          icon: Icons.check_box_outlined,
-          tooltip: 'Checklist / Tarefa',
-          onTap: () => widget.onInsertSnippet('\n- [ ] '),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildLatexMermaidButtons() {
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        _buildPillButton(
-          label: r'f(x) LaTeX',
-          svgIconName: 'math',
-          isActive: _isLatexPaletteOpen,
-          tooltip: 'Paleta Categorizada de Fórmulas LaTeX',
-          onTap: () {
-            setState(() {
-              _isLatexPaletteOpen = !_isLatexPaletteOpen;
-              _isMermaidMenuOpen = false;
-              _isCalloutMenuOpen = false;
-              _isFontMenuOpen = false;
-              _isColorPaletteOpen = false;
-              _isHighlightMenuOpen = false;
-            });
+      case ActivePillPopover.textColor:
+        return CardColorPickerPopover(
+          currentTextColor: widget.activeStyles.textColor ?? widget.card.textColor,
+          currentHighlightColor: widget.activeStyles.highlightColor,
+          initialMode: ColorPickerMode.textColor,
+          onSelectTextColor: widget.onApplyTextColor,
+          onSelectHighlightColor: (color) {
+            widget.onApplyHighlightColor?.call(color);
           },
-        ),
-        const SizedBox(width: 4),
-        _buildPillButton(
-          label: 'Mermaid',
-          svgIconName: 'code',
-          isActive: _isMermaidMenuOpen,
-          tooltip: 'Templates de Diagramas Mermaid',
-          onTap: () {
-            setState(() {
-              _isMermaidMenuOpen = !_isMermaidMenuOpen;
-              _isLatexPaletteOpen = false;
-              _isCalloutMenuOpen = false;
-              _isFontMenuOpen = false;
-              _isColorPaletteOpen = false;
-              _isHighlightMenuOpen = false;
-            });
-          },
-        ),
-        const SizedBox(width: 4),
-        _buildPillButton(
-          label: 'Callouts',
-          svgIconName: 'tag',
-          isActive: _isCalloutMenuOpen,
-          tooltip: 'Caixas de Destaque STEM (Dica, Teorema, Alerta, Conceito)',
-          onTap: () {
-            setState(() {
-              _isCalloutMenuOpen = !_isCalloutMenuOpen;
-              _isLatexPaletteOpen = false;
-              _isMermaidMenuOpen = false;
-              _isFontMenuOpen = false;
-              _isColorPaletteOpen = false;
-              _isHighlightMenuOpen = false;
-            });
-          },
-        ),
-      ],
-    );
-  }
+          onClose: _closePopover,
+        );
 
-  bool _isCopiedRecently = false;
+      case ActivePillPopover.highlightColor:
+        return CardColorPickerPopover(
+          currentTextColor: widget.activeStyles.textColor ?? widget.card.textColor,
+          currentHighlightColor: widget.activeStyles.highlightColor,
+          initialMode: ColorPickerMode.highlightColor,
+          onSelectTextColor: widget.onApplyTextColor,
+          onSelectHighlightColor: (color) {
+            widget.onApplyHighlightColor?.call(color);
+          },
+          onClose: _closePopover,
+        );
 
-  void _handleCopyContent() async {
-    final text = widget.card.content;
-    if (text.isNotEmpty) {
-      await Clipboard.setData(ClipboardData(text: text));
-      if (mounted) {
-        setState(() => _isCopiedRecently = true);
-        Future.delayed(const Duration(milliseconds: 1400), () {
-          if (mounted) setState(() => _isCopiedRecently = false);
-        });
-      }
+      case ActivePillPopover.stemHub:
+        return StemInsertHubPopover(
+          onInsertSnippet: widget.onInsertSnippet,
+          onClose: _closePopover,
+        );
+
+      case ActivePillPopover.latexEditor:
+        return CardLatexEditorPopover(
+          initialLatex: widget.activeStyles.selectedText ?? '',
+          onApply: (mathSnippet) {
+            widget.onInsertSnippet(mathSnippet);
+          },
+          onClose: _closePopover,
+        );
+
+      case ActivePillPopover.none:
+        return const SizedBox.shrink();
     }
   }
 
-  Widget _buildActionControls() {
-    final theme = MoscaroThemeController.instance.currentTheme;
-    final themeAccent = theme.accentPrimary;
+  Widget _buildPillBar(
+    bool isLight,
+    Color glassTint,
+    Color themeAccent,
+    Color textPrimary,
+    double blur,
+  ) {
+    final effectiveFont = widget.card.fontFamily;
+    final effectiveSize = widget.activeStyles.fontSize ?? widget.card.fontSize;
 
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        _buildPillSvgButton(
-          iconName: _isCopiedRecently ? 'check' : 'copy',
-          isActive: _isCopiedRecently,
-          activeColor: _isCopiedRecently ? const Color(0xFF10B981) : themeAccent,
-          tooltip: _isCopiedRecently ? 'Conteúdo copiado!' : 'Copiar Conteúdo (LaTeX/Texto)',
-          onTap: _handleCopyContent,
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(MoscaroTokens.radiusPill),
+      child: blur > 0
+          ? BackdropFilter(
+              filter: ImageFilter.blur(sigmaX: blur, sigmaY: blur),
+              child: _buildBarInner(isLight, glassTint, themeAccent, textPrimary, effectiveFont, effectiveSize),
+            )
+          : _buildBarInner(isLight, glassTint, themeAccent, textPrimary, effectiveFont, effectiveSize),
+    );
+  }
+
+  Widget _buildBarInner(
+    bool isLight,
+    Color glassTint,
+    Color themeAccent,
+    Color textPrimary,
+    String effectiveFont,
+    double effectiveSize,
+  ) {
+    return Container(
+      height: 38,
+      constraints: BoxConstraints(maxWidth: widget.cardWidth),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color: isLight
+            ? const Color(0xFFF8FAFC).withValues(alpha: 0.95)
+            : glassTint,
+        borderRadius: BorderRadius.circular(MoscaroTokens.radiusPill),
+        border: Border.all(
+          color: isLight ? MoscaroTokens.borderSubtle : MoscaroTokens.borderGlow,
+          width: 1.0,
         ),
-        _buildPillIconButton(
-          icon: widget.card.isPinned ? Icons.push_pin_rounded : Icons.push_pin_outlined,
-          isActive: widget.card.isPinned,
-          activeColor: const Color(0xFFFF007A),
-          tooltip: widget.card.isPinned ? 'Desafixar Posição' : 'Fixar Posição (Travar)',
-          onTap: () => widget.onUpdateCard(widget.card.copyWith(isPinned: !widget.card.isPinned)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.28),
+            blurRadius: 14,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: ScrollConfiguration(
+        behavior: ScrollConfiguration.of(context).copyWith(
+          dragDevices: {
+            PointerDeviceKind.touch,
+            PointerDeviceKind.mouse,
+            PointerDeviceKind.trackpad,
+            PointerDeviceKind.stylus,
+          },
         ),
-        _buildPillIconButton(
-          icon: Icons.copy_rounded,
-          tooltip: 'Duplicar Card',
-          onTap: widget.onDuplicateCard,
+        child: Listener(
+          onPointerSignal: (pointerSignal) {
+            if (pointerSignal is PointerScrollEvent && _pillScrollController.hasClients) {
+              GestureBinding.instance.pointerSignalResolver.register(pointerSignal, (event) {
+                if (event is PointerScrollEvent && _pillScrollController.hasClients) {
+                  final delta = event.scrollDelta.dx != 0 ? event.scrollDelta.dx : event.scrollDelta.dy;
+                  final target = (_pillScrollController.offset + delta * 1.5).clamp(
+                    0.0,
+                    _pillScrollController.position.maxScrollExtent,
+                  );
+                  _pillScrollController.animateTo(
+                    target,
+                    duration: const Duration(milliseconds: 100),
+                    curve: Curves.easeOutCubic,
+                  );
+                }
+              });
+            }
+          },
+          child: SingleChildScrollView(
+            controller: _pillScrollController,
+            scrollDirection: Axis.horizontal,
+            physics: const BouncingScrollPhysics(),
+            child: Row(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            // 1. Tipografia (Fonte + Tamanho)
+            _buildTypographyButton(effectiveFont, effectiveSize, themeAccent, textPrimary),
+
+            _buildDivider(isLight),
+
+            // 2. Formatação Básica (B, I, U, S, Code, Math $)
+            _buildFormatButton(
+              label: 'B',
+              tooltip: 'Negrito (Ctrl+B)',
+              isActive: widget.activeStyles.isBold,
+              themeAccent: themeAccent,
+              textPrimary: textPrimary,
+              onTap: () => widget.onWrapSelection('**', '**'),
+              isBoldText: true,
+            ),
+            const SizedBox(width: 2),
+            _buildFormatButton(
+              label: 'I',
+              tooltip: 'Itálico (Ctrl+I)',
+              isActive: widget.activeStyles.isItalic,
+              themeAccent: themeAccent,
+              textPrimary: textPrimary,
+              onTap: () => widget.onWrapSelection('*', '*'),
+              isItalicText: true,
+            ),
+            const SizedBox(width: 2),
+            _buildFormatButton(
+              label: 'U',
+              tooltip: 'Sublinhado (Ctrl+U)',
+              isActive: widget.activeStyles.isUnderline,
+              themeAccent: themeAccent,
+              textPrimary: textPrimary,
+              onTap: () => widget.onWrapSelection('<u>', '</u>'),
+              isUnderlineText: true,
+            ),
+            const SizedBox(width: 2),
+            _buildFormatButton(
+              label: 'S',
+              tooltip: 'Tachado',
+              isActive: widget.activeStyles.isStrikethrough,
+              themeAccent: themeAccent,
+              textPrimary: textPrimary,
+              onTap: () => widget.onWrapSelection('~~', '~~'),
+              isStrikeText: true,
+            ),
+            const SizedBox(width: 2),
+            _buildIconButton(
+              iconName: 'code',
+              tooltip: 'Código Monospace (`code`)',
+              isActive: widget.activeStyles.isCode,
+              themeAccent: themeAccent,
+              textPrimary: textPrimary,
+              onTap: () => widget.onWrapSelection('`', '`'),
+            ),
+            const SizedBox(width: 2),
+            _buildFormatButton(
+              label: r'$',
+              tooltip: 'LaTeX Inline (\$f(x)\$)',
+              isActive: widget.activeStyles.isLatex || _activePopover == ActivePillPopover.latexEditor,
+              themeAccent: themeAccent,
+              textPrimary: textPrimary,
+              onTap: () => _togglePopover(ActivePillPopover.latexEditor),
+            ),
+
+            _buildDivider(isLight),
+
+            // 3. Cores (Texto e Marca-texto)
+            _buildColorButton(
+              iconName: 'palette',
+              tooltip: 'Cor do Texto',
+              dotColor: widget.activeStyles.textColor ?? widget.card.textColor,
+              isActive: _activePopover == ActivePillPopover.textColor,
+              themeAccent: themeAccent,
+              textPrimary: textPrimary,
+              onTap: () => _togglePopover(ActivePillPopover.textColor),
+            ),
+            const SizedBox(width: 2),
+            _buildColorButton(
+              iconName: 'brush',
+              tooltip: 'Marca-texto (Realce)',
+              dotColor: widget.activeStyles.highlightColor,
+              isActive: _activePopover == ActivePillPopover.highlightColor,
+              themeAccent: themeAccent,
+              textPrimary: textPrimary,
+              onTap: () => _togglePopover(ActivePillPopover.highlightColor),
+            ),
+
+            _buildDivider(isLight),
+
+            // 4. STEM Hub Unificado (+)
+            _buildStemHubButton(themeAccent, textPrimary),
+
+            _buildDivider(isLight),
+
+            // 5. Ações do Card (Duplicar, Excluir)
+            _buildIconButton(
+              iconName: 'copy',
+              tooltip: 'Duplicar Card',
+              themeAccent: themeAccent,
+              textPrimary: textPrimary,
+              onTap: widget.onDuplicateCard,
+            ),
+            const SizedBox(width: 2),
+            _buildIconButton(
+              iconName: 'trash',
+              tooltip: 'Excluir Card',
+              themeAccent: Colors.redAccent,
+              textPrimary: textPrimary,
+              onTap: widget.onDeleteCard,
+            ),
+          ],
         ),
-        _buildPillIconButton(
-          icon: Icons.delete_outline_rounded,
-          activeColor: const Color(0xFFFF007A),
-          tooltip: 'Excluir Card',
-          onTap: widget.onDeleteCard,
-        ),
-      ],
+      ),
+      ),
+      ),
     );
   }
 
@@ -1026,139 +453,53 @@ class _CardFormatFloatingPillState extends State<CardFormatFloatingPill> {
     return Container(
       width: 1,
       height: 18,
-      color: isLight ? Colors.black12 : Colors.white12,
+      margin: const EdgeInsets.symmetric(horizontal: 5),
+      color: isLight
+          ? Colors.black.withValues(alpha: 0.1)
+          : Colors.white.withValues(alpha: 0.12),
     );
   }
 
-  Widget _buildPillSvgButton({
-    required String iconName,
-    bool isActive = false,
-    Color? activeColor,
-    required String tooltip,
-    required VoidCallback onTap,
-  }) {
-    final themeAccent = activeColor ?? MoscaroTokens.auroraBlue;
-    final isLight = MoscaroTokens.isLight;
-
+  Widget _buildTypographyButton(
+    String font,
+    double size,
+    Color themeAccent,
+    Color textPrimary,
+  ) {
+    final isOpen = _activePopover == ActivePillPopover.typography;
     return Tooltip(
-      message: tooltip,
+      message: 'Alterar Tipografia e Tamanho',
       child: InkWell(
-        onTap: onTap,
+        onTap: () => _togglePopover(ActivePillPopover.typography),
         borderRadius: BorderRadius.circular(6),
-        child: Container(
-          width: 24,
-          height: 24,
-          alignment: Alignment.center,
-          decoration: BoxDecoration(
-            color: isActive
-                ? themeAccent.withValues(alpha: 0.2)
-                : Colors.transparent,
-            borderRadius: BorderRadius.circular(6),
-            border: Border.all(
-              color: isActive ? themeAccent : Colors.transparent,
-              width: 1.0,
-            ),
-          ),
-          child: SvgIcon(
-            name: iconName,
-            size: 13,
-            color: isActive ? themeAccent : (isLight ? Colors.black87 : Colors.white70),
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildPillIconButton({
-    required IconData icon,
-    bool isActive = false,
-    Color? activeColor,
-    required String tooltip,
-    required VoidCallback onTap,
-  }) {
-    final themeAccent = activeColor ?? MoscaroTokens.auroraBlue;
-    final isLight = MoscaroTokens.isLight;
-
-    return Tooltip(
-      message: tooltip,
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(6),
-        child: Container(
-          width: 24,
-          height: 24,
-          alignment: Alignment.center,
-          decoration: BoxDecoration(
-            color: isActive
-                ? themeAccent.withValues(alpha: 0.2)
-                : Colors.transparent,
-            borderRadius: BorderRadius.circular(6),
-            border: Border.all(
-              color: isActive ? themeAccent : Colors.transparent,
-              width: 1.0,
-            ),
-          ),
-          child: Icon(
-            icon,
-            size: 14,
-            color: isActive ? themeAccent : (isLight ? Colors.black87 : Colors.white70),
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildPillButton({
-    required String label,
-    IconData? icon,
-    String? svgIconName,
-    bool isActive = false,
-    required String tooltip,
-    required VoidCallback onTap,
-  }) {
-    final themeAccent = MoscaroTokens.auroraBlue;
-    final isLight = MoscaroTokens.isLight;
-
-    return Tooltip(
-      message: tooltip,
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(8),
-        child: Container(
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 140),
           padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
           decoration: BoxDecoration(
-            color: isActive
-                ? themeAccent.withValues(alpha: 0.2)
-                : (isLight ? Colors.black.withValues(alpha: 0.04) : Colors.white.withValues(alpha: 0.06)),
-            borderRadius: BorderRadius.circular(8),
+            color: isOpen ? themeAccent.withValues(alpha: 0.2) : Colors.transparent,
+            borderRadius: BorderRadius.circular(6),
             border: Border.all(
-              color: isActive ? themeAccent : (isLight ? Colors.black12 : Colors.white12),
-              width: 1.0,
+              color: isOpen ? themeAccent.withValues(alpha: 0.5) : Colors.transparent,
+              width: 0.8,
             ),
           ),
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              if (svgIconName != null)
-                SvgIcon(
-                  name: svgIconName,
-                  size: 13,
-                  color: isActive ? themeAccent : (isLight ? Colors.black87 : Colors.white70),
-                )
-              else if (icon != null)
-                Icon(
-                  icon,
-                  size: 13,
-                  color: isActive ? themeAccent : (isLight ? Colors.black87 : Colors.white70),
-                ),
-              const SizedBox(width: 4),
               Text(
-                label,
+                '${font.split(' ').first} ${size.round()}pt',
                 style: TextStyle(
-                  color: isActive ? themeAccent : (isLight ? Colors.black87 : Colors.white70),
-                  fontSize: 10.5,
+                  fontSize: 11,
+                  fontFamily: font,
+                  color: isOpen ? themeAccent : textPrimary,
                   fontWeight: FontWeight.w600,
                 ),
+              ),
+              const SizedBox(width: 3),
+              SvgIcon(
+                name: 'chevron_down',
+                size: 10,
+                color: isOpen ? themeAccent : textPrimary.withValues(alpha: 0.6),
               ),
             ],
           ),
@@ -1167,356 +508,178 @@ class _CardFormatFloatingPillState extends State<CardFormatFloatingPill> {
     );
   }
 
-  Widget _buildMermaidMenu(
-    bool isLight,
-    Color glassTint,
-    Color themeAccent,
-    Color textPrimary,
-    double blur,
-  ) {
-    final templates = [
-      {
-        'title': 'Fluxograma (Flowchart)',
-        'snippet': "\n```mermaid\ngraph TD\n    A[Início] --> B{Condição}\n    B -->|Sim| C[Ação 1]\n    B -->|Não| D[Ação 2]\n    C --> E[Fim]\n    D --> E\n```\n",
-      },
-      {
-        'title': 'Diagrama de Sequência',
-        'snippet': "\n```mermaid\nsequenceDiagram\n    autonumber\n    Alice->>Bob: Olá Bob\n    Bob-->>Alice: Olá Alice\n```\n",
-      },
-      {
-        'title': 'Diagrama de Classes',
-        'snippet': "\n```mermaid\nclassDiagram\n    class Animal {\n        +String nome\n        +mover()\n    }\n```\n",
-      },
-      {
-        'title': 'Diagrama de Estados',
-        'snippet': "\n```mermaid\nstateDiagram-v2\n    [*] --> Parado\n    Parado --> Movimento: Acelerar\n    Movimento --> Parado: Frear\n```\n",
-      },
-    ];
-
-    return Container(
-      width: 265,
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(16),
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Row(
-                  children: [
-                    SvgIcon(name: 'code', size: 15, color: themeAccent),
-                    const SizedBox(width: 7),
-                    Text(
-                      'Inserir Diagrama Mermaid',
-                      style: TextStyle(color: textPrimary, fontSize: 11.5, fontWeight: FontWeight.bold),
-                    ),
-                  ],
-                ),
-                GestureDetector(
-                  onTap: () => setState(() => _isMermaidMenuOpen = false),
-                  behavior: HitTestBehavior.opaque,
-                  child: Padding(
-                    padding: const EdgeInsets.all(4),
-                    child: SvgIcon(name: 'close', size: 12, color: textPrimary.withValues(alpha: 0.7)),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          Divider(
-            height: 1,
-            color: isLight ? Colors.black.withValues(alpha: 0.08) : Colors.white.withValues(alpha: 0.08),
-          ),
-          for (final t in templates)
-            _MenuItemHoverTile(
-              title: t['title']!,
-              textPrimary: textPrimary,
-              themeAccent: themeAccent,
-              onTap: () {
-                widget.onInsertSnippet(t['snippet']!);
-              },
-            ),
-        ],
-      ),
-    ).moscaroV2(
-      borderRadius: 16,
-      blurSigma: blur,
-      enableBlur: blur > 0,
-      backgroundColor: isLight
-          ? const Color(0xFFF8FAFC).withValues(alpha: 0.95)
-          : glassTint,
-      borderColor: isLight ? MoscaroTokens.borderSubtle : MoscaroTokens.borderGlow,
-      borderWidth: 1.0,
-      padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 4),
-      customShadows: [
-        BoxShadow(
-          color: Colors.black.withValues(alpha: 0.35),
-          blurRadius: 18,
-          offset: const Offset(0, 6),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildCalloutMenu(
-    bool isLight,
-    Color glassTint,
-    Color themeAccent,
-    Color textPrimary,
-    double blur,
-  ) {
-    final activeTheme = MoscaroThemeController.instance.currentTheme;
-    final callouts = [
-      {
-        'title': 'Dica / Insight STEM',
-        'subtitle': 'Caixa de destaque para dicas e macetes',
-        'svgIcon': 'sparkle',
-        'color': activeTheme.calloutTipColor,
-        'snippet': "\n> [!TIP]\n> Insira a dica ou insight STEM aqui.\n",
-      },
-      {
-        'title': 'Teorema / Fórmula-Chave',
-        'subtitle': 'Caixa de destaque para teoremas e leis',
-        'svgIcon': 'math',
-        'color': activeTheme.calloutTheoremColor,
-        'snippet': "\n> [!THEOREM]\n> Para todo triângulo retângulo: \$a^2 + b^2 = c^2\$.\n",
-      },
-      {
-        'title': 'Atenção / Ponto Crítico',
-        'subtitle': 'Caixa de aviso sobre restrições e singularidades',
-        'svgIcon': 'target',
-        'color': activeTheme.calloutWarningColor,
-        'snippet': "\n> [!WARNING]\n> Cuidado com condições de contorno e singularidades.\n",
-      },
-      {
-        'title': 'Definição / Conceito',
-        'subtitle': 'Caixa de definição formal de conceito científico',
-        'svgIcon': 'book',
-        'color': activeTheme.calloutConceptColor,
-        'snippet': "\n> [!CONCEPT]\n> Definição formal do conceito científico.\n",
-      },
-    ];
-
-    return Container(
-      width: 275,
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(16),
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Row(
-                  children: [
-                    SvgIcon(name: 'tag', size: 15, color: themeAccent),
-                    const SizedBox(width: 7),
-                    Text(
-                      'Callouts & Caixas STEM',
-                      style: TextStyle(color: textPrimary, fontSize: 11.5, fontWeight: FontWeight.bold),
-                    ),
-                  ],
-                ),
-                GestureDetector(
-                  onTap: () => setState(() => _isCalloutMenuOpen = false),
-                  behavior: HitTestBehavior.opaque,
-                  child: Padding(
-                    padding: const EdgeInsets.all(4),
-                    child: SvgIcon(name: 'close', size: 12, color: textPrimary.withValues(alpha: 0.7)),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          Divider(
-            height: 1,
-            color: isLight ? Colors.black.withValues(alpha: 0.08) : Colors.white.withValues(alpha: 0.08),
-          ),
-          for (final c in callouts)
-            _CalloutItemHoverTile(
-              title: c['title'] as String,
-              subtitle: c['subtitle'] as String,
-              svgIcon: c['svgIcon'] as String,
-              iconColor: c['color'] as Color,
-              textPrimary: textPrimary,
-              themeAccent: themeAccent,
-              onTap: () {
-                widget.onInsertSnippet(c['snippet'] as String);
-              },
-            ),
-        ],
-      ),
-    ).moscaroV2(
-      borderRadius: 16,
-      blurSigma: blur,
-      enableBlur: blur > 0,
-      backgroundColor: isLight
-          ? const Color(0xFFF8FAFC).withValues(alpha: 0.95)
-          : glassTint,
-      borderColor: isLight ? MoscaroTokens.borderSubtle : MoscaroTokens.borderGlow,
-      borderWidth: 1.0,
-      padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 4),
-      customShadows: [
-        BoxShadow(
-          color: Colors.black.withValues(alpha: 0.35),
-          blurRadius: 18,
-          offset: const Offset(0, 6),
-        ),
-      ],
-    );
-  }
-}
-
-class _MenuItemHoverTile extends StatefulWidget {
-  final String title;
-  final Color textPrimary;
-  final Color themeAccent;
-  final VoidCallback onTap;
-
-  const _MenuItemHoverTile({
-    required this.title,
-    required this.textPrimary,
-    required this.themeAccent,
-    required this.onTap,
-  });
-
-  @override
-  State<_MenuItemHoverTile> createState() => _MenuItemHoverTileState();
-}
-
-class _MenuItemHoverTileState extends State<_MenuItemHoverTile> {
-  bool _isHovered = false;
-
-  @override
-  Widget build(BuildContext context) {
-    return MouseRegion(
-      onEnter: (_) => setState(() => _isHovered = true),
-      onExit: (_) => setState(() => _isHovered = false),
-      cursor: SystemMouseCursors.click,
-      child: GestureDetector(
-        onTap: widget.onTap,
-        behavior: HitTestBehavior.opaque,
+  Widget _buildFormatButton({
+    required String label,
+    required String tooltip,
+    required bool isActive,
+    required Color themeAccent,
+    required Color textPrimary,
+    required VoidCallback onTap,
+    bool isBoldText = false,
+    bool isItalicText = false,
+    bool isUnderlineText = false,
+    bool isStrikeText = false,
+  }) {
+    return Tooltip(
+      message: tooltip,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(6),
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 140),
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
-          margin: const EdgeInsets.symmetric(horizontal: 2, vertical: 1.5),
+          width: 26,
+          height: 26,
+          alignment: Alignment.center,
           decoration: BoxDecoration(
-            color: _isHovered
-                ? widget.themeAccent.withValues(alpha: 0.14)
-                : Colors.transparent,
-            borderRadius: BorderRadius.circular(8),
+            color: isActive ? themeAccent.withValues(alpha: 0.22) : Colors.transparent,
+            borderRadius: BorderRadius.circular(6),
             border: Border.all(
-              color: _isHovered
-                  ? widget.themeAccent.withValues(alpha: 0.35)
-                  : Colors.transparent,
+              color: isActive ? themeAccent.withValues(alpha: 0.6) : Colors.transparent,
               width: 0.8,
             ),
           ),
           child: Text(
-            widget.title,
+            label,
             style: TextStyle(
-              color: _isHovered ? widget.themeAccent : widget.textPrimary,
-              fontSize: 11.5,
-              fontWeight: _isHovered ? FontWeight.w600 : FontWeight.normal,
+              fontSize: 12,
+              fontWeight: isBoldText ? FontWeight.bold : FontWeight.w600,
+              fontStyle: isItalicText ? FontStyle.italic : FontStyle.normal,
+              decoration: isUnderlineText
+                  ? TextDecoration.underline
+                  : (isStrikeText ? TextDecoration.lineThrough : null),
+              color: isActive ? themeAccent : textPrimary.withValues(alpha: 0.85),
             ),
           ),
         ),
       ),
     );
   }
-}
 
-class _CalloutItemHoverTile extends StatefulWidget {
-  final String title;
-  final String subtitle;
-  final String svgIcon;
-  final Color iconColor;
-  final Color textPrimary;
-  final Color themeAccent;
-  final VoidCallback onTap;
-
-  const _CalloutItemHoverTile({
-    required this.title,
-    required this.subtitle,
-    required this.svgIcon,
-    required this.iconColor,
-    required this.textPrimary,
-    required this.themeAccent,
-    required this.onTap,
-  });
-
-  @override
-  State<_CalloutItemHoverTile> createState() => _CalloutItemHoverTileState();
-}
-
-class _CalloutItemHoverTileState extends State<_CalloutItemHoverTile> {
-  bool _isHovered = false;
-
-  @override
-  Widget build(BuildContext context) {
-    return MouseRegion(
-      onEnter: (_) => setState(() => _isHovered = true),
-      onExit: (_) => setState(() => _isHovered = false),
-      cursor: SystemMouseCursors.click,
-      child: GestureDetector(
-        onTap: widget.onTap,
-        behavior: HitTestBehavior.opaque,
+  Widget _buildIconButton({
+    required String iconName,
+    required String tooltip,
+    bool isActive = false,
+    required Color themeAccent,
+    required Color textPrimary,
+    required VoidCallback onTap,
+  }) {
+    return Tooltip(
+      message: tooltip,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(6),
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 140),
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
-          margin: const EdgeInsets.symmetric(horizontal: 2, vertical: 1.5),
+          width: 26,
+          height: 26,
+          alignment: Alignment.center,
           decoration: BoxDecoration(
-            color: _isHovered
-                ? widget.themeAccent.withValues(alpha: 0.14)
-                : Colors.transparent,
-            borderRadius: BorderRadius.circular(8),
+            color: isActive ? themeAccent.withValues(alpha: 0.22) : Colors.transparent,
+            borderRadius: BorderRadius.circular(6),
             border: Border.all(
-              color: _isHovered
-                  ? widget.themeAccent.withValues(alpha: 0.35)
-                  : Colors.transparent,
+              color: isActive ? themeAccent.withValues(alpha: 0.6) : Colors.transparent,
+              width: 0.8,
+            ),
+          ),
+          child: SvgIcon(
+            name: iconName,
+            size: 13,
+            color: isActive ? themeAccent : textPrimary.withValues(alpha: 0.85),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildColorButton({
+    required String iconName,
+    required String tooltip,
+    Color? dotColor,
+    required bool isActive,
+    required Color themeAccent,
+    required Color textPrimary,
+    required VoidCallback onTap,
+  }) {
+    return Tooltip(
+      message: tooltip,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(6),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 140),
+          padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 3),
+          height: 26,
+          decoration: BoxDecoration(
+            color: isActive ? themeAccent.withValues(alpha: 0.22) : Colors.transparent,
+            borderRadius: BorderRadius.circular(6),
+            border: Border.all(
+              color: isActive ? themeAccent.withValues(alpha: 0.6) : Colors.transparent,
               width: 0.8,
             ),
           ),
           child: Row(
+            mainAxisSize: MainAxisSize.min,
             children: [
-              Container(
-                padding: const EdgeInsets.all(5),
-                decoration: BoxDecoration(
-                  color: widget.iconColor.withValues(alpha: 0.15),
-                  borderRadius: BorderRadius.circular(6),
-                ),
-                child: SvgIcon(name: widget.svgIcon, size: 14, color: widget.iconColor),
+              SvgIcon(
+                name: iconName,
+                size: 13,
+                color: isActive ? themeAccent : textPrimary.withValues(alpha: 0.85),
               ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      widget.title,
-                      style: TextStyle(
-                        color: _isHovered ? widget.themeAccent : widget.textPrimary,
-                        fontSize: 11.5,
-                        fontWeight: FontWeight.bold,
-                      ),
+              if (dotColor != null) ...[
+                const SizedBox(width: 4),
+                Container(
+                  width: 8,
+                  height: 8,
+                  decoration: BoxDecoration(
+                    color: dotColor,
+                    shape: BoxShape.circle,
+                    border: Border.all(
+                      color: Colors.white.withValues(alpha: 0.4),
+                      width: 0.6,
                     ),
-                    Text(
-                      widget.subtitle,
-                      style: TextStyle(
-                        color: widget.textPrimary.withValues(alpha: 0.6),
-                        fontSize: 9.5,
-                      ),
-                    ),
-                  ],
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildStemHubButton(Color themeAccent, Color textPrimary) {
+    final isOpen = _activePopover == ActivePillPopover.stemHub;
+    return Tooltip(
+      message: 'STEM Hub (LaTeX, Mermaid & Callouts)',
+      child: InkWell(
+        onTap: () => _togglePopover(ActivePillPopover.stemHub),
+        borderRadius: BorderRadius.circular(8),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 140),
+          padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 4),
+          decoration: BoxDecoration(
+            color: isOpen
+                ? themeAccent.withValues(alpha: 0.28)
+                : themeAccent.withValues(alpha: 0.12),
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(
+              color: isOpen
+                  ? themeAccent
+                  : themeAccent.withValues(alpha: 0.45),
+              width: 0.9,
+            ),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              SvgIcon(name: 'circuit', size: 13, color: themeAccent),
+              const SizedBox(width: 4),
+              Text(
+                'STEM Hub',
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.bold,
+                  color: themeAccent,
                 ),
               ),
             ],

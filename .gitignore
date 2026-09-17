@@ -37,6 +37,8 @@ app/ios/Flutter/ephemeral/
 # 3. Local Runtime State & User Data
 app/settings.json
 **/settings.json
+.session.json
+**/.session.json
 *.db
 *.db-journal
 *.db.backup

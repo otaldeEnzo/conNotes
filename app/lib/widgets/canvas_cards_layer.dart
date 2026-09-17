@@ -159,6 +159,7 @@ class _CanvasCardsLayerState extends State<CanvasCardsLayer> {
           card: card,
           isSelected: isSelected,
           zoomNotifier: widget.zoomNotifier,
+          panNotifier: widget.panNotifier,
           onUpdateCard: widget.onUpdateCard,
           onSelectCard: widget.onSelectCard,
           onDeleteCard: widget.onDeleteCard,
@@ -172,12 +173,13 @@ class _CanvasCardsLayerState extends State<CanvasCardsLayer> {
           onSyncCardStrokes: widget.onSyncCardStrokes,
         );
 
-        if (isSelected && widget.selectionUpdateNotifier != null) {
+        if (widget.selectionUpdateNotifier != null) {
           cardChild = ListenableBuilder(
+            key: ValueKey('card_sel_listen_${card.id}'),
             listenable: widget.selectionUpdateNotifier!,
             builder: (context, child) {
               final sel = widget.getSelectionState?.call() ?? widget.selectionState;
-              final isDragging = sel.isDraggingSelection;
+              final isDragging = isSelected && sel.isDraggingSelection;
               final offset = isDragging ? sel.dragOffset : Offset.zero;
               if (offset == Offset.zero) return child!;
               return Transform.translate(offset: offset, child: child);

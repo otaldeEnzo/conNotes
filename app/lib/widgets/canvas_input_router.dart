@@ -142,6 +142,7 @@ class _CanvasInputRouterState extends State<CanvasInputRouter> {
   String? _lastMediaClickCardId;
   Offset? _lastMediaClickPos;
   final ValueNotifier<MouseCursor> _cursorNotifier = ValueNotifier(SystemMouseCursors.basic);
+  Offset? _lastPointerLocalPosition;
 
   @override
   void initState() {
@@ -168,6 +169,23 @@ class _CanvasInputRouterState extends State<CanvasInputRouter> {
     );
     SettingsService.instance.addListener(_onSettingsChanged);
     StylusNativeChannel.instance.addListener(_onStylusNativeStateChanged);
+    widget.panNotifier.addListener(_onCanvasTransform);
+    widget.zoomNotifier.addListener(_onCanvasTransform);
+  }
+
+  void _onCanvasTransform() {
+    final ctx = widget.canvasContext;
+    if (_lastPointerLocalPosition != null && ctx.selectionState.isDraggingSelection) {
+      final rawCanvasPoint = (_lastPointerLocalPosition! - ctx.panOffset) / ctx.zoomScale;
+      final canvasPoint = Offset(math.max(0.0, rawCanvasPoint.dx), math.max(0.0, rawCanvasPoint.dy));
+      _selectionHandler.updateSelection(
+        canvasPoint: canvasPoint,
+        selectionState: ctx.selectionState,
+        selectionType: ctx.selectionState.type,
+        zoomScale: ctx.zoomScale,
+        onUpdateState: ctx.updateSelectionState,
+      );
+    }
   }
 
   void _onStylusNativeStateChanged(StylusNativeStateData state) {
@@ -204,10 +222,20 @@ class _CanvasInputRouterState extends State<CanvasInputRouter> {
       _isActionExecuting = false;
       _currentActiveAction = null;
     }
+    if (oldWidget.panNotifier != widget.panNotifier) {
+      oldWidget.panNotifier.removeListener(_onCanvasTransform);
+      widget.panNotifier.addListener(_onCanvasTransform);
+    }
+    if (oldWidget.zoomNotifier != widget.zoomNotifier) {
+      oldWidget.zoomNotifier.removeListener(_onCanvasTransform);
+      widget.zoomNotifier.addListener(_onCanvasTransform);
+    }
   }
 
   @override
   void dispose() {
+    widget.panNotifier.removeListener(_onCanvasTransform);
+    widget.zoomNotifier.removeListener(_onCanvasTransform);
     SettingsService.instance.removeListener(_onSettingsChanged);
     StylusNativeChannel.instance.removeListener(_onStylusNativeStateChanged);
     _hoverNotifier.dispose();
@@ -414,33 +442,35 @@ class _CanvasInputRouterState extends State<CanvasInputRouter> {
       child: Listener(
         onPointerSignal: (event) {
           if (event is PointerScrollEvent) {
+            _lastPointerLocalPosition = event.localPosition;
             if (globalIsHoveringFloatingPill) {
               return;
-            }
-            if (note != null && ctx.selectedCardId != null) {
-              final rawCanvasPoint = (event.localPosition - ctx.panOffset) / ctx.zoomScale;
-              for (final card in note.cards) {
-                if (card.id == ctx.selectedCardId) {
-                  final pillRect = Rect.fromLTWH(
-                    card.x - 30.0,
-                    card.y - 70.0,
-                    math.max(card.width, 360.0) + 60.0,
-                    70.0,
-                  );
-                  if (pillRect.contains(rawCanvasPoint)) {
-                    return;
-                  }
-                }
-              }
             }
             _panZoomHandler.handlePointerScroll(event);
           }
         },
         onPointerHover: (event) {
           _handleButtonTransitions(event.buttons);
-          ctx.updateMousePos(event.localPosition);
-          if (globalIsHoveringFloatingPill && ctx.selectedCardId == null) {
-            globalIsHoveringFloatingPill = false;
+          if (globalIsHoveringFloatingPill) {
+            if (ctx.selectedCardId == null) {
+              globalIsHoveringFloatingPill = false;
+            } else if (note != null) {
+              final rawPt = (event.localPosition - ctx.panOffset) / ctx.zoomScale;
+              final pt = Offset(math.max(0.0, rawPt.dx), math.max(0.0, rawPt.dy));
+              final card = note.cards.where((c) => c.id == ctx.selectedCardId).firstOrNull;
+              if (card != null) {
+                final cx = card.x + card.width / 2.0;
+                final safeRect = Rect.fromLTRB(
+                  cx - math.max(card.width / 2.0 + 550.0, 650.0),
+                  card.y - 850.0,
+                  cx + math.max(card.width / 2.0 + 550.0, 650.0),
+                  card.y + card.height + 400.0,
+                );
+                if (!safeRect.contains(pt)) {
+                  globalIsHoveringFloatingPill = false;
+                }
+              }
+            }
           }
 
           final rawCanvasPoint = (event.localPosition - ctx.panOffset) / ctx.zoomScale;
@@ -481,6 +511,7 @@ class _CanvasInputRouterState extends State<CanvasInputRouter> {
         },
         onPointerDown: (event) {
           _handleButtonTransitions(event.buttons);
+          _lastPointerLocalPosition = event.localPosition;
 
           // 1. Verificação de Rejeição de Palma
           if (_isPalmContact(event)) {
@@ -696,24 +727,31 @@ class _CanvasInputRouterState extends State<CanvasInputRouter> {
             // Desmarca cards caso o clique seja no vazio (deferir para pós-frame para não quebrar propagação)
             // Antes, verifica se o ponto está na zona da pílula flutuante (popover) do card selecionado,
             // que fica acima do corpo do card e não é detectada por cardUnderPointer.
-            bool isInFloatingPillZone = false;
-            if (ctx.selectedCardId != null && note != null) {
+            bool isInFloatingPillZone = globalIsHoveringFloatingPill;
+            if (!isInFloatingPillZone && ctx.selectedCardId != null && note != null) {
               for (final card in note.cards) {
                 if (card.id == ctx.selectedCardId) {
                   // A pílula flutuante e seus popovers superiores (LaTeX, Mermaid, Callouts, Paletas)
-                  // ficam posicionados acima do card numa faixa de até ~480px
-                  final pillRect = Rect.fromLTWH(
-                    card.x - 200.0,
-                    card.y - 480.0,
-                    math.max(card.width, 600.0) + 400.0,
-                    500.0,
+                  // ficam posicionados acima do card numa faixa ampla para cobrir rotações e popovers
+                  final cx = card.x + card.width / 2.0;
+                  final pillRect = Rect.fromLTRB(
+                    cx - math.max(card.width / 2.0 + 550.0, 650.0),
+                    card.y - 850.0,
+                    cx + math.max(card.width / 2.0 + 550.0, 650.0),
+                    card.y + 60.0,
                   );
-                  if (pillRect.contains(canvasPoint)) {
+                  if (pillRect.contains(canvasPoint) || pillRect.contains(rawCanvasPoint)) {
                     isInFloatingPillZone = true;
                   }
                   break;
                 }
               }
+            }
+
+            // Se houver popover aberto na pílula flutuante (ex: STEM Hub, Cores, Tipografia), o 1º clique no canvas fecha o popover mantendo o card selecionado
+            if (CardFormatFloatingPill.hasActivePopover && !isInFloatingPillZone && cardUnderPointer == null) {
+              CardFormatFloatingPill.closeActivePopover?.call();
+              return;
             }
 
             if (!isInFloatingPillZone && !isDrawOverMediaCard && cardUnderPointer == null && ctx.selectedCardId != null && ctx.selectionState.selectedCardIds.isEmpty) {
@@ -732,6 +770,7 @@ class _CanvasInputRouterState extends State<CanvasInputRouter> {
             // Se o clique está na zona da pílula flutuante ou menus expansíveis, deixar o Flutter processar
             // os InkWell/GestureDetectors do popover sem iniciar traços ou outras ações do canvas.
             if (isInFloatingPillZone) {
+              _isInteractingWithCard = true;
               return;
             }
 
@@ -822,6 +861,7 @@ class _CanvasInputRouterState extends State<CanvasInputRouter> {
             _lastStylusTimestampMs = DateTime.now().millisecondsSinceEpoch;
           }
 
+          _lastPointerLocalPosition = event.localPosition;
           ctx.updateMousePos(event.localPosition);
 
           if (_lastMediaClickPos != null && (event.localPosition - _lastMediaClickPos!).distance > 6.0) {
@@ -1023,6 +1063,7 @@ class _CanvasInputRouterState extends State<CanvasInputRouter> {
           }
         },
         onPointerUp: (event) {
+          _lastPointerLocalPosition = null;
           _handleButtonTransitions(event.buttons);
           if (_activePalmPointerIds.remove(event.pointer)) {
             return;
@@ -1154,6 +1195,7 @@ class _CanvasInputRouterState extends State<CanvasInputRouter> {
           _activeDrawOverCardId = null;
         },
         onPointerCancel: (event) {
+          _lastPointerLocalPosition = null;
           _handleButtonTransitions(0);
           _activeDrawOverCardId = null;
           _activePalmPointerIds.remove(event.pointer);

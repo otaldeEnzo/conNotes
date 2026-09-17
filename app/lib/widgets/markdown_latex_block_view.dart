@@ -9,6 +9,7 @@ import 'mermaid_diagram_painter_view.dart';
 import 'moscaro_rich_text_controller.dart';
 import 'card_slash_command_popover.dart';
 import 'card_format_floating_pill.dart';
+import 'card_latex_editor_popover.dart';
 import 'stem_callout_box_view.dart';
 import 'svg_icon.dart';
 
@@ -44,6 +45,8 @@ class MarkdownLatexBlockView extends StatefulWidget {
   final ValueChanged<CardActiveTextStyles>? onActiveStylesChanged;
   final ValueChanged<bool>? onEditingModeChanged;
   final bool isInteractive;
+  final VoidCallback? onSelectCard;
+  final bool isSelected;
 
   const MarkdownLatexBlockView({
     super.key,
@@ -52,6 +55,8 @@ class MarkdownLatexBlockView extends StatefulWidget {
     this.onActiveStylesChanged,
     this.onEditingModeChanged,
     this.isInteractive = true,
+    this.onSelectCard,
+    this.isSelected = false,
   });
 
   @override
@@ -61,6 +66,7 @@ class MarkdownLatexBlockView extends StatefulWidget {
 class MarkdownLatexBlockViewState extends State<MarkdownLatexBlockView> {
   int? _editingBlockIndex;
   int? _hoveredBlockIndex;
+  Offset? _lastEmptyAreaDoubleTapPos;
   late MoscaroRichTextController _blockController;
   late FocusNode _blockFocusNode;
   TextSelection _lastSelection = const TextSelection.collapsed(offset: -1);
@@ -68,6 +74,7 @@ class MarkdownLatexBlockViewState extends State<MarkdownLatexBlockView> {
   // Estados de Popovers Dinâmicos
   bool _showSlashMenu = false;
   String _slashQuery = '';
+  DateTime? _timeBecameEmpty;
 
   // Cache para Performance O(1) de Build & Layout (Evita recriar Math.tex a cada frame)
   String? _lastParsedContent;
@@ -130,6 +137,13 @@ class MarkdownLatexBlockViewState extends State<MarkdownLatexBlockView> {
       }
     }
 
+    // Rastreia quando o bloco fica vazio para impedir exclusão acidental via Backspace
+    if (text.isEmpty) {
+      _timeBecameEmpty ??= DateTime.now();
+    } else {
+      _timeBecameEmpty = null;
+    }
+
     // Notifica estilos ativos para iluminar botões na barra flutuante
     widget.onActiveStylesChanged?.call(getActiveStyles());
 
@@ -168,6 +182,11 @@ class MarkdownLatexBlockViewState extends State<MarkdownLatexBlockView> {
   CardActiveTextStyles getActiveStyles() {
     if (_editingBlockIndex == null) return const CardActiveTextStyles();
     final style = _blockController.getActiveStyleAtCurrentSelection();
+    final sel = _blockController.selection;
+    String? selectedText;
+    if (sel.isValid && !sel.isCollapsed && sel.start >= 0 && sel.end <= _blockController.text.length) {
+      selectedText = _blockController.text.substring(sel.start, sel.end);
+    }
     return CardActiveTextStyles(
       isBold: style.isBold,
       isItalic: style.isItalic,
@@ -177,9 +196,11 @@ class MarkdownLatexBlockViewState extends State<MarkdownLatexBlockView> {
       isSuperscript: style.isSuperscript,
       isCode: style.isCode,
       isLatex: style.isLatex,
+      selectedText: selectedText,
       textColor: style.textColor,
       highlightColor: style.highlightColor,
       fontSize: style.fontSize,
+      fontFamily: style.fontFamily,
     );
   }
 
@@ -194,7 +215,7 @@ class MarkdownLatexBlockViewState extends State<MarkdownLatexBlockView> {
   }
 
   List<ParsedContentBlock> _parseContentIntoBlocks(String content) {
-    if (content.trim().isEmpty) {
+    if (content.isEmpty || (!content.contains('\n---\n') && content.trim().isEmpty)) {
       return [
         const ParsedContentBlock(
           index: 0,
@@ -213,8 +234,7 @@ class MarkdownLatexBlockViewState extends State<MarkdownLatexBlockView> {
       final chunk = rawChunks[i];
       final trimmed = chunk.trim();
 
-      if (trimmed.isEmpty && rawChunks.length > 1) continue;
-
+      // Blocos vazios são preservados para suportar linhas e blocos em branco!
       if (trimmed.startsWith('```mermaid')) {
         resultBlocks.add(ParsedContentBlock(index: resultBlocks.length, type: BlockType.mermaidBlock, rawText: trimmed, language: 'mermaid'));
       } else if (trimmed.startsWith('```')) {
@@ -227,7 +247,7 @@ class MarkdownLatexBlockViewState extends State<MarkdownLatexBlockView> {
       } else if (trimmed.startsWith('# ') || trimmed.startsWith('## ') || trimmed.startsWith('### ')) {
         resultBlocks.add(ParsedContentBlock(index: resultBlocks.length, type: BlockType.heading, rawText: trimmed));
       } else {
-        // Se dentro de um texto simples houver um callout isolado, mantemos como markdownText
+        // Se dentro de um texto simples houver um callout isolado ou texto vazio, mantemos como markdownText
         resultBlocks.add(ParsedContentBlock(index: resultBlocks.length, type: BlockType.markdownText, rawText: chunk));
       }
     }
@@ -275,17 +295,57 @@ class MarkdownLatexBlockViewState extends State<MarkdownLatexBlockView> {
     }
   }
 
+  /// Trata o duplo clique em area vazia do card criando um novo bloco focado para digitacao
+  void _handleDoubleTapOnEmptyArea(Offset localPosition) {
+    if (!widget.isInteractive) return;
+    if (_editingBlockIndex != null) {
+      commitBlockEdit();
+    }
+    final currentBlocks = _parseContentIntoBlocks(widget.card.content);
+    if (currentBlocks.isEmpty || (currentBlocks.length == 1 && currentBlocks.first.rawText.trim().isEmpty)) {
+      _startEditingBlock(const ParsedContentBlock(
+        index: 0,
+        type: BlockType.markdownText,
+        rawText: '',
+      ));
+      return;
+    }
+
+    if (currentBlocks.isNotEmpty && currentBlocks.last.rawText.trim().isEmpty) {
+      _startEditingBlock(currentBlocks.last);
+      return;
+    }
+
+    final newIndex = currentBlocks.length;
+    final updatedContent = widget.card.content.isEmpty
+        ? ''
+        : '${widget.card.content}\n---\n';
+    widget.onContentChanged(updatedContent);
+    setState(() {
+      _lastParsedContent = null;
+      _cachedBlockWidgets.clear();
+    });
+    _startEditingBlock(ParsedContentBlock(
+      index: newIndex,
+      type: BlockType.markdownText,
+      rawText: '',
+    ));
+  }
+
   /// Salva as alterações do bloco ativo sem fechar o modo de edição
   void _syncBlockContent() {
     if (_editingBlockIndex == null) return;
     final currentBlocks = _parseContentIntoBlocks(widget.card.content);
     final updatedBlocks = <String>[];
+    final maxLen = math.max(currentBlocks.length, _editingBlockIndex! + 1);
 
-    for (int i = 0; i < currentBlocks.length; i++) {
+    for (int i = 0; i < maxLen; i++) {
       if (i == _editingBlockIndex) {
         updatedBlocks.add(_blockController.toFormattedText());
-      } else {
+      } else if (i < currentBlocks.length) {
         updatedBlocks.add(currentBlocks[i].rawText);
+      } else {
+        updatedBlocks.add('');
       }
     }
     widget.onContentChanged(updatedBlocks.join('\n---\n'));
@@ -298,6 +358,8 @@ class MarkdownLatexBlockViewState extends State<MarkdownLatexBlockView> {
     setState(() {
       _editingBlockIndex = null;
       _showSlashMenu = false;
+      _lastParsedContent = null;
+      _cachedBlockWidgets.clear();
     });
     widget.onEditingModeChanged?.call(false);
     globalIsEditingText = false;
@@ -324,12 +386,15 @@ class MarkdownLatexBlockViewState extends State<MarkdownLatexBlockView> {
     widget.onContentChanged(finalStr);
 
     final targetIndex = index + 1;
+    globalIsEditingText = true;
     setState(() {
       _editingBlockIndex = targetIndex;
       _blockController.loadFromFormattedText('Novo Bloco');
       _blockController.selection = const TextSelection(baseOffset: 0, extentOffset: 10);
       _showSlashMenu = false;
     });
+    widget.onEditingModeChanged?.call(true);
+    widget.onActiveStylesChanged?.call(getActiveStyles());
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) {
         _blockFocusNode.requestFocus();
@@ -374,7 +439,98 @@ class MarkdownLatexBlockViewState extends State<MarkdownLatexBlockView> {
     });
   }
 
-  /// Insere um snippet no bloco ativo ou no final do card sem fechar o bloco
+  /// Divide o bloco no cursor atual e cria novo bloco abaixo (Notion Dynamic Enter)
+  void _handleEnterSplitBlock(int blockIndex) {
+    final currentBlocks = _parseContentIntoBlocks(widget.card.content);
+    final text = _blockController.text;
+    final selection = _blockController.selection;
+    final offset = (selection.isValid && selection.baseOffset >= 0)
+        ? selection.baseOffset
+        : text.length;
+
+    final textBefore = text.substring(0, offset);
+    final textAfter = text.substring(offset);
+
+    final updatedBlocks = <String>[];
+    for (int i = 0; i < currentBlocks.length; i++) {
+      if (i == blockIndex) {
+        updatedBlocks.add(textBefore);
+        updatedBlocks.add(textAfter);
+      } else {
+        updatedBlocks.add(currentBlocks[i].rawText);
+      }
+    }
+
+    if (blockIndex >= currentBlocks.length) {
+      updatedBlocks.add('');
+    }
+
+    final finalStr = updatedBlocks.join('\n---\n');
+    widget.onContentChanged(finalStr);
+
+    final nextIndex = blockIndex + 1;
+    globalIsEditingText = true;
+    setState(() {
+      _editingBlockIndex = nextIndex;
+      _showSlashMenu = false;
+      _lastParsedContent = null;
+    });
+    widget.onEditingModeChanged?.call(true);
+    widget.onActiveStylesChanged?.call(getActiveStyles());
+
+    _blockController.loadFromFormattedText(textAfter);
+    _blockController.selection = const TextSelection.collapsed(offset: 0);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        _blockFocusNode.requestFocus();
+      }
+    });
+  }
+
+  /// Mescla o bloco atual com o bloco anterior ao pressionar Backspace no início (Notion Dynamic Backspace)
+  void _handleBackspaceMergeBlock(int blockIndex) {
+    if (blockIndex <= 0) return;
+    final currentBlocks = _parseContentIntoBlocks(widget.card.content);
+    if (blockIndex >= currentBlocks.length) return;
+
+    final currentText = _blockController.text;
+    final prevBlock = currentBlocks[blockIndex - 1];
+    final prevText = prevBlock.rawText;
+    final mergedText = '$prevText$currentText';
+    final newCursorOffset = prevText.length;
+
+    final updatedBlocks = <String>[];
+    for (int i = 0; i < currentBlocks.length; i++) {
+      if (i == blockIndex - 1) {
+        updatedBlocks.add(mergedText);
+      } else if (i == blockIndex) {
+        // Bloco incorporado ao anterior
+        continue;
+      } else {
+        updatedBlocks.add(currentBlocks[i].rawText);
+      }
+    }
+
+    final finalStr = updatedBlocks.join('\n---\n');
+    widget.onContentChanged(finalStr);
+
+    final targetIndex = blockIndex - 1;
+    setState(() {
+      _editingBlockIndex = targetIndex;
+      _showSlashMenu = false;
+      _lastParsedContent = null;
+    });
+
+    _blockController.loadFromFormattedText(mergedText);
+    _blockController.selection = TextSelection.collapsed(offset: newCursorOffset);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        _blockFocusNode.requestFocus();
+      }
+    });
+  }
+
+  /// Insere um snippet no bloco ativo ou no final do card
   void insertSnippetAtActive(String snippet) {
     if (_editingBlockIndex != null) {
       if (_lastSelection.isValid && _lastSelection.start >= 0) {
@@ -382,24 +538,122 @@ class MarkdownLatexBlockViewState extends State<MarkdownLatexBlockView> {
       }
       final text = _blockController.text;
       final sel = _blockController.selection;
-      if (sel.isValid && sel.start >= 0 && sel.end >= 0) {
-        final newText = text.replaceRange(sel.start, sel.end, snippet);
+      
+      // Se o snippet for um bloco estrutural (Mermaid, Callout, Bloco LaTeX), criamos blocos separados
+      if (snippet.trim().startsWith('```') || snippet.trim().startsWith('> [!') || snippet.trim().startsWith(r'$$') && snippet.trim().contains('\n')) {
+        final currentBlocks = _parseContentIntoBlocks(widget.card.content);
+        final offset = (sel.isValid && sel.start >= 0) ? sel.start : text.length;
+        
+        // Pega o texto formatado antes e depois do cursor
+        // Como é difícil mapear, vamos exportar tudo, e dividir no cursor?
+        // Na verdade, toFormattedText exporta tudo. Precisamos cortar.
+        // Uma forma melhor é aplicar uma marca temporária, exportar, e dividir.
+        const mark = '\u200B_SPLIT_\u200B';
+        final newText = text.replaceRange(offset, (sel.isValid && sel.end >= 0) ? sel.end : offset, mark);
         _blockController.text = newText;
-        _blockController.selection = TextSelection.collapsed(offset: sel.start + snippet.length);
-        _syncBlockContent();
-      } else {
-        final newText = '$text$snippet';
-        _blockController.text = newText;
-        _blockController.selection = TextSelection.collapsed(offset: newText.length);
-        _syncBlockContent();
+        final formattedWithMark = _blockController.toFormattedText();
+        
+        final parts = formattedWithMark.split(mark);
+        final beforeStr = parts[0].trim();
+        final afterStr = parts.length > 1 ? parts[1].trim() : '';
+        
+        final updatedBlocks = <String>[];
+        for (int i = 0; i < currentBlocks.length; i++) {
+          if (i == _editingBlockIndex) {
+            if (beforeStr.isNotEmpty) updatedBlocks.add(beforeStr);
+            updatedBlocks.add(snippet.trim());
+            if (afterStr.isNotEmpty) updatedBlocks.add(afterStr);
+          } else {
+            updatedBlocks.add(currentBlocks[i].rawText);
+          }
+        }
+        
+        final finalStr = updatedBlocks.join('\n---\n');
+        widget.onContentChanged(finalStr);
+        
+        final nextIndex = _editingBlockIndex! + (beforeStr.isNotEmpty ? 1 : 0);
+        setState(() {
+          _editingBlockIndex = nextIndex;
+          _showSlashMenu = false;
+        });
+        _blockController.loadFromFormattedText(snippet.trim());
+        _blockController.selection = TextSelection.collapsed(offset: _blockController.text.length);
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) _blockFocusNode.requestFocus();
+        });
+        return;
       }
+
+      // Caso contrário, é um snippet inline normal
+      String textToInsert = snippet;
+      bool isInlineMath = false;
+      if (snippet.startsWith(r'$') && snippet.endsWith(r'$') && snippet.length >= 2) {
+        textToInsert = snippet.substring(1, snippet.length - 1).trim();
+        isInlineMath = true;
+      }
+
+      final insertStart = (sel.isValid && sel.start >= 0) ? sel.start : text.length;
+      final insertEnd = (sel.isValid && sel.end >= 0) ? sel.end : text.length;
+      final newText = text.replaceRange(insertStart, insertEnd, textToInsert);
+
+      _blockController.text = newText;
+      _blockController.selection = TextSelection.collapsed(offset: insertStart + textToInsert.length);
+
+      if (isInlineMath) {
+        _blockController.styleSpans.add(RichStyleSpan(
+          start: insertStart,
+          end: insertStart + textToInsert.length,
+          isLatex: true,
+        ));
+      }
+
+      _lastParsedContent = null;
+      _cachedBlockWidgets.clear();
+      _syncBlockContent();
       _lastSelection = _blockController.selection;
       _blockFocusNode.requestFocus();
     } else {
       final current = widget.card.content;
-      final updated = current.isEmpty ? snippet : '$current\n\n$snippet';
+      final updated = current.isEmpty ? snippet.trim() : '$current\n---\n${snippet.trim()}';
       widget.onContentChanged(updated);
     }
+  }
+
+  /// Abre o popover/modal de edição interativa de fórmulas LaTeX com preview KaTeX em tempo real
+  void openLatexEditor({
+    String? initialFormula,
+    bool isBlock = false,
+    ValueChanged<String>? onCustomApply,
+  }) {
+    final effectiveInitial = initialFormula ?? (
+      _lastSelection.isValid && !_lastSelection.isCollapsed && _lastSelection.start >= 0 && _lastSelection.end <= _blockController.text.length
+        ? _blockController.text.substring(_lastSelection.start, _lastSelection.end)
+        : ''
+    );
+
+    showDialog(
+      context: context,
+      barrierColor: Colors.black.withValues(alpha: 0.4),
+      builder: (dialogCtx) => Center(
+        child: Material(
+          type: MaterialType.transparency,
+          child: CardLatexEditorPopover(
+            initialLatex: effectiveInitial,
+            defaultBlockMode: isBlock,
+            onApply: (formattedMath) {
+              if (onCustomApply != null) {
+                onCustomApply(formattedMath);
+              } else {
+                insertSnippetAtActive(formattedMath);
+              }
+            },
+            onClose: () {
+              Navigator.of(dialogCtx, rootNavigator: true).pop();
+            },
+          ),
+        ),
+      ),
+    );
   }
 
   /// Aplica ou remove (toggle) formatação no texto selecionado ou ativa typingStyle para os próximos caracteres (100% WYSIWYG)
@@ -490,6 +744,36 @@ class MarkdownLatexBlockViewState extends State<MarkdownLatexBlockView> {
     }
   }
 
+  /// Aplica família de fonte via WYSIWYG Spans
+  void applyFontFamily(String family) {
+    if (_editingBlockIndex == null) editLastBlock();
+    if (_editingBlockIndex != null) {
+      if (_lastSelection.isValid && _lastSelection.start >= 0) {
+        _blockController.selection = _lastSelection;
+      }
+      _blockController.toggleFormatting(setFontFamily: family);
+      _lastSelection = _blockController.selection;
+      _syncBlockContent();
+      widget.onActiveStylesChanged?.call(getActiveStyles());
+      _blockFocusNode.requestFocus();
+    }
+  }
+
+  /// Aplica cor de destaque / marca-texto via WYSIWYG Spans
+  void applyHighlightColor(Color? color) {
+    if (_editingBlockIndex == null) editLastBlock();
+    if (_editingBlockIndex != null) {
+      if (_lastSelection.isValid && _lastSelection.start >= 0) {
+        _blockController.selection = _lastSelection;
+      }
+      _blockController.toggleFormatting(setHighlightColor: color);
+      _lastSelection = _blockController.selection;
+      _syncBlockContent();
+      widget.onActiveStylesChanged?.call(getActiveStyles());
+      _blockFocusNode.requestFocus();
+    }
+  }
+
   Color _parseHex(String hex) {
     try {
       String clean = hex.replaceAll('#', '').replaceAll('0x', '').trim();
@@ -514,7 +798,7 @@ class MarkdownLatexBlockViewState extends State<MarkdownLatexBlockView> {
     final blocks = _cachedParsedBlocks!;
     final availableBodyHeight = math.max(60.0, widget.card.height - 46.0);
 
-    if (widget.card.content.trim().isEmpty && _editingBlockIndex == null) {
+    if (widget.card.content.trim().isEmpty && !widget.card.content.contains('\n---\n') && _editingBlockIndex == null) {
       return _buildPlaceholderSuggestionView(
         availableBodyHeight: availableBodyHeight,
         isLight: isLight,
@@ -525,37 +809,65 @@ class MarkdownLatexBlockViewState extends State<MarkdownLatexBlockView> {
       );
     }
 
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-      child: ClipRect(
-        child: SingleChildScrollView(
-          physics: const ClampingScrollPhysics(),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              ...blocks.map((block) {
-                final isEditing = _editingBlockIndex == block.index;
-                if (isEditing) {
-                  return _buildEditingField(
-                    block,
-                    isLight,
-                    themeAccent,
-                    textPrimary,
-                    fontFamily,
-                    fontSize,
-                  );
-                }
-                return _buildRenderedBlock(
-                  block,
-                  isLight,
-                  themeAccent,
-                  textPrimary,
-                  fontFamily,
-                  fontSize,
-                );
-              }),
-            ],
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: () => widget.onSelectCard?.call(),
+      onDoubleTapDown: (details) {
+        _lastEmptyAreaDoubleTapPos = details.localPosition;
+      },
+      onDoubleTap: () {
+        widget.onSelectCard?.call();
+        _handleDoubleTapOnEmptyArea(_lastEmptyAreaDoubleTapPos ?? Offset.zero);
+      },
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+        child: ClipRect(
+          child: SingleChildScrollView(
+            physics: const ClampingScrollPhysics(),
+            child: Container(
+              constraints: BoxConstraints(minHeight: availableBodyHeight),
+              alignment: Alignment.topLeft,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  ...blocks.map((block) {
+                    final isEditing = _editingBlockIndex == block.index;
+                    if (isEditing) {
+                      return _buildEditingField(
+                        block,
+                        isLight,
+                        themeAccent,
+                        textPrimary,
+                        fontFamily,
+                        fontSize,
+                      );
+                    }
+                    return _buildRenderedBlock(
+                      block,
+                      isLight,
+                      themeAccent,
+                      textPrimary,
+                      fontFamily,
+                      fontSize,
+                    );
+                  }),
+                  if (_editingBlockIndex != null && _editingBlockIndex! >= blocks.length)
+                    _buildEditingField(
+                      ParsedContentBlock(
+                        index: _editingBlockIndex!,
+                        type: BlockType.markdownText,
+                        rawText: _blockController.text,
+                      ),
+                      isLight,
+                      themeAccent,
+                      textPrimary,
+                      fontFamily,
+                      fontSize,
+                    ),
+                ],
+              ),
+            ),
           ),
         ),
       ),
@@ -572,7 +884,9 @@ class MarkdownLatexBlockViewState extends State<MarkdownLatexBlockView> {
   }) {
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
-      onTap: () {
+      onTap: () => widget.onSelectCard?.call(),
+      onDoubleTap: () {
+        widget.onSelectCard?.call();
         _startEditingBlock(const ParsedContentBlock(
           index: 0,
           type: BlockType.markdownText,
@@ -581,6 +895,7 @@ class MarkdownLatexBlockViewState extends State<MarkdownLatexBlockView> {
       },
       child: Container(
         width: double.infinity,
+        constraints: BoxConstraints(minHeight: availableBodyHeight),
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -621,57 +936,120 @@ class MarkdownLatexBlockViewState extends State<MarkdownLatexBlockView> {
     String fontFamily,
     double fontSize,
   ) {
-    return CallbackShortcuts(
-      bindings: {
-        const SingleActivator(LogicalKeyboardKey.keyZ, control: true): () {
-          _blockController.undo();
-          _syncBlockContent();
-        },
-        const SingleActivator(LogicalKeyboardKey.keyZ, meta: true): () {
-          _blockController.undo();
-          _syncBlockContent();
-        },
-        const SingleActivator(LogicalKeyboardKey.keyY, control: true): () {
-          _blockController.redo();
-          _syncBlockContent();
-        },
-        const SingleActivator(LogicalKeyboardKey.keyZ, control: true, shift: true): () {
-          _blockController.redo();
-          _syncBlockContent();
-        },
-        const SingleActivator(LogicalKeyboardKey.keyZ, meta: true, shift: true): () {
-          _blockController.redo();
-          _syncBlockContent();
-        },
-        const SingleActivator(LogicalKeyboardKey.keyA, control: true): () {
-          _blockController.selection = TextSelection(
-            baseOffset: 0,
-            extentOffset: _blockController.text.length,
-          );
-        },
-        const SingleActivator(LogicalKeyboardKey.keyA, meta: true): () {
-          _blockController.selection = TextSelection(
-            baseOffset: 0,
-            extentOffset: _blockController.text.length,
-          );
-        },
-        const SingleActivator(LogicalKeyboardKey.enter, control: true): () {
-          createNewBlockBelow(block.index);
-        },
-        const SingleActivator(LogicalKeyboardKey.keyB, control: true): () {
-          _blockController.toggleFormatting(toggleBold: true);
-          _syncBlockContent();
-        },
-        const SingleActivator(LogicalKeyboardKey.keyI, control: true): () {
-          _blockController.toggleFormatting(toggleItalic: true);
-          _syncBlockContent();
-        },
-        const SingleActivator(LogicalKeyboardKey.keyU, control: true): () {
-          _blockController.toggleFormatting(toggleUnderline: true);
-          _syncBlockContent();
-        },
+    double effectiveFontSize = fontSize;
+    for (final s in _blockController.styleSpans) {
+      if (s.fontSize != null && s.fontSize! > effectiveFontSize) {
+        effectiveFontSize = s.fontSize!;
+      }
+    }
+    if (_blockController.hasActiveTypingStyle && _blockController.typingStyle.fontSize != null) {
+      if (_blockController.typingStyle.fontSize! > effectiveFontSize) {
+        effectiveFontSize = _blockController.typingStyle.fontSize!;
+      }
+    }
+
+    return Focus(
+      onKeyEvent: (node, event) {
+        if (event is KeyDownEvent || event is KeyRepeatEvent) {
+          // 1. Enter: divide bloco ou cria novo bloco abaixo (Notion style)
+          if (event is KeyDownEvent && event.logicalKey == LogicalKeyboardKey.enter) {
+            final isShift = HardwareKeyboard.instance.isShiftPressed;
+            final isCtrl = HardwareKeyboard.instance.isControlPressed || HardwareKeyboard.instance.isMetaPressed;
+            if (isShift) {
+              // Shift+Enter: quebra de linha suave dentro do mesmo bloco
+              return KeyEventResult.ignored;
+            } else if (!isCtrl) {
+              _handleEnterSplitBlock(block.index);
+              return KeyEventResult.handled;
+            }
+          }
+
+          // 2. Backspace suave estilo Notion:
+          // Se o bloco tiver conteúdo, o backspace apaga caracteres e termos normalmente,
+          // permitindo editar parâmetros e fórmulas sem apagar a equação inteira acidentalmente.
+          // Se o usuário apagar todo o conteúdo, o bloco fica em branco.
+          // O bloco só é excluído e mesclado se o usuário pressionar Backspace mais uma vez enquanto o bloco já estiver vazio!
+          if (event.logicalKey == LogicalKeyboardKey.backspace) {
+            if (_blockController.text.isNotEmpty) {
+              return KeyEventResult.ignored;
+            } else {
+              // Bloco está completamente vazio
+              if (block.index > 0) {
+                // KeyRepeatEvent (segurar Backspace continuamente) NUNCA deve mesclar ou excluir blocos
+                if (event is KeyRepeatEvent) {
+                  return KeyEventResult.handled;
+                }
+
+                // Se o bloco acabou de ficar vazio (ex: usuário estava apagando caracteres),
+                // exigimos uma pausa mínima para que a tecla seja solta e pressionada novamente com intenção consciente.
+                final becameEmptyRecently = _timeBecameEmpty != null &&
+                    DateTime.now().difference(_timeBecameEmpty!).inMilliseconds < 350;
+
+                if (becameEmptyRecently) {
+                  // Primeiro instante em que o bloco esvaziou: consome o evento e deixa o bloco em branco!
+                  return KeyEventResult.handled;
+                }
+
+                // O bloco já estava vazio e o usuário pressionou Backspace mais uma vez de forma intencional:
+                _handleBackspaceMergeBlock(block.index);
+                return KeyEventResult.handled;
+              }
+            }
+          }
+        }
+        return KeyEventResult.ignored;
       },
-      child: Stack(
+      child: CallbackShortcuts(
+        bindings: {
+          const SingleActivator(LogicalKeyboardKey.keyZ, control: true): () {
+            _blockController.undo();
+            _syncBlockContent();
+          },
+          const SingleActivator(LogicalKeyboardKey.keyZ, meta: true): () {
+            _blockController.undo();
+            _syncBlockContent();
+          },
+          const SingleActivator(LogicalKeyboardKey.keyY, control: true): () {
+            _blockController.redo();
+            _syncBlockContent();
+          },
+          const SingleActivator(LogicalKeyboardKey.keyZ, control: true, shift: true): () {
+            _blockController.redo();
+            _syncBlockContent();
+          },
+          const SingleActivator(LogicalKeyboardKey.keyZ, meta: true, shift: true): () {
+            _blockController.redo();
+            _syncBlockContent();
+          },
+          const SingleActivator(LogicalKeyboardKey.keyA, control: true): () {
+            _blockController.selection = TextSelection(
+              baseOffset: 0,
+              extentOffset: _blockController.text.length,
+            );
+          },
+          const SingleActivator(LogicalKeyboardKey.keyA, meta: true): () {
+            _blockController.selection = TextSelection(
+              baseOffset: 0,
+              extentOffset: _blockController.text.length,
+            );
+          },
+          const SingleActivator(LogicalKeyboardKey.enter, control: true): () {
+            createNewBlockBelow(block.index);
+          },
+          const SingleActivator(LogicalKeyboardKey.keyB, control: true): () {
+            _blockController.toggleFormatting(toggleBold: true);
+            _syncBlockContent();
+          },
+          const SingleActivator(LogicalKeyboardKey.keyI, control: true): () {
+            _blockController.toggleFormatting(toggleItalic: true);
+            _syncBlockContent();
+          },
+          const SingleActivator(LogicalKeyboardKey.keyU, control: true): () {
+            _blockController.toggleFormatting(toggleUnderline: true);
+            _syncBlockContent();
+          },
+        },
+        child: Stack(
         clipBehavior: Clip.none,
         children: [
           GestureDetector(
@@ -684,7 +1062,10 @@ class MarkdownLatexBlockViewState extends State<MarkdownLatexBlockView> {
             child: Container(
               width: double.infinity,
               margin: const EdgeInsets.only(bottom: 4),
-              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+              padding: EdgeInsets.symmetric(
+                horizontal: 6,
+                vertical: math.max(6.0, effectiveFontSize * 0.22),
+              ),
               decoration: BoxDecoration(
                 color: themeAccent.withValues(alpha: isLight ? 0.06 : 0.10),
                 borderRadius: BorderRadius.circular(8),
@@ -698,13 +1079,13 @@ class MarkdownLatexBlockViewState extends State<MarkdownLatexBlockView> {
                 style: TextStyle(
                   color: textPrimary,
                   fontFamily: fontFamily,
-                  fontSize: fontSize,
-                  height: 1.45,
+                  fontSize: effectiveFontSize,
+                  height: 1.35,
                 ),
                 decoration: const InputDecoration(
                   isDense: true,
                   border: InputBorder.none,
-                  contentPadding: EdgeInsets.only(left: 6, top: 4, bottom: 4, right: 84),
+                  contentPadding: EdgeInsets.only(left: 6, top: 2, bottom: 2, right: 88),
                 ),
                 onChanged: (val) => _syncBlockContent(),
               ),
@@ -788,6 +1169,22 @@ class MarkdownLatexBlockViewState extends State<MarkdownLatexBlockView> {
                 blur: MoscaroTokens.blurSigma,
                 onClose: () => setState(() => _showSlashMenu = false),
                 onSelectCommand: (cmd) {
+                  if (cmd.key.contains('latex')) {
+                    final text = _blockController.text;
+                    final lastSlash = text.lastIndexOf('/');
+                    if (lastSlash >= 0) {
+                      _blockController.text = text.substring(0, lastSlash).trimRight();
+                    }
+                    setState(() => _showSlashMenu = false);
+                    openLatexEditor(
+                      isBlock: true,
+                      onCustomApply: (mathSnippet) {
+                        insertSnippetAtActive(mathSnippet);
+                      },
+                    );
+                    return;
+                  }
+
                   final text = _blockController.text;
                   final lastSlash = text.lastIndexOf('/');
                   final beforeSlash = lastSlash >= 0 ? text.substring(0, lastSlash).trimRight() : '';
@@ -837,6 +1234,7 @@ class MarkdownLatexBlockViewState extends State<MarkdownLatexBlockView> {
             ),
         ],
       ),
+      ),
     );
   }
 
@@ -855,7 +1253,11 @@ class MarkdownLatexBlockViewState extends State<MarkdownLatexBlockView> {
       onExit: (_) => setState(() => _hoveredBlockIndex = null),
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,
-        onDoubleTap: () => _startEditingBlock(block),
+        onTap: () => widget.onSelectCard?.call(),
+        onDoubleTap: () {
+          widget.onSelectCard?.call();
+          _startEditingBlock(block);
+        },
         child: Stack(
           clipBehavior: Clip.none,
           children: [
@@ -863,6 +1265,7 @@ class MarkdownLatexBlockViewState extends State<MarkdownLatexBlockView> {
               width: double.infinity,
               margin: const EdgeInsets.only(bottom: 4),
               padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+              constraints: const BoxConstraints(minHeight: 26),
               decoration: BoxDecoration(
                 borderRadius: BorderRadius.circular(8),
                 border: Border.all(
@@ -1071,10 +1474,24 @@ class MarkdownLatexBlockViewState extends State<MarkdownLatexBlockView> {
     if (mathStr.endsWith(r'$$')) mathStr = mathStr.substring(0, mathStr.length - 2);
     mathStr = mathStr.trim();
 
-    // Normaliza ambientes como gathered para aligned que é suportado nativamente pelo flutter_math_fork
+    double effectiveFontSize = fontSize * 1.15;
+    Color effectiveTextColor = textPrimary;
+    final sizeMatch = RegExp(r'<span style="font-size:\s*([0-9.]+)px">').firstMatch(mathStr);
+    if (sizeMatch != null) {
+      effectiveFontSize = double.tryParse(sizeMatch.group(1)!) ?? effectiveFontSize;
+    }
+    final colorMatch = RegExp(r'<span style="color:\s*([^"]+)">|<font color="([^"]+)">').firstMatch(mathStr);
+    if (colorMatch != null) {
+      final hex = colorMatch.group(1) ?? colorMatch.group(2) ?? '';
+      effectiveTextColor = _parseHexColor(hex, textPrimary);
+    }
+
+    // Normaliza ambientes como gathered para aligned e remove quaisquer tags HTML acidentais
     final cleanMathStr = mathStr
+        .replaceAll(RegExp(r'</?(span|font|mark|b|i|u|sub|sup)[^>]*>', caseSensitive: false), '')
         .replaceAll(r'\begin{gathered}', r'\begin{aligned}')
-        .replaceAll(r'\end{gathered}', r'\end{aligned}');
+        .replaceAll(r'\end{gathered}', r'\end{aligned}')
+        .trim();
 
     return RepaintBoundary(
       child: Container(
@@ -1087,19 +1504,23 @@ class MarkdownLatexBlockViewState extends State<MarkdownLatexBlockView> {
         ),
         child: GestureDetector(
           behavior: HitTestBehavior.translucent,
-          onDoubleTap: () => _startEditingBlock(block),
+          onTap: () => widget.onSelectCard?.call(),
+          onDoubleTap: () {
+            widget.onSelectCard?.call();
+            _startEditingBlock(block);
+          },
           child: SingleChildScrollView(
             scrollDirection: Axis.horizontal,
             physics: const BouncingScrollPhysics(),
             child: Math.tex(
               cleanMathStr,
               textStyle: TextStyle(
-                color: textPrimary,
-                fontSize: fontSize * 1.15,
+                color: effectiveTextColor,
+                fontSize: effectiveFontSize,
               ),
               onErrorFallback: (err) => Text(
-                block.rawText,
-                style: TextStyle(color: const Color(0xFFFF007A), fontSize: fontSize),
+                cleanMathStr,
+                style: TextStyle(color: const Color(0xFFFF007A), fontSize: effectiveFontSize),
               ),
             ),
           ),
@@ -1225,6 +1646,11 @@ class MarkdownLatexBlockViewState extends State<MarkdownLatexBlockView> {
 
         ...lines.map((line) {
           final trimmed = line.trim();
+
+          // Linhas em branco ocupam altura normal para preservar espaçamento e blocos vazios
+          if (trimmed.isEmpty) {
+            return SizedBox(height: fontSize * 1.3);
+          }
 
           // 1. Checklists (- [ ] / - [x])
           if (trimmed.startsWith('- [ ] ') || trimmed.startsWith('- [x] ') || trimmed.startsWith('- [X] ')) {
@@ -1587,7 +2013,8 @@ class MarkdownLatexBlockViewState extends State<MarkdownLatexBlockView> {
       r'(\*([^\*\n]+)\*)|' // 25,26: *Italic*
       r'(`([^`\n]+)`)|' // 27,28: `Code`
       r'(\$\$[\s\S]*?\$\$)|' // 29: Display Math $$...$$
-      r'(\$[^$\n]+\$)', // 30: Inline Math $...$
+      r'(\$[^$\n]+\$)|' // 30: Inline Math $...$
+      r'(~~([\s\S]*?)~~)', // 31,32: Strikethrough
     );
 
     int lastMatchEnd = 0;
@@ -1830,20 +2257,64 @@ class MarkdownLatexBlockViewState extends State<MarkdownLatexBlockView> {
         } else if (mathSnippet.startsWith(r'$') && mathSnippet.endsWith(r'$') && mathSnippet.length >= 2) {
           mathSnippet = mathSnippet.substring(1, mathSnippet.length - 1).trim();
         }
+
+        double mathFontSize = fontSize * 1.05;
+        Color mathTextColor = textPrimary;
+        final sizeMatch = RegExp(r'<span style="font-size:\s*([0-9.]+)px">').firstMatch(mathSnippet);
+        if (sizeMatch != null) {
+          mathFontSize = double.tryParse(sizeMatch.group(1)!) ?? mathFontSize;
+        }
+        final colorMatch = RegExp(r'<span style="color:\s*([^"]+)">|<font color="([^"]+)">').firstMatch(mathSnippet);
+        if (colorMatch != null) {
+          final hex = colorMatch.group(1) ?? colorMatch.group(2) ?? '';
+          mathTextColor = _parseHexColor(hex, textPrimary);
+        }
+
+        final cleanMath = mathSnippet
+            .replaceAll(RegExp(r'</?(span|font|mark|b|i|u|sub|sup)[^>]*>', caseSensitive: false), '')
+            .replaceAll(r'\begin{gathered}', r'\begin{aligned}')
+            .replaceAll(r'\end{gathered}', r'\end{aligned}')
+            .trim();
+
         spans.add(WidgetSpan(
           alignment: PlaceholderAlignment.middle,
-          child: Math.tex(
-            mathSnippet,
-            textStyle: TextStyle(
-              color: textPrimary,
-              fontSize: fontSize * 1.05,
-              fontWeight: isBold ? FontWeight.bold : FontWeight.normal,
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 1),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(4),
             ),
-            onErrorFallback: (err) => Text(
-              fullMatch,
-              style: TextStyle(color: const Color(0xFFFF007A), fontSize: fontSize),
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              alignment: Alignment.centerLeft,
+              child: Math.tex(
+                cleanMath,
+                textStyle: TextStyle(
+                  color: mathTextColor,
+                  fontSize: mathFontSize,
+                  fontWeight: isBold ? FontWeight.bold : FontWeight.normal,
+                ),
+                onErrorFallback: (err) => Text(
+                  cleanMath,
+                  style: TextStyle(color: const Color(0xFFFF007A), fontSize: mathFontSize),
+                ),
+              ),
             ),
           ),
+        ));
+      }
+      // 14. Strikethrough (~~...~~)
+      else if (match.group(31) != null) {
+        final innerText = match.group(32)!;
+        spans.addAll(_parseRichInlineSpan(
+          innerText,
+          textPrimary: textPrimary,
+          fontFamily: fontFamily,
+          fontSize: fontSize,
+          themeAccent: themeAccent,
+          isLight: isLight,
+          isBold: isBold,
+          isItalic: isItalic,
+          strikethrough: true,
         ));
       }
 

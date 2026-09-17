@@ -43,6 +43,7 @@ import '../services/workspace_storage_service.dart';
 import 'undo_commands.dart';
 import '../dev_hub/dev_hub_server.dart';
 import '../models/canvas_card_model.dart';
+import 'card_format_floating_pill.dart';
 import 'media_lightbox_modal.dart';
 import 'cards_sub_bar.dart';
 import '../models/ai_message_model.dart';
@@ -766,6 +767,13 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
         return false;
       }
 
+      // Se algum popover da barra flutuante estiver aberto, nunca intercepta atalhos de canvas (Backspace, Delete, etc.)
+      if (CardFormatFloatingPill.hasActivePopover) {
+        if (event.logicalKey != LogicalKeyboardKey.escape) {
+          return false;
+        }
+      }
+
       // Se estiver editando texto de bloco ou título de card, não intercepta teclas de edição (Backspace, etc.)
       if (globalIsEditingText) {
         if (event.logicalKey != LogicalKeyboardKey.escape) {
@@ -774,11 +782,15 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
       }
 
       final primaryFocus = FocusManager.instance.primaryFocus;
-      if (primaryFocus != null &&
+      final isEditingField = primaryFocus != null &&
           (primaryFocus.context?.widget is EditableText ||
+              primaryFocus.context?.findAncestorWidgetOfExactType<EditableText>() != null ||
+              primaryFocus.context?.findAncestorWidgetOfExactType<TextField>() != null ||
               (primaryFocus.hasFocus &&
                   (primaryFocus.debugLabel?.contains('EditableText') == true ||
-                      primaryFocus.debugLabel?.contains('TextField') == true)))) {
+                      primaryFocus.debugLabel?.contains('TextField') == true)));
+
+      if (isEditingField) {
         if (event.logicalKey != LogicalKeyboardKey.escape) {
           return false;
         }

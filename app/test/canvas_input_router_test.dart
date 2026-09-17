@@ -122,6 +122,9 @@ class _FakeCanvasInputContext implements CanvasInputContext {
   void insertCardAt(Offset canvasPoint) {}
 
   @override
+  void openMediaLightbox(String cardId) {}
+
+  @override
   void pushCommand(UndoCommand command, {required bool execute, NoteDocument? note}) {}
 
   @override
