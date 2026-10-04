@@ -248,8 +248,11 @@ class WorkspaceStorageService extends ChangeNotifier {
       final docsToSave = List<NoteDocument>.from(_pendingDocs.values);
       _pendingDocs.clear();
       _pendingSaveDocIds.clear();
-      for (final doc in docsToSave) {
-        await saveNoteNow(doc);
+      const chunkSize = 32;
+      for (var i = 0; i < docsToSave.length; i += chunkSize) {
+        final end = (i + chunkSize > docsToSave.length) ? docsToSave.length : i + chunkSize;
+        final chunk = docsToSave.sublist(i, end);
+        await Future.wait(chunk.map((doc) => saveNoteNow(doc)));
       }
     }
   }
