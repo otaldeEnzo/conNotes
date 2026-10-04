@@ -533,12 +533,17 @@ class WorkspaceStorageService extends ChangeNotifier {
     if (trashDir.existsSync()) {
       try {
         final entities = trashDir.listSync();
-        for (final entity in entities) {
-          if (entity is File) {
-            await entity.delete();
-          } else if (entity is Directory) {
-            await entity.delete(recursive: true);
-          }
+        const chunkSize = 32;
+        for (var i = 0; i < entities.length; i += chunkSize) {
+          final chunk = entities.sublist(i, (i + chunkSize > entities.length) ? entities.length : i + chunkSize);
+          await Future.wait(chunk.map((entity) {
+            if (entity is File) {
+              return entity.delete();
+            } else if (entity is Directory) {
+              return entity.delete(recursive: true);
+            }
+            return Future.value();
+          }));
         }
       } catch (e) {
         debugPrint('[WorkspaceStorageService] Error emptying trash: $e');
