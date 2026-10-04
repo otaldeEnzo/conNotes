@@ -7,7 +7,8 @@ import 'cncanvas_file_service.dart';
 
 /// Gerenciador Central de Armazenamento Local-First, Workspace e Autosave do conNotes
 class WorkspaceStorageService extends ChangeNotifier {
-  static final WorkspaceStorageService instance = WorkspaceStorageService._internal();
+  static final WorkspaceStorageService instance =
+      WorkspaceStorageService._internal();
 
   WorkspaceStorageService._internal();
 
@@ -109,7 +110,8 @@ class WorkspaceStorageService extends ChangeNotifier {
             return;
           }
           // Apenas reagir se for arquivo .cncanvas ou alteração de pasta
-          if (!p.endsWith('.cncanvas') && !FileSystemEntity.isDirectorySync(p)) {
+          if (!p.endsWith('.cncanvas') &&
+              !FileSystemEntity.isDirectorySync(p)) {
             return;
           }
 
@@ -140,22 +142,35 @@ class WorkspaceStorageService extends ChangeNotifier {
     // Ler lista de cadernos e notas raiz
     try {
       final entities = cadernosDir.listSync();
-      final rootNoteFutures = <Future<NoteDocument?>>[];
+      final rootNotePaths = <String>[];
 
       for (final entity in entities) {
         if (entity is Directory) {
-          final folderName = entity.uri.pathSegments.where((s) => s.isNotEmpty).last;
+          final folderName = entity.uri.pathSegments
+              .where((s) => s.isNotEmpty)
+              .last;
           final folder = await _scanFolder(entity, folderName);
           scannedNotebooks.add(folder);
         } else if (entity is File && entity.path.endsWith('.cncanvas')) {
-          rootNoteFutures.add(CncanvasFileService.loadFromCnCanvasFile(entity.path));
+          rootNotePaths.add(entity.path);
         }
       }
 
-      final docs = await Future.wait(rootNoteFutures);
-      for (final doc in docs) {
-        if (doc != null) {
-          scannedRootNotes.add(doc);
+      const batchSize = 32;
+      for (var i = 0; i < rootNotePaths.length; i += batchSize) {
+        final end = (i + batchSize < rootNotePaths.length)
+            ? i + batchSize
+            : rootNotePaths.length;
+        final batchPaths = rootNotePaths.sublist(i, end);
+        final docs = await Future.wait(
+          batchPaths.map(
+            (path) => CncanvasFileService.loadFromCnCanvasFile(path),
+          ),
+        );
+        for (final doc in docs) {
+          if (doc != null) {
+            scannedRootNotes.add(doc);
+          }
         }
       }
     } catch (e) {
@@ -168,18 +183,29 @@ class WorkspaceStorageService extends ChangeNotifier {
     if (trashDir.existsSync()) {
       try {
         final trashEntities = trashDir.listSync();
-        final trashNoteFutures = <Future<NoteDocument?>>[];
+        final trashNotePaths = <String>[];
 
         for (final entity in trashEntities) {
           if (entity is File && entity.path.endsWith('.cncanvas')) {
-            trashNoteFutures.add(CncanvasFileService.loadFromCnCanvasFile(entity.path));
+            trashNotePaths.add(entity.path);
           }
         }
 
-        final docs = await Future.wait(trashNoteFutures);
-        for (final doc in docs) {
-          if (doc != null) {
-            scannedTrashNotes.add(doc);
+        const batchSize = 32;
+        for (var i = 0; i < trashNotePaths.length; i += batchSize) {
+          final end = (i + batchSize < trashNotePaths.length)
+              ? i + batchSize
+              : trashNotePaths.length;
+          final batchPaths = trashNotePaths.sublist(i, end);
+          final docs = await Future.wait(
+            batchPaths.map(
+              (path) => CncanvasFileService.loadFromCnCanvasFile(path),
+            ),
+          );
+          for (final doc in docs) {
+            if (doc != null) {
+              scannedTrashNotes.add(doc);
+            }
           }
         }
       } catch (e) {
@@ -204,7 +230,8 @@ class WorkspaceStorageService extends ChangeNotifier {
     final metaFile = File('${dir.path}/.notebook_meta.json');
     if (metaFile.existsSync()) {
       try {
-        final metaJson = jsonDecode(metaFile.readAsStringSync()) as Map<String, dynamic>;
+        final metaJson =
+            jsonDecode(metaFile.readAsStringSync()) as Map<String, dynamic>;
         if (metaJson['color'] != null) {
           folderColor = Color(metaJson['color'] as int);
         }
@@ -216,22 +243,35 @@ class WorkspaceStorageService extends ChangeNotifier {
 
     try {
       final entities = dir.listSync();
-      final noteFutures = <Future<NoteDocument?>>[];
+      final notePaths = <String>[];
 
       for (final entity in entities) {
         if (entity is Directory) {
-          final subName = entity.uri.pathSegments.where((s) => s.isNotEmpty).last;
+          final subName = entity.uri.pathSegments
+              .where((s) => s.isNotEmpty)
+              .last;
           final sub = await _scanFolder(entity, subName);
           subFolders.add(sub);
         } else if (entity is File && entity.path.endsWith('.cncanvas')) {
-          noteFutures.add(CncanvasFileService.loadFromCnCanvasFile(entity.path));
+          notePaths.add(entity.path);
         }
       }
 
-      final docs = await Future.wait(noteFutures);
-      for (final doc in docs) {
-        if (doc != null) {
-          notes.add(doc);
+      const batchSize = 32;
+      for (var i = 0; i < notePaths.length; i += batchSize) {
+        final end = (i + batchSize < notePaths.length)
+            ? i + batchSize
+            : notePaths.length;
+        final batchPaths = notePaths.sublist(i, end);
+        final docs = await Future.wait(
+          batchPaths.map(
+            (path) => CncanvasFileService.loadFromCnCanvasFile(path),
+          ),
+        );
+        for (final doc in docs) {
+          if (doc != null) {
+            notes.add(doc);
+          }
         }
       }
     } catch (_) {}
@@ -286,7 +326,7 @@ class WorkspaceStorageService extends ChangeNotifier {
       final folder = targetFolderName != null && targetFolderName.isNotEmpty
           ? '$_workspacePath/Cadernos/$targetFolderName'
           : '$_workspacePath/Cadernos';
-      
+
       final dir = Directory(folder);
       if (!dir.existsSync()) {
         dir.createSync(recursive: true);
@@ -302,7 +342,11 @@ class WorkspaceStorageService extends ChangeNotifier {
   }
 
   /// Cria um novo caderno físico no disco
-  Future<NotebookFolder> createNotebook(String name, {Color color = const Color(0xFF00E1FF), String iconKey = 'book'}) async {
+  Future<NotebookFolder> createNotebook(
+    String name, {
+    Color color = const Color(0xFF00E1FF),
+    String iconKey = 'book',
+  }) async {
     final safeName = name.replaceAll(RegExp(r'[\\/:*?"<>|]'), '_');
     final folderPath = '$_workspacePath/Cadernos/$safeName';
     final dir = Directory(folderPath);
@@ -313,11 +357,9 @@ class WorkspaceStorageService extends ChangeNotifier {
     // Salvar metadados visuais no disco (.notebook_meta.json)
     final metaFile = File('$folderPath/.notebook_meta.json');
     try {
-      metaFile.writeAsStringSync(jsonEncode({
-        'name': name,
-        'color': color.toARGB32(),
-        'icon': iconKey,
-      }));
+      metaFile.writeAsStringSync(
+        jsonEncode({'name': name, 'color': color.toARGB32(), 'icon': iconKey}),
+      );
     } catch (_) {}
 
     final folder = NotebookFolder(
@@ -335,7 +377,10 @@ class WorkspaceStorageService extends ChangeNotifier {
   }
 
   /// Cria uma nova nota .cncanvas em um caderno específico ou na raiz
-  Future<NoteDocument> createNote({required String title, String? targetFolderName}) async {
+  Future<NoteDocument> createNote({
+    required String title,
+    String? targetFolderName,
+  }) async {
     final safeTitle = title.replaceAll(RegExp(r'[\\/:*?"<>|]'), '_');
     final folderPath = targetFolderName != null && targetFolderName.isNotEmpty
         ? '$_workspacePath/Cadernos/$targetFolderName'
@@ -392,7 +437,10 @@ class WorkspaceStorageService extends ChangeNotifier {
   }
 
   /// Aninha uma nota arrastada como subnota (filha) de outra nota
-  Future<void> nestNoteAsSubnote(NoteDocument childNote, NoteDocument parentNote) async {
+  Future<void> nestNoteAsSubnote(
+    NoteDocument childNote,
+    NoteDocument parentNote,
+  ) async {
     if (childNote.id == parentNote.id) return;
 
     // Remove child de onde ela estiver na árvore
@@ -407,7 +455,10 @@ class WorkspaceStorageService extends ChangeNotifier {
     }
 
     if (parentNote.filePath != null) {
-      await CncanvasFileService.saveToCnCanvasFile(parentNote, parentNote.filePath!);
+      await CncanvasFileService.saveToCnCanvasFile(
+        parentNote,
+        parentNote.filePath!,
+      );
     }
     await scanWorkspace();
     notifyListeners();
@@ -415,7 +466,12 @@ class WorkspaceStorageService extends ChangeNotifier {
   }
 
   /// Reordena uma nota arrastada para antes ou depois de uma nota de destino
-  Future<void> reorderNote(NoteDocument dragged, NoteDocument target, bool before, {String? targetFolderName}) async {
+  Future<void> reorderNote(
+    NoteDocument dragged,
+    NoteDocument target,
+    bool before, {
+    String? targetFolderName,
+  }) async {
     if (dragged.id == target.id) return;
 
     // Primeiro move o arquivo se for para outro caderno
@@ -424,7 +480,10 @@ class WorkspaceStorageService extends ChangeNotifier {
     // Ajusta a ordem na lista apropriada
     List<NoteDocument> list;
     if (targetFolderName != null && targetFolderName.isNotEmpty) {
-      final nb = _notebooks.firstWhere((n) => n.name == targetFolderName, orElse: () => _notebooks.first);
+      final nb = _notebooks.firstWhere(
+        (n) => n.name == targetFolderName,
+        orElse: () => _notebooks.first,
+      );
       list = nb.notes;
     } else {
       list = _rootNotes;
@@ -456,7 +515,10 @@ class WorkspaceStorageService extends ChangeNotifier {
   }
 
   /// Move uma nota entre cadernos (ou para a raiz de Cadernos/ se targetFolderName for null)
-  Future<void> moveNoteToNotebook(NoteDocument note, String? targetFolderName) async {
+  Future<void> moveNoteToNotebook(
+    NoteDocument note,
+    String? targetFolderName,
+  ) async {
     final currentPath = note.filePath;
     if (currentPath == null || !File(currentPath).existsSync()) return;
 
@@ -523,13 +585,16 @@ class WorkspaceStorageService extends ChangeNotifier {
   }
 
   /// Lixeira Etapa 2: Restaura uma nota da .trash/ de volta para a pasta de Cadernos
-  Future<void> restoreFromTrash(NoteDocument doc, {String? targetFolderName}) async {
+  Future<void> restoreFromTrash(
+    NoteDocument doc, {
+    String? targetFolderName,
+  }) async {
     if (doc.filePath != null && File(doc.filePath!).existsSync()) {
       final fileName = File(doc.filePath!).uri.pathSegments.last;
       final targetFolder = targetFolderName != null
           ? '$_workspacePath/Cadernos/$targetFolderName'
           : '$_workspacePath/Cadernos';
-      
+
       final targetPath = '$targetFolder/$fileName';
       final file = File(doc.filePath!);
       try {
@@ -567,7 +632,10 @@ class WorkspaceStorageService extends ChangeNotifier {
   }
 
   /// Altera o diretório do Workspace com migração assistida de arquivos
-  Future<void> changeWorkspaceDirectory(String newPath, {required bool migrateExistingFiles}) async {
+  Future<void> changeWorkspaceDirectory(
+    String newPath, {
+    required bool migrateExistingFiles,
+  }) async {
     if (newPath == _workspacePath) return;
 
     final oldPath = _workspacePath;
@@ -576,7 +644,9 @@ class WorkspaceStorageService extends ChangeNotifier {
       await newDir.create(recursive: true);
     }
 
-    if (migrateExistingFiles && oldPath.isNotEmpty && Directory(oldPath).existsSync()) {
+    if (migrateExistingFiles &&
+        oldPath.isNotEmpty &&
+        Directory(oldPath).existsSync()) {
       // Migração: copia todos os arquivos de Cadernos/ para o novo destino
       final oldCadernos = Directory('$oldPath/Cadernos');
       final newCadernos = Directory('$newPath/Cadernos');
@@ -594,16 +664,22 @@ class WorkspaceStorageService extends ChangeNotifier {
     notesListNotifier.notifyListeners();
   }
 
-  static Future<void> _copyDirectoryRecursively(Directory source, Directory destination) async {
+  static Future<void> _copyDirectoryRecursively(
+    Directory source,
+    Directory destination,
+  ) async {
     if (!destination.existsSync()) {
       destination.createSync(recursive: true);
     }
     for (final entity in source.listSync(recursive: false)) {
       if (entity is Directory) {
-        final newSubDir = Directory('${destination.path}/${entity.uri.pathSegments.where((s) => s.isNotEmpty).last}');
+        final newSubDir = Directory(
+          '${destination.path}/${entity.uri.pathSegments.where((s) => s.isNotEmpty).last}',
+        );
         await _copyDirectoryRecursively(entity, newSubDir);
       } else if (entity is File) {
-        final newFilePath = '${destination.path}/${entity.uri.pathSegments.last}';
+        final newFilePath =
+            '${destination.path}/${entity.uri.pathSegments.last}';
         await entity.copy(newFilePath);
       }
     }
