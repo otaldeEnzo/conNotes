@@ -140,16 +140,22 @@ class WorkspaceStorageService extends ChangeNotifier {
     // Ler lista de cadernos e notas raiz
     try {
       final entities = cadernosDir.listSync();
+      final rootNoteFutures = <Future<NoteDocument?>>[];
+
       for (final entity in entities) {
         if (entity is Directory) {
           final folderName = entity.uri.pathSegments.where((s) => s.isNotEmpty).last;
           final folder = await _scanFolder(entity, folderName);
           scannedNotebooks.add(folder);
         } else if (entity is File && entity.path.endsWith('.cncanvas')) {
-          final doc = await CncanvasFileService.loadFromCnCanvasFile(entity.path);
-          if (doc != null) {
-            scannedRootNotes.add(doc);
-          }
+          rootNoteFutures.add(CncanvasFileService.loadFromCnCanvasFile(entity.path));
+        }
+      }
+
+      final docs = await Future.wait(rootNoteFutures);
+      for (final doc in docs) {
+        if (doc != null) {
+          scannedRootNotes.add(doc);
         }
       }
     } catch (e) {
@@ -162,12 +168,18 @@ class WorkspaceStorageService extends ChangeNotifier {
     if (trashDir.existsSync()) {
       try {
         final trashEntities = trashDir.listSync();
+        final trashNoteFutures = <Future<NoteDocument?>>[];
+
         for (final entity in trashEntities) {
           if (entity is File && entity.path.endsWith('.cncanvas')) {
-            final doc = await CncanvasFileService.loadFromCnCanvasFile(entity.path);
-            if (doc != null) {
-              scannedTrashNotes.add(doc);
-            }
+            trashNoteFutures.add(CncanvasFileService.loadFromCnCanvasFile(entity.path));
+          }
+        }
+
+        final docs = await Future.wait(trashNoteFutures);
+        for (final doc in docs) {
+          if (doc != null) {
+            scannedTrashNotes.add(doc);
           }
         }
       } catch (e) {
@@ -204,16 +216,22 @@ class WorkspaceStorageService extends ChangeNotifier {
 
     try {
       final entities = dir.listSync();
+      final noteFutures = <Future<NoteDocument?>>[];
+
       for (final entity in entities) {
         if (entity is Directory) {
           final subName = entity.uri.pathSegments.where((s) => s.isNotEmpty).last;
           final sub = await _scanFolder(entity, subName);
           subFolders.add(sub);
         } else if (entity is File && entity.path.endsWith('.cncanvas')) {
-          final doc = await CncanvasFileService.loadFromCnCanvasFile(entity.path);
-          if (doc != null) {
-            notes.add(doc);
-          }
+          noteFutures.add(CncanvasFileService.loadFromCnCanvasFile(entity.path));
+        }
+      }
+
+      final docs = await Future.wait(noteFutures);
+      for (final doc in docs) {
+        if (doc != null) {
+          notes.add(doc);
         }
       }
     } catch (_) {}
