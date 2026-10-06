@@ -23,6 +23,10 @@ dependencies:
   image: ^4.3.0
   path_provider: ^2.1.2
   path: ^1.9.0
+  pdfrx: ^1.1.25
+  desktop_drop: ^0.8.4
+  pdf: ^3.13.1
+  archive: ^4.0.9
 
 dev_dependencies:
   flutter_test:

@@ -44,6 +44,8 @@ app/settings.json
 *.db.backup
 *.sqlite
 *.sqlite3
+.connotes/
+**/.connotes/
 
 # Local test canvases / notes created during dev
 Cadernos/

@@ -1,0 +1,211 @@
+--- a/lib/services/pdf_document_service.dart
++++ b/lib/services/pdf_document_service.dart
+@@ -1,4 +1,5 @@
+ import 'dart:io';
++import 'dart:typed_data';
+ import 'dart:ui' as ui;
+ import 'package:flutter/foundation.dart';
+ import 'package:flutter/material.dart';
+@@ -35,6 +36,11 @@
+   /// Idempotent: safe to invoke repeatedly.
+   Future<void> initialize() async {
+     if (_isInitialized) return;
++    try {
++      await pdfrxFlutterInitialize();
++    } catch (e) {
++      debugPrint('PdfDocumentService.initialize warning: $e');
++    }
+     _isInitialized = true;
+   }
+ 
+@@ -76,6 +82,21 @@
+     }
+   }
+ 
++  /// Returns whether a given 1-based [pageNumber] is excluded from export.
++  @visibleForTesting
++  static bool shouldExcludePage(int pageNumber, Iterable<int> excludedPageIndices) {
++    return excludedPageIndices.contains(pageNumber);
++  }
++
++  /// Retrieves ink strokes specifically for 1-based [pageNumber] without bleeding.
++  @visibleForTesting
++  static List<InkStroke> getStrokesForPage(
++    int pageNumber,
++    Map<int, List<InkStroke>> strokesPerPage,
++  ) {
++    return strokesPerPage[pageNumber] ?? const <InkStroke>[];
++  }
++
+   /// Exports an annotated PDF document by compositing high-resolution (300 DPI) base page
+   /// bitmaps with user ink strokes into a flattened document via package:pdf.
+   ///
+@@ -83,7 +104,7 @@
+   /// [outputPath]: Destination path for the exported PDF.
+   /// [strokesPerPage]: Map of page numbers (1-based) to page-local ink strokes.
+   /// [cardWidth]: Display width of the card on canvas, used to scale stroke coordinates.
+-  /// [excludedPageIndices]: Page indices/numbers excluded from export (e.g. detached pages).
++  /// [excludedPageIndices]: Page numbers (1-based) excluded from export (e.g. detached pages).
+   Future<void> exportAnnotatedPdf({
+     required String originalPdfPath,
+     required String outputPath,
+@@ -98,9 +119,10 @@
+     const double pdfPointsDpi = 72.0;
+     const double dpiScale = targetDpi / pdfPointsDpi; // 4.166667
+ 
++    final Set<int> excludedSet = excludedPageIndices.toSet();
++
+     for (int pageNum = 1; pageNum <= doc.pages.length; pageNum++) {
+-      // Check both 1-based page number and 0-based page index
+-      if (excludedPageIndices.contains(pageNum) || excludedPageIndices.contains(pageNum - 1)) {
++      if (shouldExcludePage(pageNum, excludedSet)) {
+         continue;
+       }
+ 
+@@ -118,75 +140,79 @@
+         continue;
+       }
+ 
+-      final ui.Image baseUiImage = await renderedPageImage.createImage();
+-
+-      // Retrieve strokes for this page (support both 1-based and 0-based keys)
+-      final List<InkStroke> pageStrokes = strokesPerPage[pageNum] ??
+-          strokesPerPage[pageNum - 1] ??
+-          const <InkStroke>[];
+-
+-      final Uint8List pngBytes;
+-
+-      if (pageStrokes.isEmpty) {
+-        final byteData = await baseUiImage.toByteData(format: ui.ImageByteFormat.png);
+-        if (byteData == null) {
+-          baseUiImage.dispose();
+-          continue;
++      final ui.Image baseUiImage;
++      try {
++        baseUiImage = await renderedPageImage.createImage();
++      } finally {
++        renderedPageImage.dispose();
++      }
++
++      try {
++        final List<InkStroke> pageStrokes = getStrokesForPage(pageNum, strokesPerPage);
++
++        final Uint8List pngBytes;
++
++        if (pageStrokes.isEmpty) {
++          final byteData = await baseUiImage.toByteData(format: ui.ImageByteFormat.png);
++          if (byteData == null) {
++            continue;
++          }
++          pngBytes = byteData.buffer.asUint8List();
++        } else {
++          final recorder = ui.PictureRecorder();
++          final canvas = ui.Canvas(
++            recorder,
++            Rect.fromLTWH(0.0, 0.0, targetPixelWidth.toDouble(), targetPixelHeight.toDouble()),
++          );
++
++          // 1. Draw base page raster image
++          canvas.drawImage(baseUiImage, Offset.zero, Paint());
++
++          // 2. Scale transform from card display width to 300 DPI raster pixels
++          final double strokeScale = cardWidth > 0.0 ? (targetPixelWidth / cardWidth) : dpiScale;
++          canvas.save();
++          canvas.scale(strokeScale, strokeScale);
++
++          // 3. Paint each stroke
++          for (final stroke in pageStrokes) {
++            _paintStroke(canvas, stroke);
++          }
++
++          canvas.restore();
++
++          final picture = recorder.endRecording();
++          ui.Image? compositeUiImage;
++          try {
++            compositeUiImage = await picture.toImage(targetPixelWidth, targetPixelHeight);
++            final byteData = await compositeUiImage.toByteData(format: ui.ImageByteFormat.png);
++            if (byteData == null) {
++              continue;
++            }
++            pngBytes = byteData.buffer.asUint8List();
++          } finally {
++            picture.dispose();
++            compositeUiImage?.dispose();
++          }
+         }
+-        pngBytes = byteData.buffer.asUint8List();
+-      } else {
+-        final recorder = ui.PictureRecorder();
+-        final canvas = ui.Canvas(
+-          recorder,
+-          Rect.fromLTWH(0.0, 0.0, targetPixelWidth.toDouble(), targetPixelHeight.toDouble()),
++
++        // 4. Append page to package:pdf document
++        pdfDoc.addPage(
++          pw.Page(
++            pageFormat: pw_pdf.PdfPageFormat(page.width, page.height, marginAll: 0),
++            build: (pw.Context context) {
++              return pw.FullPage(
++                ignoreMargins: true,
++                child: pw.Image(
++                  pw.MemoryImage(pngBytes),
++                  fit: pw.BoxFit.fill,
++                ),
++              );
++            },
++          ),
+         );
+-
+-        // 1. Draw base page raster image
+-        canvas.drawImage(baseUiImage, Offset.zero, Paint());
+-
+-        // 2. Scale transform from card display width to 300 DPI raster pixels
+-        final double strokeScale = cardWidth > 0.0 ? (targetPixelWidth / cardWidth) : dpiScale;
+-        canvas.save();
+-        canvas.scale(strokeScale, strokeScale);
+-
+-        // 3. Paint each stroke
+-        for (final stroke in pageStrokes) {
+-          _paintStroke(canvas, stroke);
+-        }
+-
+-        canvas.restore();
+-
+-        final picture = recorder.endRecording();
+-        final compositeUiImage = await picture.toImage(targetPixelWidth, targetPixelHeight);
+-        final byteData = await compositeUiImage.toByteData(format: ui.ImageByteFormat.png);
+-
+-        picture.dispose();
+-        compositeUiImage.dispose();
+-
+-        if (byteData == null) {
+-          baseUiImage.dispose();
+-          continue;
+-        }
+-        pngBytes = byteData.buffer.asUint8List();
+-      }
+-
+-      baseUiImage.dispose();
+-
+-      // 4. Append page to package:pdf document
+-      pdfDoc.addPage(
+-        pw.Page(
+-          pageFormat: pw_pdf.PdfPageFormat(page.width, page.height, marginAll: 0),
+-          build: (pw.Context context) {
+-            return pw.FullPage(
+-              ignoreMargins: true,
+-              child: pw.Image(
+-                pw.MemoryImage(pngBytes),
+-                fit: pw.BoxFit.fill,
+-              ),
+-            );
+-          },
+-        ),
+-      );
++      } finally {
++        baseUiImage.dispose();
++      }
+     }
+ 
+     final pdfBytes = await pdfDoc.save();

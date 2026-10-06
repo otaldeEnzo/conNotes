@@ -229,8 +229,86 @@ class CanvasClipboardService {
       );
     }
 
-    // 2. Se a clipboard interna estiver vazia, verifica imagem no clipboard nativo do OS
+    // 2. Se a clipboard interna estiver vazia, verifica arquivos ou caminhos no clipboard nativo do OS
     try {
+      final files = await Pasteboard.files();
+      if (files.isNotEmpty) {
+        for (final filePath in files) {
+          if (filePath.toLowerCase().endsWith('.pdf') && File(filePath).existsSync()) {
+            final nowMicro = DateTime.now().microsecondsSinceEpoch;
+            final newId = 'card_pdf_${nowMicro}_${_counter++}';
+            final fileName = filePath.split(Platform.pathSeparator).last.replaceAll('.pdf', '');
+
+            final newCard = CanvasCardModel(
+              id: newId,
+              cardType: CardType.pdf,
+              title: fileName.isNotEmpty ? fileName : 'Documento PDF',
+              pdfPath: filePath,
+              pdfDisplayMode: PdfDisplayMode.continuous,
+              x: canvasMousePos.dx - 340.0,
+              y: canvasMousePos.dy - 480.0,
+              width: 680.0,
+              height: 960.0,
+            );
+
+            undoManager.pushCommand(
+              AddCardCommand(newCard),
+              execute: true,
+              note: note,
+            );
+
+            WorkspaceStorageService.instance.scheduleAutoSave(note);
+            DevHubServer.instance.logAction('Colar PDF do Clipboard do OS ($fileName)');
+
+            return CanvasPasteResult(
+              pastedCards: [newCard],
+              pastedStrokes: [],
+              singleSelectedCardId: newCard.id,
+              newSelectionState: SelectionState.empty(),
+            );
+          }
+        }
+      }
+
+      final clipboardText = await Pasteboard.text;
+      if (clipboardText != null && clipboardText.trim().toLowerCase().endsWith('.pdf')) {
+        final cleanPath = clipboardText.trim().replaceAll('"', '').replaceAll("'", '');
+        if (File(cleanPath).existsSync()) {
+          final nowMicro = DateTime.now().microsecondsSinceEpoch;
+          final newId = 'card_pdf_${nowMicro}_${_counter++}';
+          final fileName = cleanPath.split(Platform.pathSeparator).last.replaceAll('.pdf', '');
+
+          final newCard = CanvasCardModel(
+            id: newId,
+            cardType: CardType.pdf,
+            title: fileName.isNotEmpty ? fileName : 'Documento PDF',
+            pdfPath: cleanPath,
+            pdfDisplayMode: PdfDisplayMode.continuous,
+            x: canvasMousePos.dx - 340.0,
+            y: canvasMousePos.dy - 480.0,
+            width: 680.0,
+            height: 960.0,
+          );
+
+          undoManager.pushCommand(
+            AddCardCommand(newCard),
+            execute: true,
+            note: note,
+          );
+
+          WorkspaceStorageService.instance.scheduleAutoSave(note);
+          DevHubServer.instance.logAction('Colar Caminho de PDF do Clipboard ($fileName)');
+
+          return CanvasPasteResult(
+            pastedCards: [newCard],
+            pastedStrokes: [],
+            singleSelectedCardId: newCard.id,
+            newSelectionState: SelectionState.empty(),
+          );
+        }
+      }
+
+      // 3. Se não for PDF, verifica se há imagem no clipboard nativo do OS
       final clipboardImage = await Pasteboard.image;
       if (clipboardImage != null && clipboardImage.isNotEmpty) {
         final compressed = await MediaCompressionService.compressImageBytes(clipboardImage);
@@ -276,7 +354,7 @@ class CanvasClipboardService {
         }
       }
     } catch (e) {
-      debugPrint('[CanvasClipboardService] Erro ao obter imagem da área de transferência: $e');
+      debugPrint('[CanvasClipboardService] Erro ao obter dados da área de transferência: $e');
     }
 
     return null;

@@ -133,6 +133,15 @@ class SvgIcon extends StatelessWidget {
     'chevron_right': '''<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
   <path d="m9 18 6-6-6-6"/>
 </svg>''',
+    'chevron-right': '''<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+  <path d="m9 18 6-6-6-6"/>
+</svg>''',
+    'chevron_left': '''<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+  <path d="m15 18-6-6 6-6"/>
+</svg>''',
+    'chevron-left': '''<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+  <path d="m15 18-6-6 6-6"/>
+</svg>''',
     'chevron_down': '''<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
   <path d="m6 9 6 6 6-6"/>
 </svg>''',
@@ -215,6 +224,9 @@ class SvgIcon extends StatelessWidget {
   <path d="M15 3v18"/>
 </svg>''',
     'sparkle': '''<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+  <path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z"/>
+</svg>''',
+    'sparkles': '''<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
   <path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z"/>
 </svg>''',
     'pen': '''<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -369,6 +381,25 @@ class SvgIcon extends StatelessWidget {
   <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/>
   <path d="M3 3v5h5"/>
 </svg>''',
+    'pdf': '''<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+  <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/>
+  <polyline points="14 2 14 8 20 8"/>
+  <path d="M10 12h2a1 1 0 0 1 1 1v1a1 1 0 0 1-1 1h-2v3"/>
+</svg>''',
+    'file_text': '''<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+  <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/>
+  <polyline points="14 2 14 8 20 8"/>
+  <line x1="16" x2="8" y1="13" y2="13"/>
+  <line x1="16" x2="8" y1="17" y2="17"/>
+  <line x1="10" x2="8" y1="9" y2="9"/>
+</svg>''',
+    'file-text': '''<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+  <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/>
+  <polyline points="14 2 14 8 20 8"/>
+  <line x1="16" x2="8" y1="13" y2="13"/>
+  <line x1="16" x2="8" y1="17" y2="17"/>
+  <line x1="10" x2="8" y1="9" y2="9"/>
+</svg>''',
     'flip_h': '''<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
   <path d="m3 7 5 5-5 5V7"/>
   <path d="m21 7-5 5 5 5V7"/>
@@ -389,6 +420,23 @@ class SvgIcon extends StatelessWidget {
   <path d="m3 3 7.07 16.97 2.51-7.39 7.39-2.51L3 3z"/>
   <path d="m13 13 6 6"/>
 </svg>''',
+    'move': '''<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+  <polyline points="5 9 2 12 5 15"/>
+  <polyline points="9 5 12 2 15 5"/>
+  <polyline points="15 19 12 22 9 19"/>
+  <polyline points="19 9 22 12 19 15"/>
+  <line x1="2" x2="22" y1="12" y2="12"/>
+  <line x1="12" x2="12" y1="2" y2="22"/>
+</svg>''',
+    'link': '''<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+  <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/>
+  <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
+</svg>''',
+    'external_link': '''<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+  <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>
+  <polyline points="15 3 21 3 21 9"/>
+  <line x1="10" y1="14" x2="21" y2="3"/>
+</svg>''',
   };
 
   const SvgIcon({
@@ -402,7 +450,8 @@ class SvgIcon extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final key = iconKey;
-    final inlineSvg = _builtinSvgStrings[key];
+    final normalized = key.replaceAll('-', '_');
+    final inlineSvg = _builtinSvgStrings[key] ?? _builtinSvgStrings[normalized];
     if (inlineSvg != null) {
       return SvgPicture.string(
         inlineSvg,

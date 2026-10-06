@@ -1,0 +1,15 @@
+--- a/app/lib/models/canvas_card_model.dart
++++ b/app/lib/models/canvas_card_model.dart
+@@ -414,8 +414,9 @@
+       totalPdfPages: totalPdfPages ?? this.totalPdfPages,
+       pdfPageGap: pdfPageGap ?? this.pdfPageGap,
+       isPdfLocked: isPdfLocked ?? this.isPdfLocked,
+-      pageAttachedStrokeIds: pageAttachedStrokeIds ?? this.pageAttachedStrokeIds,
+-      excludedPageIndices: excludedPageIndices ?? this.excludedPageIndices,
++      pageAttachedStrokeIds: (pageAttachedStrokeIds ?? this.pageAttachedStrokeIds)
++          .map((k, v) => MapEntry(k, List<String>.from(v))),
++      excludedPageIndices:
++          List<int>.from(excludedPageIndices ?? this.excludedPageIndices),
+       createdAt: createdAt ?? this.createdAt,
+       updatedAt: updatedAt ?? DateTime.now(),
+     );

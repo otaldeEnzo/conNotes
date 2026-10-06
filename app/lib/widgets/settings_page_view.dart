@@ -1512,27 +1512,67 @@ class _SettingsPageViewState extends State<SettingsPageView> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       key: const ValueKey('ai_settings'),
       children: [
-        // 1. Banner de Privacidade Local-First
+        // 1. Banner de Privacidade Local-First & Master Switch
         Container(
           margin: const EdgeInsets.only(bottom: 16),
-          padding: const EdgeInsets.all(14),
+          padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
             color: accent.withValues(alpha: 0.08),
-            borderRadius: BorderRadius.circular(14),
+            borderRadius: BorderRadius.circular(16),
             border: Border.all(color: accent.withValues(alpha: 0.3)),
           ),
-          child: Row(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              SvgIcon(assetName: 'ai', color: accent, size: 20),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Text(
-                  'Privacidade Garantida: Suas chaves de API ficam salvas exclusivamente no seu computador e nenhuma informação passa por servidores intermediários.',
-                  style: TextStyle(
-                    color: MoscaroTokens.textSecondary,
-                    fontSize: 12,
-                    height: 1.35,
+              Row(
+                children: [
+                  SvgIcon(name: 'ai', color: accent, size: 22),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Recursos Inteligentes de IA (Master Switch)',
+                          style: TextStyle(
+                            color: MoscaroTokens.textPrimary,
+                            fontSize: 13.5,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          'Quando desativado, oculta todos os botões e subpílulas de IA do app, garantindo 100% de privacidade offline.',
+                          style: TextStyle(
+                            color: MoscaroTokens.textSecondary,
+                            fontSize: 11.5,
+                            height: 1.35,
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
+                  const SizedBox(width: 8),
+                  Transform.scale(
+                    scale: 0.9,
+                    child: Switch(
+                      value: widget.settings.enableCloudAiFeatures,
+                      onChanged: (val) => widget.onUpdateSettings(widget.settings.copyWith(enableCloudAiFeatures: val)),
+                      activeThumbColor: accent,
+                      activeTrackColor: accent.withValues(alpha: 0.4),
+                      inactiveThumbColor: MoscaroTokens.textSecondary,
+                      inactiveTrackColor: MoscaroTokens.isLight ? Colors.black12 : Colors.white12,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 10),
+              Text(
+                'Privacidade Garantida: Suas chaves de API ficam salvas exclusivamente no seu computador e nenhuma informação passa por servidores intermediários.',
+                style: TextStyle(
+                  color: MoscaroTokens.textSecondary.withValues(alpha: 0.8),
+                  fontSize: 11,
+                  height: 1.3,
                 ),
               ),
             ],
@@ -1720,6 +1760,13 @@ class _SettingsPageViewState extends State<SettingsPageView> {
           description: 'Quando ativado, a IA prioriza formular perguntas e dicas progressivas (> [!TIP]) em vez de apenas dar a resposta pronta.',
           value: widget.settings.enableAiSocraticMode,
           onChanged: (val) => widget.onUpdateSettings(widget.settings.copyWith(enableAiSocraticMode: val)),
+        ),
+
+        SettingsToggleTile(
+          title: 'Ações de IA nos Cards de PDF',
+          description: 'Habilita subpílula de IA nos documentos PDF (Resumir, Extrair LaTeX e Explicar Diagrama).',
+          value: widget.settings.enablePdfAiActions,
+          onChanged: (val) => widget.onUpdateSettings(widget.settings.copyWith(enablePdfAiActions: val)),
         ),
 
         const SizedBox(height: 14),

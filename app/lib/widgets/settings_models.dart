@@ -345,8 +345,13 @@ class AppSettingsState {
     this.enableAiSocraticMode = false,
     this.enableAiMermaidDiagrams = true,
     this.enableAiHandwritingOcr = true,
+    this.enableCloudAiFeatures = true,
+    this.enablePdfAiActions = true,
     this.noteSummaryEngine = NoteSummaryEngine.aiMultimodal,
   });
+
+  final bool enableCloudAiFeatures;
+  final bool enablePdfAiActions;
 
   factory AppSettingsState.defaults() => const AppSettingsState();
 
@@ -397,6 +402,8 @@ class AppSettingsState {
     bool? enableAiSocraticMode,
     bool? enableAiMermaidDiagrams,
     bool? enableAiHandwritingOcr,
+    bool? enableCloudAiFeatures,
+    bool? enablePdfAiActions,
     NoteSummaryEngine? noteSummaryEngine,
   }) {
     return AppSettingsState(
@@ -446,6 +453,8 @@ class AppSettingsState {
       enableAiSocraticMode: enableAiSocraticMode ?? this.enableAiSocraticMode,
       enableAiMermaidDiagrams: enableAiMermaidDiagrams ?? this.enableAiMermaidDiagrams,
       enableAiHandwritingOcr: enableAiHandwritingOcr ?? this.enableAiHandwritingOcr,
+      enableCloudAiFeatures: enableCloudAiFeatures ?? this.enableCloudAiFeatures,
+      enablePdfAiActions: enablePdfAiActions ?? this.enablePdfAiActions,
       noteSummaryEngine: noteSummaryEngine ?? this.noteSummaryEngine,
     );
   }
@@ -498,6 +507,8 @@ class AppSettingsState {
       'enableAiSocraticMode': enableAiSocraticMode,
       'enableAiMermaidDiagrams': enableAiMermaidDiagrams,
       'enableAiHandwritingOcr': enableAiHandwritingOcr,
+      'enableCloudAiFeatures': enableCloudAiFeatures,
+      'enablePdfAiActions': enablePdfAiActions,
       'noteSummaryEngine': noteSummaryEngine.name,
     };
   }
@@ -616,6 +627,8 @@ class AppSettingsState {
       enableAiSocraticMode: json['enableAiSocraticMode'] as bool? ?? false,
       enableAiMermaidDiagrams: json['enableAiMermaidDiagrams'] as bool? ?? true,
       enableAiHandwritingOcr: json['enableAiHandwritingOcr'] as bool? ?? true,
+      enableCloudAiFeatures: json['enableCloudAiFeatures'] as bool? ?? true,
+      enablePdfAiActions: json['enablePdfAiActions'] as bool? ?? true,
       noteSummaryEngine: noteSummaryEngine,
     );
   }

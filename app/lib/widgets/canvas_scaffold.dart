@@ -52,6 +52,8 @@ import '../services/ai_service_bridge.dart';
 import 'cards_debug_overlay.dart';
 import '../services/cards_telemetry_controller.dart';
 import 'package:file_picker/file_picker.dart';
+import 'package:desktop_drop/desktop_drop.dart';
+import '../services/pdf_document_service.dart';
 import '../services/media_compression_service.dart';
 import 'canvas_area_selection_overlay.dart';
 import 'debug/performance_debug_hud.dart';
@@ -1280,9 +1282,171 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
     _panNotifier.value = Offset(math.min(0.0, rawPan.dx), math.min(0.0, rawPan.dy));
   }
 
+  Future<void> _insertPdfCardFromPath(String path, Offset canvasPoint) async {
+    final note = _currentNote;
+    if (note == null) return;
+
+    final baseId = 'card_pdf_${DateTime.now().millisecondsSinceEpoch}';
+    final fileName = path.split(Platform.pathSeparator).last.replaceAll('.pdf', '');
+
+    try {
+      final doc = await PdfDocumentService.instance.loadDocument(path);
+      final totalPages = doc.pages.length;
+
+      // Tamanho dinâmico de inserção baseado no nível de zoom atual do canvas
+      // Proporcional aos outros cards (ex: card de mídia com 420px; PDF como documento completo em 840px = 2x mídia)
+      const visualDesiredWidth = 840.0;
+      final currentZoom = (_zoomScale > 0) ? _zoomScale : 1.0;
+      final zoomScaledWidth = visualDesiredWidth / currentZoom;
+      final targetWidth = zoomScaledWidth.clamp(320.0, 4200.0);
+
+      double currentY = canvasPoint.dy;
+      final cardsToAdd = <CanvasCardModel>[];
+
+      for (int i = 1; i <= totalPages; i++) {
+        final page = doc.pages[i - 1];
+        final ratio = (page.width > 0 && page.height > 0)
+            ? (page.width / page.height)
+            : (1.0 / 1.4142);
+        final pageHeight = targetWidth / ratio;
+        final cardId = (totalPages == 1) ? baseId : '${baseId}_p$i';
+
+        cardsToAdd.add(CanvasCardModel(
+          id: cardId,
+          cardType: CardType.pdf,
+          title: totalPages > 1 ? '$fileName (Pág. $i)' : (fileName.isNotEmpty ? fileName : 'Documento PDF'),
+          pdfPath: path,
+          pdfDisplayMode: PdfDisplayMode.singlePage,
+          currentPdfPage: i,
+          totalPdfPages: totalPages,
+          originalAspectRatio: ratio,
+          pdfPageGap: 56.0,
+          x: canvasPoint.dx,
+          y: currentY,
+          width: targetWidth,
+          height: pageHeight,
+          sourceMasterCardId: (i > 1) ? '${baseId}_p1' : null,
+        ));
+
+        final headerH = (i == 1) ? 28.0 : 0.0;
+        currentY += pageHeight + headerH + 56.0;
+      }
+
+      for (final card in cardsToAdd) {
+        _undoManager.pushCommand(
+          AddCardCommand(card),
+          execute: true,
+          note: note,
+        );
+      }
+
+      setState(() {
+        _selectedCardId = cardsToAdd.first.id;
+        _activeTool = 'select';
+        _activeCardPreset = null;
+        _isCardsSubBarVisible = false;
+      });
+
+      WorkspaceStorageService.instance.scheduleAutoSave(note);
+      DevHubServer.instance.logAction('Novo Card de PDF ($fileName, $totalPages págs separadas, larg: ${targetWidth.round()}px)');
+    } catch (e) {
+      debugPrint('[CanvasScaffold] Erro ao carregar PDF para criar cards: $e');
+      const visualDesiredWidth = 840.0;
+      final currentZoom = (_zoomScale > 0) ? _zoomScale : 1.0;
+      final zoomScaledWidth = visualDesiredWidth / currentZoom;
+      final targetWidth = zoomScaledWidth.clamp(320.0, 4200.0);
+      final fallbackCard = CanvasCardModel(
+        id: baseId,
+        cardType: CardType.pdf,
+        title: fileName.isNotEmpty ? fileName : 'Documento PDF',
+        pdfPath: path,
+        pdfDisplayMode: PdfDisplayMode.singlePage,
+        currentPdfPage: 1,
+        totalPdfPages: 1,
+        x: canvasPoint.dx,
+        y: canvasPoint.dy,
+        width: targetWidth,
+        height: targetWidth / (1.0 / 1.4142),
+      );
+      _undoManager.pushCommand(
+        AddCardCommand(fallbackCard),
+        execute: true,
+        note: note,
+      );
+      setState(() {
+        _selectedCardId = fallbackCard.id;
+        _activeTool = 'select';
+        _activeCardPreset = null;
+        _isCardsSubBarVisible = false;
+      });
+      WorkspaceStorageService.instance.scheduleAutoSave(note);
+    }
+  }
+
+  Future<void> _insertMediaCardFromPath(String path, Offset canvasPoint) async {
+    final note = _currentNote;
+    if (note == null) return;
+    try {
+      final bytes = await File(path).readAsBytes();
+      final compressed = await MediaCompressionService.compressImageBytes(bytes);
+      if (compressed != null) {
+        final id = 'card_media_${DateTime.now().millisecondsSinceEpoch}';
+        final visualDesiredWidth = 420.0;
+        final zoomScaledWidth = visualDesiredWidth / (_zoomScale > 0 ? _zoomScale : 1.0);
+        final targetWidth = zoomScaledWidth.clamp(160.0, 1400.0);
+        final targetHeight = compressed.aspectRatio > 0 ? (targetWidth / compressed.aspectRatio) : 220.0;
+        final newCard = CanvasCardModel(
+          id: id,
+          cardType: CardType.media,
+          title: 'Mídia',
+          mediaData: compressed.dataUri,
+          originalAspectRatio: compressed.aspectRatio,
+          lockAspectRatio: true,
+          x: canvasPoint.dx,
+          y: canvasPoint.dy,
+          width: targetWidth,
+          height: targetHeight,
+        );
+        _undoManager.pushCommand(
+          AddCardCommand(newCard),
+          execute: true,
+          note: note,
+        );
+        setState(() {
+          _selectedCardId = newCard.id;
+          _activeTool = 'select';
+          _activeCardPreset = null;
+          _isCardsSubBarVisible = false;
+        });
+        WorkspaceStorageService.instance.scheduleAutoSave(note);
+        DevHubServer.instance.logAction('Novo Card de Mídia (${compressed.byteSize ~/ 1024} KB)');
+      }
+    } catch (e) {
+      debugPrint('[_insertMediaCardFromPath] Erro ao carregar mídia: $e');
+    }
+  }
+
   Future<void> _insertCardAtPosition(Offset canvasPoint, {CardTypePreset? preset}) async {
     final note = _currentNote;
     if (note == null) return;
+
+    if (preset == CardTypePreset.pdf) {
+      try {
+        final result = await FilePickerPlatform.instance.pickFiles(
+          type: FileType.custom,
+          allowedExtensions: ['pdf'],
+        );
+        if (result != null && result.isNotEmpty) {
+          final path = result.first.path;
+          if (path != null) {
+            await _insertPdfCardFromPath(path, canvasPoint);
+          }
+        }
+      } catch (e) {
+        debugPrint('[_insertCardAtPosition] Erro ao selecionar PDF: $e');
+      }
+      return;
+    }
 
     if (preset == CardTypePreset.media) {
       try {
@@ -1293,40 +1457,7 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
         if (result != null && result.isNotEmpty) {
           final path = result.first.path;
           if (path != null) {
-            final bytes = await File(path).readAsBytes();
-            final compressed = await MediaCompressionService.compressImageBytes(bytes);
-            if (compressed != null) {
-              final id = 'card_media_${DateTime.now().millisecondsSinceEpoch}';
-              final visualDesiredWidth = 420.0;
-              final zoomScaledWidth = visualDesiredWidth / (_zoomScale > 0 ? _zoomScale : 1.0);
-              final targetWidth = zoomScaledWidth.clamp(160.0, 1400.0);
-              final targetHeight = compressed.aspectRatio > 0 ? (targetWidth / compressed.aspectRatio) : 220.0;
-              final newCard = CanvasCardModel(
-                id: id,
-                cardType: CardType.media,
-                title: 'Mídia',
-                mediaData: compressed.dataUri,
-                originalAspectRatio: compressed.aspectRatio,
-                lockAspectRatio: true,
-                x: canvasPoint.dx,
-                y: canvasPoint.dy,
-                width: targetWidth,
-                height: targetHeight,
-              );
-              _undoManager.pushCommand(
-                AddCardCommand(newCard),
-                execute: true,
-                note: note,
-              );
-              setState(() {
-                _selectedCardId = newCard.id;
-                _activeTool = 'select';
-                _activeCardPreset = null;
-                _isCardsSubBarVisible = false;
-              });
-              WorkspaceStorageService.instance.scheduleAutoSave(note);
-              DevHubServer.instance.logAction('Novo Card de Mídia (${compressed.byteSize ~/ 1024} KB)');
-            }
+            await _insertMediaCardFromPath(path, canvasPoint);
           }
         }
       } catch (e) {
@@ -1448,7 +1579,23 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
                     _laserEngine.updateHoverPosition(null);
                   }
                 },
-                child: CanvasInputRouter(
+                child: DropTarget(
+                  onDragDone: (detail) async {
+                    final localPos = detail.localPosition;
+                    final canvasPoint = (localPos - _panOffset) / _zoomScale;
+                    for (final file in detail.files) {
+                      final path = file.path;
+                      final lower = path.toLowerCase();
+                      if (lower.endsWith('.pdf')) {
+                        await _insertPdfCardFromPath(path, canvasPoint);
+                        break;
+                      } else if (lower.endsWith('.png') || lower.endsWith('.jpg') || lower.endsWith('.jpeg') || lower.endsWith('.webp') || lower.endsWith('.gif')) {
+                        await _insertMediaCardFromPath(path, canvasPoint);
+                        break;
+                      }
+                    }
+                  },
+                  child: CanvasInputRouter(
                     canvasContext: this,
                     activePenPreset: _activePenPreset,
                     activeStrokeUpdateNotifier: _activeStrokeUpdateNotifier,
@@ -1461,7 +1608,7 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
                       final n = _currentNote;
                       if (n != null) {
                         InkStroke strokeToAdd = newStroke;
-                        // Se >= 50% dos pontos do traço estiverem dentro da área de imagem da mídia (descontando cabeçalho de 28px)
+                        // Se >= 50% dos pontos do traço estiverem dentro da área de imagem da mídia ou do PDF
                         if (newStroke.points.isNotEmpty) {
                           for (final card in n.cards) {
                             if (card.cardType == CardType.media) {
@@ -1474,6 +1621,30 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
                               int pointsInside = 0;
                               for (final p in newStroke.points) {
                                 if (imgRect.contains(p.point)) {
+                                  pointsInside++;
+                                }
+                              }
+                              final overlapRatio = pointsInside / newStroke.points.length;
+                              if (overlapRatio >= 0.5) {
+                                strokeToAdd = newStroke.copyWith(parentCardId: card.id);
+                                if (!card.attachedStrokeIds.contains(newStroke.id)) {
+                                  final cardIdx = n.cards.indexOf(card);
+                                  n.cards[cardIdx] = card.copyWith(
+                                    attachedStrokeIds: [...card.attachedStrokeIds, newStroke.id],
+                                  );
+                                }
+                                break;
+                              }
+                            } else if (card.cardType == CardType.pdf) {
+                              final pdfRect = Rect.fromLTWH(
+                                card.x,
+                                card.y,
+                                card.width,
+                                card.height,
+                              );
+                              int pointsInside = 0;
+                              for (final p in newStroke.points) {
+                                if (pdfRect.contains(p.point)) {
                                   pointsInside++;
                                 }
                               }
@@ -1843,6 +2014,7 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
                   ),
                 ),
               ),
+            ),
 
               // 2. Barra de Ações Rápidas da Seleção (Flutuante sobre a Bounding Box - Reativa a _selectionUpdateNotifier)
               ListenableBuilder(

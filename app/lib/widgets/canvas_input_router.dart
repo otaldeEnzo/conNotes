@@ -1085,6 +1085,14 @@ class _CanvasInputRouterState extends State<CanvasInputRouter> {
             isInteractingWithCard: false,
           );
 
+          // Failsafe: se houver resquício de drag ou resize de card não finalizado por interrupção de ponteiro, encerra imediatamente
+          if (CardsTelemetryController.instance.current.isResizingCard) {
+            CardsTelemetryController.instance.endCardResize();
+          }
+          if (CardsTelemetryController.instance.current.isDraggingCard) {
+            CardsTelemetryController.instance.endCardDrag();
+          }
+
           if (_isInteractingWithCard) {
             _isInteractingWithCard = false;
             CardsTelemetryController.instance.setInteractingWithCard(false);

@@ -150,8 +150,9 @@ class CardsTelemetryController extends ChangeNotifier {
     if (selectedCardId != null) {
       final selected = cards.where((c) => c.id == selectedCardId).firstOrNull;
       if (selected != null) {
+        final double headerH = (selected.cardType == CardType.pdf && (selected.sourceMasterCardId == null || selected.isDetached)) ? 28.0 : 0.0;
         final double minH = selected.calculateMinHeight();
-        final double cardH = selected.isCollapsed ? 36.0 : math.max(selected.height, minH);
+        final double cardH = selected.isCollapsed ? 36.0 : math.max(selected.height + headerH, minH);
 
         // Alca de Rotacao (~24px acima do topo central do card quando selecionado)
         if (!selected.isPinned) {
@@ -166,12 +167,16 @@ class CardsTelemetryController extends ChangeNotifier {
         }
 
         // Barra Flutuante Superior (apenas se for card de mídia visível, cobrindo apenas a faixa exata da pílula)
-        if (selected.cardType == CardType.media && !selected.isCollapsed) {
+        if ((selected.cardType == CardType.media || selected.cardType == CardType.pdf) && !selected.isCollapsed) {
+          final double pillTopOffset = selected.cardType == CardType.pdf ? 120.0 : 50.0;
+          final double pillTotalHeight = selected.cardType == CardType.pdf ? 150.0 : 50.0;
+          final double pillWidth = math.max(selected.width, 600.0);
+          final double pillLeft = selected.x + (selected.width - pillWidth) / 2.0;
           final floatingPillRect = Rect.fromLTWH(
-            selected.x,
-            selected.y - 50.0,
-            selected.width,
-            50.0,
+            pillLeft,
+            selected.y - pillTopOffset,
+            pillWidth,
+            pillTotalHeight,
           );
           if (floatingPillRect.contains(canvasPoint)) {
             return (zone: CardHoverZone.body, card: selected);
@@ -191,26 +196,29 @@ class CardsTelemetryController extends ChangeNotifier {
             return (zone: CardHoverZone.corner, card: selected);
           }
 
-          // Aresta Direita (Vertical)
-          final rightEdgeRect = Rect.fromLTWH(
-            selected.x + selected.width - edgeThickness / 2,
-            selected.y,
-            edgeThickness,
-            cardH - cornerSize,
-          );
-          if (rightEdgeRect.contains(canvasPoint)) {
-            return (zone: CardHoverZone.rightEdge, card: selected);
-          }
+          // Apenas cards não-PDF possuem alças de aresta reta (PDF usa exclusivamente vértice inferior direito)
+          if (selected.cardType != CardType.pdf) {
+            // Aresta Direita (Vertical)
+            final rightEdgeRect = Rect.fromLTWH(
+              selected.x + selected.width - edgeThickness / 2,
+              selected.y,
+              edgeThickness,
+              cardH - cornerSize,
+            );
+            if (rightEdgeRect.contains(canvasPoint)) {
+              return (zone: CardHoverZone.rightEdge, card: selected);
+            }
 
-          // Aresta Inferior (Horizontal) - Borda generosa para redimensionamento limpo
-          final bottomEdgeRect = Rect.fromLTWH(
-            selected.x,
-            selected.y + cardH - 12.0,
-            selected.width - cornerSize,
-            24.0,
-          );
-          if (bottomEdgeRect.contains(canvasPoint)) {
-            return (zone: CardHoverZone.bottomEdge, card: selected);
+            // Aresta Inferior (Horizontal) - Borda generosa para redimensionamento limpo
+            final bottomEdgeRect = Rect.fromLTWH(
+              selected.x,
+              selected.y + cardH - 12.0,
+              selected.width - cornerSize,
+              24.0,
+            );
+            if (bottomEdgeRect.contains(canvasPoint)) {
+              return (zone: CardHoverZone.bottomEdge, card: selected);
+            }
           }
         }
 
@@ -231,8 +239,9 @@ class CardsTelemetryController extends ChangeNotifier {
     // 2. Testa os demais cards em ordem reversa (topo para fundo) - Hitbox exata na geometria visível
     for (final card in cards.reversed) {
       if (card.id == selectedCardId) continue;
+      final double headerH = (card.cardType == CardType.pdf && (card.sourceMasterCardId == null || card.isDetached)) ? 28.0 : 0.0;
       final double minH = card.calculateMinHeight();
-      final double cardH = card.isCollapsed ? 36.0 : math.max(card.height, minH);
+      final double cardH = card.isCollapsed ? 36.0 : math.max(card.height + headerH, minH);
 
       final totalCardRect = Rect.fromLTWH(card.x, card.y, card.width, cardH);
       if (totalCardRect.contains(canvasPoint)) {

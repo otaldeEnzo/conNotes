@@ -9,6 +9,14 @@ bool globalIsEditingText = false;
 enum CardType {
   textLatex,
   media,
+  pdf,
+}
+
+/// Modo de exibicao do documento PDF no card
+enum PdfDisplayMode {
+  continuous,
+  singlePage,
+  grid,
 }
 
 /// Modelo de Dados para Cards no Canvas Infinito (Texto, Markdown, LaTeX, Mermaid & Mídia).
@@ -43,6 +51,17 @@ class CanvasCardModel {
   bool isFlippedVertical;
   final List<String> attachedStrokeIds;
   final bool isProcessing;
+  // Propriedades especificas de CardType.pdf
+  String? pdfPath;
+  PdfDisplayMode pdfDisplayMode;
+  int currentPdfPage;
+  int totalPdfPages;
+  double pdfPageGap;
+  bool isPdfLocked;
+  bool isDetached;
+  Map<int, List<String>> pageAttachedStrokeIds;
+  List<int> excludedPageIndices;
+  String? sourceMasterCardId;
   final DateTime createdAt;
   DateTime updatedAt;
 
@@ -77,14 +96,43 @@ class CanvasCardModel {
     this.isFlippedHorizontal = false,
     this.isFlippedVertical = false,
     this.attachedStrokeIds = const [],
+    this.pdfPath,
+    this.pdfDisplayMode = PdfDisplayMode.singlePage,
+    this.currentPdfPage = 1,
+    this.totalPdfPages = 1,
+    this.pdfPageGap = 56.0,
+    this.isPdfLocked = false,
+    this.isDetached = false,
+    this.sourceMasterCardId,
+    Map<int, List<String>>? pageAttachedStrokeIds,
+    List<int>? excludedPageIndices,
     DateTime? createdAt,
     DateTime? updatedAt,
   })  : _manualMinHeight = minHeight,
+        pageAttachedStrokeIds = pageAttachedStrokeIds ?? <int, List<String>>{},
+        excludedPageIndices = excludedPageIndices ?? <int>[],
         createdAt = createdAt ?? DateTime.now(),
         updatedAt = updatedAt ?? DateTime.now();
 
   /// Alias de tipo de card
   CardType get type => cardType;
+
+  /// Indica se o card e do tipo PDF
+  bool get isPdf => cardType == CardType.pdf;
+
+  /// Retorna os IDs de tracos vinculados a uma pagina especifica do PDF
+  List<String> getStrokesForPage(int pageNumber) {
+    return pageAttachedStrokeIds[pageNumber] ?? const [];
+  }
+
+  /// Retorna o conjunto consolidado de todos os IDs de tracos do card
+  Set<String> get allAttachedStrokeIds {
+    final ids = <String>{...attachedStrokeIds};
+    for (final strokes in pageAttachedStrokeIds.values) {
+      ids.addAll(strokes);
+    }
+    return ids;
+  }
 
   /// Centro geométrico do card no espaço do canvas
   Offset get center => Offset(x + width / 2.0, y + height / 2.0);
@@ -105,6 +153,34 @@ class CanvasCardModel {
         return math.max(100.0, width / originalAspectRatio!);
       }
       return 100.0;
+    }
+
+    if (cardType == CardType.pdf) {
+      final double effectiveAspectRatio =
+          (originalAspectRatio != null && originalAspectRatio! > 0)
+              ? originalAspectRatio!
+              : (1.0 / 1.4142); // Proporcao padrao A4 (0.7071)
+      final double singlePageHeight = width / effectiveAspectRatio;
+
+      if (pdfDisplayMode == PdfDisplayMode.singlePage || sourceMasterCardId != null) {
+        final double headerH = (sourceMasterCardId == null || isDetached) ? 28.0 : 0.0;
+        return math.max(100.0, singlePageHeight + headerH);
+      }
+
+      final int excludedCount = excludedPageIndices.toSet().length;
+      final int activePages = math.max(1, totalPdfPages - excludedCount);
+
+      if (pdfDisplayMode == PdfDisplayMode.grid) {
+        final int rows = (activePages / 2.0).ceil();
+        final double itemWidth = (width - pdfPageGap) / 2.0;
+        final double itemHeight = itemWidth / effectiveAspectRatio;
+        final double totalHeight = (rows * itemHeight) + (math.max(0, rows - 1) * pdfPageGap);
+        return math.max(100.0, totalHeight);
+      }
+
+      final double totalGaps = (activePages - 1) * pdfPageGap;
+      final double totalHeight = (activePages * singlePageHeight) + totalGaps;
+      return math.max(100.0, totalHeight);
     }
 
     const headerHeight = 36.0;
@@ -305,6 +381,16 @@ class CanvasCardModel {
     bool? isFlippedHorizontal,
     bool? isFlippedVertical,
     List<String>? attachedStrokeIds,
+    String? pdfPath,
+    PdfDisplayMode? pdfDisplayMode,
+    int? currentPdfPage,
+    int? totalPdfPages,
+    double? pdfPageGap,
+    bool? isPdfLocked,
+    bool? isDetached,
+    String? sourceMasterCardId,
+    Map<int, List<String>>? pageAttachedStrokeIds,
+    List<int>? excludedPageIndices,
     DateTime? createdAt,
     DateTime? updatedAt,
   }) {
@@ -339,6 +425,18 @@ class CanvasCardModel {
       isFlippedHorizontal: isFlippedHorizontal ?? this.isFlippedHorizontal,
       isFlippedVertical: isFlippedVertical ?? this.isFlippedVertical,
       attachedStrokeIds: attachedStrokeIds ?? this.attachedStrokeIds,
+      pdfPath: pdfPath ?? this.pdfPath,
+      pdfDisplayMode: pdfDisplayMode ?? this.pdfDisplayMode,
+      currentPdfPage: currentPdfPage ?? this.currentPdfPage,
+      totalPdfPages: totalPdfPages ?? this.totalPdfPages,
+      pdfPageGap: pdfPageGap ?? this.pdfPageGap,
+      isPdfLocked: isPdfLocked ?? this.isPdfLocked,
+      isDetached: isDetached ?? this.isDetached,
+      sourceMasterCardId: sourceMasterCardId ?? this.sourceMasterCardId,
+      pageAttachedStrokeIds: (pageAttachedStrokeIds ?? this.pageAttachedStrokeIds)
+          .map((k, v) => MapEntry(k, List<String>.from(v))),
+      excludedPageIndices:
+          List<int>.from(excludedPageIndices ?? this.excludedPageIndices),
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? DateTime.now(),
     );
@@ -376,6 +474,18 @@ class CanvasCardModel {
       'isFlippedHorizontal': isFlippedHorizontal,
       'isFlippedVertical': isFlippedVertical,
       'attachedStrokeIds': attachedStrokeIds,
+      'pdfPath': pdfPath,
+      'pdfDisplayMode': pdfDisplayMode.name,
+      'currentPdfPage': currentPdfPage,
+      'totalPdfPages': totalPdfPages,
+      'pdfPageGap': pdfPageGap,
+      'isPdfLocked': isPdfLocked,
+      'isDetached': isDetached,
+      'sourceMasterCardId': sourceMasterCardId,
+      'pageAttachedStrokeIds': pageAttachedStrokeIds.map(
+        (page, strokes) => MapEntry(page.toString(), strokes),
+      ),
+      'excludedPageIndices': excludedPageIndices,
       'createdAt': createdAt.toIso8601String(),
       'updatedAt': updatedAt.toIso8601String(),
     };
@@ -416,10 +526,53 @@ class CanvasCardModel {
       }
     }
 
+    PdfDisplayMode parsedPdfMode = PdfDisplayMode.singlePage;
+    if (map['pdfDisplayMode'] != null) {
+      for (final m in PdfDisplayMode.values) {
+        if (m.name == map['pdfDisplayMode']) {
+          parsedPdfMode = m;
+          break;
+        }
+      }
+    }
+
+    final Map<int, List<String>> parsedPageAttachedStrokes = {};
+    if (map['pageAttachedStrokeIds'] is Map) {
+      final rawMap = map['pageAttachedStrokeIds'] as Map;
+      rawMap.forEach((key, value) {
+        final pageNum = int.tryParse(key.toString());
+        if (pageNum != null && value is List) {
+          parsedPageAttachedStrokes[pageNum] =
+              value.map((e) => e.toString()).toList();
+        }
+      });
+    }
+
+    final List<int> parsedExcludedPages = [];
+    if (map['excludedPageIndices'] is List) {
+      for (final item in map['excludedPageIndices'] as List) {
+        if (item is num) {
+          parsedExcludedPages.add(item.toInt());
+        } else if (item != null) {
+          final parsed = int.tryParse(item.toString());
+          if (parsed != null) parsedExcludedPages.add(parsed);
+        }
+      }
+    }
+
+    String defaultTitle;
+    if (parsedType == CardType.media) {
+      defaultTitle = 'Media';
+    } else if (parsedType == CardType.pdf) {
+      defaultTitle = 'PDF STEM';
+    } else {
+      defaultTitle = 'Card STEM';
+    }
+
     return CanvasCardModel(
       id: map['id']?.toString() ?? 'card_${DateTime.now().millisecondsSinceEpoch}',
       cardType: parsedType,
-      title: map['title']?.toString() ?? (parsedType == CardType.media ? 'Media' : 'Card STEM'),
+      title: map['title']?.toString() ?? defaultTitle,
       x: (map['x'] as num?)?.toDouble() ?? 100.0,
       y: (map['y'] as num?)?.toDouble() ?? 100.0,
       width: (map['width'] as num?)?.toDouble() ?? 340.0,
@@ -450,6 +603,16 @@ class CanvasCardModel {
               ?.map((e) => e.toString())
               .toList() ??
           const [],
+      pdfPath: map['pdfPath']?.toString(),
+      pdfDisplayMode: parsedPdfMode,
+      currentPdfPage: (map['currentPdfPage'] as num?)?.toInt() ?? 1,
+      totalPdfPages: (map['totalPdfPages'] as num?)?.toInt() ?? 1,
+      pdfPageGap: (map['pdfPageGap'] as num?)?.toDouble() ?? 56.0,
+      isPdfLocked: map['isPdfLocked'] == true,
+      isDetached: map['isDetached'] == true,
+      sourceMasterCardId: map['sourceMasterCardId']?.toString(),
+      pageAttachedStrokeIds: parsedPageAttachedStrokes,
+      excludedPageIndices: parsedExcludedPages,
       createdAt: map['createdAt'] != null ? DateTime.tryParse(map['createdAt'].toString()) : null,
       updatedAt: map['updatedAt'] != null ? DateTime.tryParse(map['updatedAt'].toString()) : null,
     );

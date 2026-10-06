@@ -1,3 +1,4 @@
+import 'dart:math' as math;
 import 'dart:ui';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
@@ -104,17 +105,26 @@ class _NoteTabBarState extends State<NoteTabBar> {
     final iconColor = MoscaroTokens.iconInactive;
     final dividerColor = isLight ? Colors.black12 : Colors.white24;
 
-    return AnimatedContainer(
-      duration: const Duration(milliseconds: 200),
-      curve: Curves.easeOutCubic,
-      height: 38,
-      width: targetWidth,
-      child: Column(
-        children: [
-          Expanded(
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final maxW = math.max(0.0, constraints.maxWidth);
+        final effectiveTargetWidth = maxW > 0 ? math.min(targetWidth, maxW) : targetWidth;
+
+        return AnimatedContainer(
+          duration: const Duration(milliseconds: 200),
+          curve: Curves.easeOutCubic,
+          height: 38,
+          width: effectiveTargetWidth,
+          child: ClipRect(
+            child: Column(
               children: [
+                Expanded(
+                  child: SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    physics: const ClampingScrollPhysics(),
+                    child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
                 if (widget.onBackToHome != null) ...[
                   IconButton(
                     icon: SvgIcon(
@@ -209,6 +219,7 @@ class _NoteTabBarState extends State<NoteTabBar> {
               ],
             ),
           ),
+        ),
           if (widget.activeNoteIds.isNotEmpty && _scrollController.hasClients && _scrollController.position.maxScrollExtent > 0)
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 14),
@@ -234,12 +245,15 @@ class _NoteTabBarState extends State<NoteTabBar> {
                 ),
               ),
             ),
-        ],
+          ],
+        ),
       ),
     ).moscaroV2(
       borderRadius: MoscaroTokens.radiusPill,
       enableBlur: MoscaroTokens.enableToolbarBlur,
       padding: const EdgeInsets.only(left: 4, right: 4, top: 2, bottom: 2),
+    );
+      },
     );
   }
 }

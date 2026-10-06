@@ -7,6 +7,7 @@ import 'svg_icon.dart';
 enum CardTypePreset {
   generalMarkdownLatex,
   media,
+  pdf,
 }
 
 /// Sub-Barra de Criação de Cards no Canvas (100% Moscaro Glass).
@@ -49,6 +50,12 @@ class CardsSubBar extends StatelessWidget {
             'icon': 'image',
             'label': 'Card de Mídia',
             'desc': 'Imagens, diagramas e GIFs (Upload ou Ctrl+V)',
+          },
+          {
+            'preset': CardTypePreset.pdf,
+            'icon': 'pdf',
+            'label': 'Card PDF STEM',
+            'desc': 'Visualização contínua ou página única (Upload, Drag&Drop ou Ctrl+V)',
           },
         ];
 
