@@ -104,9 +104,9 @@ class SelectionOverlayPainter extends CustomPainter {
       }
     }
 
-    // 2. Se houver traços selecionados ou multi-seleção, desenhar a Bounding Box com 8 alças
-    final hasStrokesOrMultiItems = activeState.selectedStrokeIds.isNotEmpty || activeState.selectedCardIds.length > 1;
-    if (activeState.hasSelection && hasStrokesOrMultiItems) {
+    // 2. Se houver traços selecionados ou cards selecionados, desenhar a Bounding Box com 8 alças
+    final hasSelectableItems = activeState.selectedStrokeIds.isNotEmpty || activeState.selectedCardIds.isNotEmpty;
+    if (activeState.hasSelection && hasSelectableItems && activeState.bounds != null) {
       final bounds = activeState.bounds!;
       final dragOffset = activeState.dragOffset;
       final transformBounds = activeState.transformBounds;

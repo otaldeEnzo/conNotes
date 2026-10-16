@@ -35,6 +35,9 @@ class InkInputHandler {
     activeStrokeUpdateNotifier.value++;
   }
 
+  Offset? _smoothedCursorPos;
+  double _smoothedPressure = 0.6;
+
   void startStroke({
     required Offset canvasPoint,
     required double pressure,
@@ -56,6 +59,8 @@ class InkInputHandler {
             ? protractorState.snapPoint(canvasPoint)
             : null);
     final effectiveStartPoint = snapped ?? canvasPoint;
+    _smoothedCursorPos = effectiveStartPoint;
+    _smoothedPressure = pressure;
 
     isDrawing = true;
     final isShift = HardwareKeyboard.instance.isShiftPressed;
@@ -100,7 +105,7 @@ class InkInputHandler {
   void _scheduleDrawAndHold(int durationMs, PenSlotPreset preset, double pressure) {
     drawAndHoldTimer?.cancel();
     drawAndHoldTimer = Timer(Duration(milliseconds: durationMs), () {
-      if (isDrawing && activeStroke != null && activeStroke!.points.length >= 20 && !isSmartShapeSnapped) {
+      if (isDrawing && activeStroke != null && activeStroke!.points.length >= 14 && !isSmartShapeSnapped) {
         final recognized = SmartShapeEngine.recognizeDrawnShape(activeStroke!.points);
         if (recognized != null) {
           isSmartShapeSnapped = true;
@@ -150,7 +155,6 @@ class InkInputHandler {
     int drawAndHoldDurationMs = 700,
   }) {
     if (!isDrawing || activeStroke == null) return;
-    onInteracting();
 
     // 1. Teclas Modificadoras: Shift = Linha Reta, Ctrl = Seta STEM
     final isShift = HardwareKeyboard.instance.isShiftPressed;
@@ -210,52 +214,55 @@ class InkInputHandler {
       return;
     }
 
-    // 3. Desenho normal da caneta
+    // 3. Desenho normal da caneta com Estabilização Adaptativa de Velocidade (Estilo 1€ Filter / GoodNotes)
+    final isSnappedToTool = (rulerState != null && rulerState.isVisible) ||
+        (protractorState != null && protractorState.isVisible);
     final snapped = (rulerState != null && rulerState.isVisible)
         ? rulerState.snapPoint(canvasPoint)
         : ((protractorState != null && protractorState.isVisible)
             ? protractorState.snapPoint(canvasPoint)
             : null);
-    final effectivePoint = snapped ?? canvasPoint;
+    final rawPoint = snapped ?? canvasPoint;
 
-    final lastPoint = activeStroke!.points.last.point;
-    if ((effectivePoint - lastPoint).distanceSquared >= 2.25) {
-      activeStroke!.points.add(StrokePoint(point: effectivePoint, pressure: pressure));
-      
-      final pts = activeStroke!.points;
-      final len = pts.length;
-      if (len >= 4) {
-        activeStroke!.cachedPath ??= Path();
-        if ((activeStroke!.toolType == InkToolType.fountain || activeStroke!.enablePressure) && !activeStroke!.isShape) {
-          if (len >= 5) {
-            final segment = FreehandOutlineRenderer.generateOutlinePath(
-              pts.sublist(len - 5, len - 2),
-              baseWidth: activeStroke!.strokeWidth,
-              isTapered: activeStroke!.toolType == InkToolType.fountain,
-            );
-            activeStroke!.cachedPath!.addPath(segment, Offset.zero);
-          }
-        } else {
-          final p0 = pts[len - 4].point;
-          final p1 = pts[len - 3].point;
-          final mid = Offset((p0.dx + p1.dx) / 2, (p0.dy + p1.dy) / 2);
-          if (len == 4) {
-            final first = pts[0].point;
-            final second = pts[1].point;
-            final mid0 = Offset((first.dx + second.dx) / 2, (first.dy + second.dy) / 2);
-            activeStroke!.cachedPath!.moveTo(first.dx, first.dy);
-            activeStroke!.cachedPath!.quadraticBezierTo(first.dx, first.dy, mid0.dx, mid0.dy);
-            activeStroke!.cachedPath!.quadraticBezierTo(second.dx, second.dy, mid.dx, mid.dy);
-          } else {
-            activeStroke!.cachedPath!.quadraticBezierTo(p0.dx, p0.dy, mid.dx, mid.dy);
-          }
-        }
-      }
+    final prevSmoothed = _smoothedCursorPos ?? rawPoint;
+    final rawDelta = rawPoint - prevSmoothed;
+    final rawDist = rawDelta.distance;
 
+    // Quando não está preso à régua/transferidor, aplica filtro adaptativo anti-tremor (jitter)
+    // Em baixa velocidade (< 8px), filtra intensamente o tremor da mão/digitalizador (alpha ~0.36).
+    // Em alta velocidade, reduz a inércia (alpha até 0.85) para zero input-lag.
+    final Offset effectivePoint;
+    if (isSnappedToTool && snapped != null) {
+      effectivePoint = snapped;
+      _smoothedCursorPos = snapped;
+    } else {
+      final velocityFactor = (rawDist / 10.0).clamp(0.0, 1.0);
+      final alpha = 0.36 + 0.49 * velocityFactor;
+      effectivePoint = Offset(
+        prevSmoothed.dx + rawDelta.dx * alpha,
+        prevSmoothed.dy + rawDelta.dy * alpha,
+      );
+      _smoothedCursorPos = effectivePoint;
+    }
+
+    _smoothedPressure = _smoothedPressure * 0.45 + pressure * 0.55;
+
+    final pts = activeStroke!.points;
+    final lastPoint = pts.last.point;
+    final distSq = (effectivePoint - lastPoint).distanceSquared;
+
+    // Limiar mínimo de espaçamento (1.35px, distSq >= 1.8) para evitar acúmulo de micro-vértices
+    // que causam instabilidade de tangente/normal e serrilhado no contorno.
+    if (distSq >= 1.8) {
+      pts.add(StrokePoint(point: effectivePoint, pressure: _smoothedPressure));
+      activeStroke!.cachedPath = null;
       activeStrokeUpdateNotifier.value++;
 
-      // Reinicia o timer Draw & Hold enquanto a caneta estiver em movimento
-      _scheduleDrawAndHold(drawAndHoldDurationMs, preset, pressure);
+      if (distSq < 16.0) {
+        _scheduleDrawAndHold(drawAndHoldDurationMs, preset, _smoothedPressure);
+      } else {
+        drawAndHoldTimer?.cancel();
+      }
     }
   }
 
@@ -323,11 +330,26 @@ class InkInputHandler {
     shapeDragStartPoint = null;
     if (!isDrawing || activeStroke == null) return null;
 
-    final finished = activeStroke;
+    final finished = activeStroke!;
     isDrawing = false;
     activeStroke = null;
     isSmartShapeSnapped = false;
     snappedShapeType = null;
+
+    // Garante que o caminho cachedPath definitivo seja construído com 100% dos pontos finais
+    if (!finished.isShape && finished.points.isNotEmpty) {
+      if ((finished.toolType == InkToolType.fountain || finished.enablePressure)) {
+        finished.cachedPath = FreehandOutlineRenderer.generateOutlinePath(
+          finished.points,
+          baseWidth: finished.strokeWidth,
+          isTapered: finished.toolType == InkToolType.fountain,
+          isLive: false,
+        );
+      } else {
+        finished.cachedPath = StrokePictureCache.buildSmoothCatmullRomPath(finished.points);
+      }
+    }
+
     activeStrokeUpdateNotifier.value++;
     return finished;
   }

@@ -35,7 +35,7 @@ class MockPdfDocumentService implements PdfDocumentService {
   Future<void> initialize() async {}
 
   @override
-  Future<pdfrx.PdfDocument> loadDocument(String filePath) async {
+  Future<pdfrx.PdfDocument> loadDocument(String filePath, {pdfrx.PdfPasswordProvider? passwordProvider}) async {
     if (delay > Duration.zero) await Future.delayed(delay);
     return MockPdfDocument(totalPages);
   }
@@ -61,6 +61,9 @@ class MockPdfDocumentService implements PdfDocumentService {
 
   @override
   void disposeDocument(String filePath) {}
+
+  @override
+  Future<List<pdfrx.PdfOutlineNode>> loadOutline(String filePath) async => const [];
 
   @override
   void disposeAll() {}

@@ -37,16 +37,33 @@ class PromptInputBoxState extends State<PromptInputBox> with SingleTickerProvide
 
   String? _attachedImageBase64;
   Uint8List? _attachedImageBytes;
+  String? _attachedTextReference;
 
   /// Permite que chamadores externos (ex: Captura de Área do Canvas ou Card de Mídia)
   /// anexem uma imagem diretamente ao prompt box com foco.
-  void attachImage({required Uint8List bytes, required String base64, String? defaultPrompt}) {
+  void attachImage({
+    required Uint8List bytes,
+    required String base64,
+    String? defaultPrompt,
+    bool clearPrompt = false,
+  }) {
     setState(() {
       _attachedImageBytes = bytes;
       _attachedImageBase64 = base64;
-      if (defaultPrompt != null && _textController.text.trim().isEmpty) {
+      if (clearPrompt) {
+        _textController.clear();
+      } else if (defaultPrompt != null && _textController.text.trim().isEmpty) {
         _textController.text = defaultPrompt;
       }
+    });
+    _focusNode.requestFocus();
+  }
+
+  /// Permite que chamadores externos anexem um trecho de texto selecionado
+  /// como citação de referência destacada acima da barra de digitação.
+  void attachTextReference(String text, {String? defaultPrompt}) {
+    setState(() {
+      _attachedTextReference = text.trim();
     });
     _focusNode.requestFocus();
   }
@@ -179,13 +196,25 @@ class PromptInputBoxState extends State<PromptInputBox> with SingleTickerProvide
 
   void _handleSend() {
     final text = _textController.text.trim();
-    if (text.isEmpty && _attachedImageBase64 == null) return;
+    if (text.isEmpty && _attachedImageBase64 == null && _attachedTextReference == null) return;
 
-    widget.onSubmit(text, _attachedImageBase64);
+    final String promptToSend;
+    if (_attachedTextReference != null && _attachedTextReference!.isNotEmpty) {
+      if (text.isEmpty) {
+        promptToSend = 'Analise e explique detalhadamente o seguinte trecho selecionado do documento:\n\n> "$_attachedTextReference"';
+      } else {
+        promptToSend = 'Referência do documento:\n> "$_attachedTextReference"\n\n$text';
+      }
+    } else {
+      promptToSend = text;
+    }
+
+    widget.onSubmit(promptToSend, _attachedImageBase64);
     _textController.clear();
     setState(() {
       _attachedImageBase64 = null;
       _attachedImageBytes = null;
+      _attachedTextReference = null;
       _showMentionMenu = false;
     });
   }
@@ -296,6 +325,68 @@ class PromptInputBoxState extends State<PromptInputBox> with SingleTickerProvide
               borderColor: accent.withValues(alpha: 0.45),
               borderRadius: 10,
               padding: const EdgeInsets.all(6),
+              enableBlur: true,
+            ),
+          ),
+
+        // Trecho de Referência Anexado (Citação do PDF / STEM)
+        if (_attachedTextReference != null)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(6.0),
+                  decoration: BoxDecoration(
+                    color: accent.withValues(alpha: 0.15),
+                    borderRadius: BorderRadius.circular(6.0),
+                  ),
+                  child: SvgIcon(name: 'highlighter', color: accent, size: 14),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        'Referência Citada',
+                        style: TextStyle(
+                          color: accent,
+                          fontSize: 10.5,
+                          fontWeight: FontWeight.bold,
+                          letterSpacing: 0.2,
+                        ),
+                      ),
+                      const SizedBox(height: 1),
+                      Text(
+                        _attachedTextReference!.replaceAll('\n', ' '),
+                        style: TextStyle(
+                          color: MoscaroTokens.textSecondary,
+                          fontSize: 11,
+                          fontStyle: FontStyle.italic,
+                        ),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
+                  ),
+                ),
+                IconButton(
+                  tooltip: 'Remover referência',
+                  icon: SvgIcon(name: 'close', color: MoscaroTokens.textMuted, size: 14),
+                  onPressed: () {
+                    setState(() {
+                      _attachedTextReference = null;
+                    });
+                  },
+                ),
+              ],
+            ).moscaroV2(
+              backgroundColor: theme.backgroundSurface.withValues(alpha: 0.32),
+              borderColor: accent.withValues(alpha: 0.45),
+              borderRadius: 10,
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
               enableBlur: true,
             ),
           ),

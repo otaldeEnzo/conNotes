@@ -75,6 +75,10 @@ class PdfResizeMath {
       return pageRatio;
     }
     final activePages = math.max(1, card.totalPdfPages - card.excludedPageIndices.length);
+    if (card.pdfDisplayMode == PdfDisplayMode.grid) {
+      final rows = (activePages / 2.0).ceil();
+      return (pageRatio * 2.0) / rows;
+    }
     return pageRatio / activePages;
   }
 
@@ -151,8 +155,10 @@ class PdfResizeMath {
 /// Adheres to Moscaro v2 liquid glass styling with aurora cyan glow.
 class PdfCornerResizeHandle extends StatefulWidget {
   final PdfCornerVertex vertex;
-  final double left;
-  final double top;
+  final double? left;
+  final double? top;
+  final double? right;
+  final double? bottom;
   final bool isDragging;
   final GestureDragStartCallback onPanStart;
   final GestureDragUpdateCallback onPanUpdate;
@@ -162,8 +168,10 @@ class PdfCornerResizeHandle extends StatefulWidget {
   const PdfCornerResizeHandle({
     super.key,
     required this.vertex,
-    required this.left,
-    required this.top,
+    this.left,
+    this.top,
+    this.right,
+    this.bottom,
     this.isDragging = false,
     required this.onPanStart,
     required this.onPanUpdate,
@@ -181,20 +189,18 @@ class _PdfCornerResizeHandleState extends State<PdfCornerResizeHandle> {
     const hitTargetSize = 28.0;
     final cursor = getPdfCornerCursor(widget.vertex);
 
-    return Positioned(
-      left: widget.left,
-      top: widget.top,
-      width: hitTargetSize,
-      height: hitTargetSize,
-      child: MouseRegion(
-        cursor: cursor,
-        hitTestBehavior: HitTestBehavior.opaque,
-        child: GestureDetector(
-          behavior: HitTestBehavior.opaque,
-          onPanStart: widget.onPanStart,
-          onPanUpdate: widget.onPanUpdate,
-          onPanEnd: widget.onPanEnd,
-          onPanCancel: widget.onPanCancel,
+    final content = MouseRegion(
+      cursor: cursor,
+      hitTestBehavior: HitTestBehavior.opaque,
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onPanStart: widget.onPanStart,
+        onPanUpdate: widget.onPanUpdate,
+        onPanEnd: widget.onPanEnd,
+        onPanCancel: widget.onPanCancel,
+        child: SizedBox(
+          width: hitTargetSize,
+          height: hitTargetSize,
           child: CustomPaint(
             painter: _PdfCornerGripPainter(
               color: MoscaroTokens.auroraBlue,
@@ -204,6 +210,20 @@ class _PdfCornerResizeHandleState extends State<PdfCornerResizeHandle> {
         ),
       ),
     );
+
+    if (widget.left != null || widget.top != null || widget.right != null || widget.bottom != null) {
+      return Positioned(
+        left: widget.left,
+        top: widget.top,
+        right: widget.right,
+        bottom: widget.bottom,
+        width: hitTargetSize,
+        height: hitTargetSize,
+        child: content,
+      );
+    }
+
+    return content;
   }
 }
 
@@ -253,7 +273,7 @@ class PdfCornerResizeFrame extends StatefulWidget {
   final ValueNotifier<double>? zoomNotifier;
   final ValueChanged<CanvasCardModel> onUpdateCard;
   final List<CanvasCardModel>? allCards;
-  final Widget Function(BuildContext context, Size currentSize) builder;
+  final Widget Function(BuildContext context, Size currentSize, [Widget? resizeHandle]) builder;
 
   const PdfCornerResizeFrame({
     super.key,
@@ -378,8 +398,7 @@ class _PdfCornerResizeFrameState extends State<PdfCornerResizeFrame> {
   void _onPanStart(DragStartDetails details, PdfCornerVertex vertex) {
     _dragStartGlobalPos = details.globalPosition;
     _initialWidth = widget.card.width;
-    final pageRatio = PdfResizeMath.calculatePageAspectRatio(widget.card);
-    _initialHeight = widget.card.width / pageRatio;
+    _initialHeight = widget.card.calculateMinHeight();
     _initialCardX = widget.card.x;
     _initialCardY = widget.card.y;
 
@@ -417,6 +436,12 @@ class _PdfCornerResizeFrameState extends State<PdfCornerResizeFrame> {
     );
     PdfFamilyLivePreviewController.instance.updateInteraction(transforms);
 
+    _dragStateNotifier.value = PdfResizeDragState(
+      size: Size(result.newWidth, result.newHeight),
+      translationOffset: Offset(result.shiftX, result.shiftY),
+      vertex: vertex,
+    );
+
     CardsTelemetryController.instance.updateCardResize(
       delta: delta,
       currentSize: Size(result.newWidth, result.newHeight),
@@ -425,6 +450,7 @@ class _PdfCornerResizeFrameState extends State<PdfCornerResizeFrame> {
 
   void _onPanEnd(DragEndDetails details) {
     try {
+      final dragState = _dragStateNotifier.value;
       final liveState = PdfFamilyLivePreviewController.instance.value;
       final transforms = liveState.cardTransforms;
       if (transforms != null && transforms.isNotEmpty && widget.allCards != null) {
@@ -445,6 +471,13 @@ class _PdfCornerResizeFrameState extends State<PdfCornerResizeFrame> {
             ));
           }
         }
+      } else if (dragState != null) {
+        widget.onUpdateCard(widget.card.copyWith(
+          width: dragState.size.width,
+          height: dragState.size.height,
+          x: widget.card.x + dragState.translationOffset.dx,
+          y: widget.card.y + dragState.translationOffset.dy,
+        ));
       }
     } finally {
       CardsTelemetryController.instance.endCardResize();
@@ -477,57 +510,38 @@ class _PdfCornerResizeFrameState extends State<PdfCornerResizeFrame> {
     return ValueListenableBuilder<PdfResizeDragState?>(
       valueListenable: _dragStateNotifier,
       builder: (context, dragState, _) {
-        final currentWidth = dragState?.size.width ?? widget.card.width;
-        final pageRatio = PdfResizeMath.calculatePageAspectRatio(widget.card);
-        final expectedPageHeight = currentWidth / pageRatio;
-        final currentHeight = dragState?.size.height ?? expectedPageHeight;
-        final isMasterPdf = widget.card.cardType == CardType.pdf && widget.card.sourceMasterCardId == null;
-        final headerH = isMasterPdf ? 28.0 : 0.0;
-        final totalFrameHeight = currentHeight + headerH;
-        final translation = dragState?.translationOffset ?? Offset.zero;
+        final currentWidth = widget.card.width;
+        final currentHeight = widget.card.calculateMinHeight();
 
         final showHandles = widget.isSelected &&
             !widget.card.isPinned &&
             !widget.card.isPdfLocked &&
             !widget.card.isCollapsed;
 
-        const handleSize = 28.0;
-        const headerOffset = 60.0;
+        final handleWidget = showHandles
+            ? PdfCornerResizeHandle(
+                vertex: PdfCornerVertex.bottomRight,
+                right: 0,
+                bottom: 0,
+                isDragging: dragState?.vertex == PdfCornerVertex.bottomRight,
+                onPanStart: (d) => _onPanStart(d, PdfCornerVertex.bottomRight),
+                onPanUpdate: (d) => _onPanUpdate(d, PdfCornerVertex.bottomRight),
+                onPanEnd: _onPanEnd,
+                onPanCancel: _onPanCancel,
+              )
+            : null;
 
-        final frameContent = InfiniteHitTestSizedBox(
+        return InfiniteHitTestSizedBox(
           width: currentWidth,
-          height: totalFrameHeight + headerOffset,
+          height: currentHeight + 60.0,
           child: InfiniteHitTestStack(
             clipBehavior: Clip.none,
             children: [
-              // 1. Content builder receiving constrained current size
               Positioned.fill(
-                child: widget.builder(context, Size(currentWidth, currentHeight)),
+                child: widget.builder(context, Size(currentWidth, currentHeight), handleWidget),
               ),
-
-              // 2. The corner vertex handle (Exclusively Bottom-Right)
-              if (showHandles)
-                PdfCornerResizeHandle(
-                  vertex: PdfCornerVertex.bottomRight,
-                  left: currentWidth - handleSize,
-                  top: headerOffset + totalFrameHeight - handleSize,
-                  isDragging: dragState?.vertex == PdfCornerVertex.bottomRight,
-                  onPanStart: (d) => _onPanStart(d, PdfCornerVertex.bottomRight),
-                  onPanUpdate: (d) => _onPanUpdate(d, PdfCornerVertex.bottomRight),
-                  onPanEnd: _onPanEnd,
-                  onPanCancel: _onPanCancel,
-                ),
             ],
           ),
-        );
-
-        if (translation == Offset.zero) {
-          return frameContent;
-        }
-
-        return Transform.translate(
-          offset: translation,
-          child: frameContent,
         );
       },
     );

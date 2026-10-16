@@ -27,12 +27,15 @@ class CanvasCardsLayer extends StatefulWidget {
   final ValueChanged<String?> onSelectCard;
   final ValueChanged<String> onDeleteCard;
   final ValueChanged<CanvasCardModel> onDuplicateCard;
+  final ValueChanged<CanvasCardModel>? onAddCard;
   final double gridSpacing;
   final ValueChanged<CanvasCardModel>? onSolveWithAi;
+  final ValueChanged<String>? onAskAiText;
   final ValueChanged<CanvasCardModel>? onExtractLatex;
   final List<InkStroke> Function(Set<String> ids)? getAttachedStrokes;
   final String activeTool;
   final void Function(List<InkStroke> finalStrokes, String cardId)? onSyncCardStrokes;
+  final void Function(String masterCardId, int pageNumber, String? text, [CanvasCardModel? sourceCard])? onJumpToPdfSource;
 
   const CanvasCardsLayer({
     super.key,
@@ -40,6 +43,7 @@ class CanvasCardsLayer extends StatefulWidget {
     this.getAttachedStrokes,
     this.activeTool = 'pen',
     this.onSyncCardStrokes,
+    this.onJumpToPdfSource,
     required this.selectedCardId,
     this.selectionState = const SelectionState(),
     this.getSelectionState,
@@ -50,8 +54,10 @@ class CanvasCardsLayer extends StatefulWidget {
     required this.onSelectCard,
     required this.onDeleteCard,
     required this.onDuplicateCard,
+    this.onAddCard,
     this.gridSpacing = 28.0,
     this.onSolveWithAi,
+    this.onAskAiText,
     this.onExtractLatex,
   });
 
@@ -210,13 +216,17 @@ class _CanvasCardsLayerState extends State<CanvasCardsLayer> {
           onSelectCard: widget.onSelectCard,
           onDeleteCard: widget.onDeleteCard,
           onDuplicateCard: widget.onDuplicateCard,
+          onAddCard: widget.onAddCard,
           allCards: widget.cards,
           gridSpacing: widget.gridSpacing,
           onSolveWithAi: widget.onSolveWithAi != null ? () => widget.onSolveWithAi!(card) : null,
+          onSolveCardWithAi: widget.onSolveWithAi,
+          onAskAiText: widget.onAskAiText,
           onExtractLatex: widget.onExtractLatex != null ? () => widget.onExtractLatex!(card) : null,
           getAttachedStrokes: widget.getAttachedStrokes,
           activeTool: widget.activeTool,
           onSyncCardStrokes: widget.onSyncCardStrokes,
+          onJumpToPdfSource: widget.onJumpToPdfSource,
         );
 
         if (widget.selectionUpdateNotifier != null) {

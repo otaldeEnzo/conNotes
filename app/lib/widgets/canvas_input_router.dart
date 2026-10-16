@@ -862,7 +862,9 @@ class _CanvasInputRouterState extends State<CanvasInputRouter> {
           }
 
           _lastPointerLocalPosition = event.localPosition;
-          ctx.updateMousePos(event.localPosition);
+          if (!_inkHandler.isDrawing) {
+            ctx.updateMousePos(event.localPosition);
+          }
 
           if (_lastMediaClickPos != null && (event.localPosition - _lastMediaClickPos!).distance > 6.0) {
             _lastMediaClickTime = 0;
@@ -874,29 +876,35 @@ class _CanvasInputRouterState extends State<CanvasInputRouter> {
           final canvasPoint = Offset(math.max(0.0, rawCanvasPoint.dx), math.max(0.0, rawCanvasPoint.dy));
 
           final isInteractingCard = _isInteractingWithCard || CardsTelemetryController.instance.isInteractingWithCard;
+          final isActivelyErasing = (ctx.activeTool == 'eraser' && event.buttons != 0) ||
+              (_isActionExecuting && (_currentActiveAction == StylusBarrelAction.strokeEraser || _currentActiveAction == StylusBarrelAction.pixelEraser));
 
-          CardsTelemetryController.instance.updatePointerEvent(
-            eventType: 'Move',
-            deviceKind: event.kind,
-            buttons: event.buttons,
-            pressure: event.pressure,
-            screenPosition: event.localPosition,
-            canvasPosition: canvasPoint,
-            activeTool: ctx.activeTool,
-            selectedCardId: ctx.selectedCardId,
-            cards: note?.cards,
-            isInteractingWithCard: isInteractingCard,
-          );
+          if (!_inkHandler.isDrawing && !isActivelyErasing) {
+            CardsTelemetryController.instance.updatePointerEvent(
+              eventType: 'Move',
+              deviceKind: event.kind,
+              buttons: event.buttons,
+              pressure: event.pressure,
+              screenPosition: event.localPosition,
+              canvasPosition: canvasPoint,
+              activeTool: ctx.activeTool,
+              selectedCardId: ctx.selectedCardId,
+              cards: note?.cards,
+              isInteractingWithCard: isInteractingCard,
+            );
+          }
 
-          final effectiveAction = _getEffectiveStylusAction(event.buttons, event.kind);
-          _updateHoverState(
-            position: event.localPosition,
-            deviceKind: event.kind,
-            buttons: event.buttons,
-            pressure: event.pressure,
-            distance: event.distance,
-            isVisible: _isActionExecuting || effectiveAction != StylusBarrelAction.disabled,
-          );
+          if (!_inkHandler.isDrawing) {
+            final effectiveAction = _getEffectiveStylusAction(event.buttons, event.kind);
+            _updateHoverState(
+              position: event.localPosition,
+              deviceKind: event.kind,
+              buttons: event.buttons,
+              pressure: event.pressure,
+              distance: event.distance,
+              isVisible: _isActionExecuting || effectiveAction != StylusBarrelAction.disabled,
+            );
+          }
 
           if (event.buttons == 4 || (event.buttons & kMiddleMouseButton != 0) || (_isActionExecuting && _currentActiveAction == StylusBarrelAction.pan)) {
             _panZoomHandler.handlePanDelta(event.delta);

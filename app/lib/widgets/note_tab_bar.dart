@@ -119,107 +119,105 @@ class _NoteTabBarState extends State<NoteTabBar> {
             child: Column(
               children: [
                 Expanded(
-                  child: SingleChildScrollView(
-                    scrollDirection: Axis.horizontal,
-                    physics: const ClampingScrollPhysics(),
-                    child: Row(
-                    mainAxisSize: MainAxisSize.min,
+                  child: Row(
                     children: [
-                if (widget.onBackToHome != null) ...[
-                  IconButton(
-                    icon: SvgIcon(
-                      name: 'home',
-                      size: 16,
-                      color: iconColor,
-                    ),
-                    onPressed: widget.onBackToHome,
-                    tooltip: 'Página Inicial (Home)',
-                    padding: EdgeInsets.zero,
-                    constraints: const BoxConstraints(),
-                  ),
-                  const SizedBox(width: 8),
-                ],
-                IconButton(
-                  icon: SvgIcon(
-                    assetName: 'grid',
-                    size: 18,
-                    color: widget.isSidebarOpen ? MoscaroTokens.auroraBlue : iconColor,
-                  ),
-                  onPressed: widget.onToggleSidebar,
-                  tooltip: 'Menu de Notas',
-                  padding: EdgeInsets.zero,
-                  constraints: const BoxConstraints(),
-                ),
-                const SizedBox(width: 8),
-                Container(width: 1, height: 14, color: dividerColor),
-                const SizedBox(width: 8),
-                Flexible(
-                  child: widget.activeNoteIds.isEmpty
-                      ? Center(
-                          child: Text(
-                            'Nenhuma nota aberta',
-                            style: TextStyle(color: textSecondary.withValues(alpha: 0.6), fontSize: 12),
+                      const SizedBox(width: 8),
+                      if (widget.onBackToHome != null) ...[
+                        IconButton(
+                          icon: SvgIcon(
+                            name: 'home',
+                            size: 16,
+                            color: iconColor,
                           ),
-                        )
-                      : Listener(
-                          onPointerSignal: _handlePointerSignal,
-                          child: ScrollConfiguration(
-                            behavior: ScrollConfiguration.of(context).copyWith(
-                              dragDevices: {
-                                PointerDeviceKind.touch,
-                                PointerDeviceKind.mouse,
-                                PointerDeviceKind.trackpad,
-                              },
-                              scrollbars: false,
-                            ),
-                            child: SingleChildScrollView(
-                              controller: _scrollController,
-                              scrollDirection: Axis.horizontal,
-                              child: Row(
-                                children: widget.activeNoteIds.map((noteId) {
-                                  final isSelected = noteId == widget.selectedNoteId;
-                                  final title = widget.noteTitles[noteId] ?? 'Nota sem título';
-
-                                  return _NoteTabItem(
-                                    key: ValueKey('tab_$noteId'),
-                                    noteId: noteId,
-                                    title: title,
-                                    isSelected: isSelected,
-                                    isLight: isLight,
-                                    textPrimary: textPrimary,
-                                    textSecondary: textSecondary,
-                                    onSelect: widget.onSelectNote,
-                                    onClose: widget.onCloseNote,
-                                  );
-                                }).toList(),
-                              ),
-                            ),
-                          ),
+                          onPressed: widget.onBackToHome,
+                          tooltip: 'Página Inicial (Home)',
+                          padding: EdgeInsets.zero,
+                          constraints: const BoxConstraints(),
                         ),
+                        const SizedBox(width: 8),
+                      ],
+                      IconButton(
+                        icon: SvgIcon(
+                          assetName: 'grid',
+                          size: 18,
+                          color: widget.isSidebarOpen ? MoscaroTokens.auroraBlue : iconColor,
+                        ),
+                        onPressed: widget.onToggleSidebar,
+                        tooltip: 'Menu de Notas',
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(),
+                      ),
+                      const SizedBox(width: 8),
+                      Container(width: 1, height: 14, color: dividerColor),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: widget.activeNoteIds.isEmpty
+                            ? Center(
+                                child: Text(
+                                  'Nenhuma nota aberta',
+                                  style: TextStyle(color: textSecondary.withValues(alpha: 0.6), fontSize: 12),
+                                ),
+                              )
+                            : Listener(
+                                onPointerSignal: _handlePointerSignal,
+                                child: ScrollConfiguration(
+                                  behavior: ScrollConfiguration.of(context).copyWith(
+                                    dragDevices: {
+                                      PointerDeviceKind.touch,
+                                      PointerDeviceKind.mouse,
+                                      PointerDeviceKind.trackpad,
+                                    },
+                                    scrollbars: false,
+                                  ),
+                                  child: SingleChildScrollView(
+                                    controller: _scrollController,
+                                    scrollDirection: Axis.horizontal,
+                                    physics: const ClampingScrollPhysics(),
+                                    child: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: widget.activeNoteIds.map((noteId) {
+                                        final isSelected = noteId == widget.selectedNoteId;
+                                        final title = widget.noteTitles[noteId] ?? 'Nota sem título';
+
+                                        return _NoteTabItem(
+                                          key: ValueKey('tab_$noteId'),
+                                          noteId: noteId,
+                                          title: title,
+                                          isSelected: isSelected,
+                                          isLight: isLight,
+                                          textPrimary: textPrimary,
+                                          textSecondary: textSecondary,
+                                          onSelect: widget.onSelectNote,
+                                          onClose: widget.onCloseNote,
+                                        );
+                                      }).toList(),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                      ),
+                      const SizedBox(width: 8),
+                      Container(width: 1, height: 14, color: dividerColor),
+                      const SizedBox(width: 8),
+                      IconButton(
+                        icon: SvgIcon(name: 'plus', color: iconColor, size: 16),
+                        onPressed: widget.onAddNote,
+                        tooltip: 'Nova Nota',
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(),
+                      ),
+                      const SizedBox(width: 8),
+                      IconButton(
+                        icon: SvgIcon(assetName: 'settings', size: 16, color: iconColor),
+                        onPressed: widget.onOpenSettings,
+                        tooltip: 'Configurações (Ctrl + ,)',
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(),
+                      ),
+                      const SizedBox(width: 8),
+                    ],
+                  ),
                 ),
-                const SizedBox(width: 10),
-                Container(width: 1, height: 14, color: dividerColor),
-                const SizedBox(width: 10),
-                IconButton(
-                  icon: SvgIcon(name: 'plus', color: iconColor, size: 16),
-                  onPressed: widget.onAddNote,
-                  tooltip: 'Nova Nota',
-                  padding: EdgeInsets.zero,
-                  constraints: const BoxConstraints(),
-                ),
-                const SizedBox(width: 8),
-                IconButton(
-                  icon: SvgIcon(assetName: 'settings', size: 16, color: iconColor),
-                  onPressed: widget.onOpenSettings,
-                  tooltip: 'Configurações (Ctrl + ,)',
-                  padding: EdgeInsets.zero,
-                  constraints: const BoxConstraints(),
-                ),
-                const SizedBox(width: 6),
-              ],
-            ),
-          ),
-        ),
           if (widget.activeNoteIds.isNotEmpty && _scrollController.hasClients && _scrollController.position.maxScrollExtent > 0)
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 14),

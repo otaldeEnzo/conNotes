@@ -60,10 +60,24 @@ class AiSidebarState extends State<AiSidebar> {
   bool _isScopeMenuOpen = false;
 
   /// Permite anexar imagem externamente (captura do canvas ou card de mídia)
-  void attachImage({required Uint8List bytes, required String base64, String? defaultPrompt}) {
+  void attachImage({
+    required Uint8List bytes,
+    required String base64,
+    String? defaultPrompt,
+    bool clearPrompt = false,
+  }) {
     promptInputKey.currentState?.attachImage(
       bytes: bytes,
       base64: base64,
+      defaultPrompt: defaultPrompt,
+      clearPrompt: clearPrompt,
+    );
+  }
+
+  /// Permite anexar texto de referência externamente (seleção em documento PDF)
+  void attachTextReference(String text, {String? defaultPrompt}) {
+    promptInputKey.currentState?.attachTextReference(
+      text,
       defaultPrompt: defaultPrompt,
     );
   }

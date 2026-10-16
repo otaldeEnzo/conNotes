@@ -298,6 +298,13 @@ class AppSettingsState {
   final bool enableAiHandwritingOcr;
   final NoteSummaryEngine noteSummaryEngine;
 
+  final bool enableCloudAiFeatures;
+  final bool enablePdfAiActions;
+  final bool enablePdfAiSummarize;
+  final bool enablePdfAiExtractLatex;
+  final bool enablePdfAiExplainDiagram;
+  final bool enablePdfAiFlashcards;
+
   const AppSettingsState({
     this.activeThemeId = 'moscaro_cyan',
     this.customBgMode = 'preset',
@@ -347,11 +354,12 @@ class AppSettingsState {
     this.enableAiHandwritingOcr = true,
     this.enableCloudAiFeatures = true,
     this.enablePdfAiActions = true,
+    this.enablePdfAiSummarize = true,
+    this.enablePdfAiExtractLatex = true,
+    this.enablePdfAiExplainDiagram = true,
+    this.enablePdfAiFlashcards = true,
     this.noteSummaryEngine = NoteSummaryEngine.aiMultimodal,
   });
-
-  final bool enableCloudAiFeatures;
-  final bool enablePdfAiActions;
 
   factory AppSettingsState.defaults() => const AppSettingsState();
 
@@ -404,6 +412,10 @@ class AppSettingsState {
     bool? enableAiHandwritingOcr,
     bool? enableCloudAiFeatures,
     bool? enablePdfAiActions,
+    bool? enablePdfAiSummarize,
+    bool? enablePdfAiExtractLatex,
+    bool? enablePdfAiExplainDiagram,
+    bool? enablePdfAiFlashcards,
     NoteSummaryEngine? noteSummaryEngine,
   }) {
     return AppSettingsState(
@@ -455,6 +467,10 @@ class AppSettingsState {
       enableAiHandwritingOcr: enableAiHandwritingOcr ?? this.enableAiHandwritingOcr,
       enableCloudAiFeatures: enableCloudAiFeatures ?? this.enableCloudAiFeatures,
       enablePdfAiActions: enablePdfAiActions ?? this.enablePdfAiActions,
+      enablePdfAiSummarize: enablePdfAiSummarize ?? this.enablePdfAiSummarize,
+      enablePdfAiExtractLatex: enablePdfAiExtractLatex ?? this.enablePdfAiExtractLatex,
+      enablePdfAiExplainDiagram: enablePdfAiExplainDiagram ?? this.enablePdfAiExplainDiagram,
+      enablePdfAiFlashcards: enablePdfAiFlashcards ?? this.enablePdfAiFlashcards,
       noteSummaryEngine: noteSummaryEngine ?? this.noteSummaryEngine,
     );
   }
@@ -509,6 +525,10 @@ class AppSettingsState {
       'enableAiHandwritingOcr': enableAiHandwritingOcr,
       'enableCloudAiFeatures': enableCloudAiFeatures,
       'enablePdfAiActions': enablePdfAiActions,
+      'enablePdfAiSummarize': enablePdfAiSummarize,
+      'enablePdfAiExtractLatex': enablePdfAiExtractLatex,
+      'enablePdfAiExplainDiagram': enablePdfAiExplainDiagram,
+      'enablePdfAiFlashcards': enablePdfAiFlashcards,
       'noteSummaryEngine': noteSummaryEngine.name,
     };
   }
@@ -629,6 +649,10 @@ class AppSettingsState {
       enableAiHandwritingOcr: json['enableAiHandwritingOcr'] as bool? ?? true,
       enableCloudAiFeatures: json['enableCloudAiFeatures'] as bool? ?? true,
       enablePdfAiActions: json['enablePdfAiActions'] as bool? ?? true,
+      enablePdfAiSummarize: json['enablePdfAiSummarize'] as bool? ?? true,
+      enablePdfAiExtractLatex: json['enablePdfAiExtractLatex'] as bool? ?? true,
+      enablePdfAiExplainDiagram: json['enablePdfAiExplainDiagram'] as bool? ?? true,
+      enablePdfAiFlashcards: json['enablePdfAiFlashcards'] as bool? ?? true,
       noteSummaryEngine: noteSummaryEngine,
     );
   }

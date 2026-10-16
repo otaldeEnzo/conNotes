@@ -50,13 +50,16 @@ class CanvasLayerStack extends StatelessWidget {
   final ValueChanged<String?> onSelectCard;
   final ValueChanged<String> onDeleteCard;
   final ValueChanged<CanvasCardModel> onDuplicateCard;
+  final ValueChanged<CanvasCardModel>? onAddCard;
   final ValueChanged<StemRulerState> onRulerStateChanged;
   final ValueChanged<StemProtractorState> onProtractorStateChanged;
   final VoidCallback onCloseRuler;
   final VoidCallback onCloseProtractor;
   final ValueChanged<CanvasCardModel>? onSolveWithAi;
+  final ValueChanged<String>? onAskAiText;
   final ValueChanged<CanvasCardModel>? onExtractLatex;
   final void Function(List<InkStroke> finalStrokes, String cardId)? onSyncCardStrokes;
+  final void Function(String masterCardId, int pageNumber, String? text, [CanvasCardModel? sourceCard])? onJumpToPdfSource;
 
   const CanvasLayerStack({
     super.key,
@@ -90,13 +93,16 @@ class CanvasLayerStack extends StatelessWidget {
     required this.onSelectCard,
     required this.onDeleteCard,
     required this.onDuplicateCard,
+    this.onAddCard,
     required this.onRulerStateChanged,
     required this.onProtractorStateChanged,
     required this.onCloseRuler,
     required this.onCloseProtractor,
     this.onSolveWithAi,
+    this.onAskAiText,
     this.onExtractLatex,
     this.onSyncCardStrokes,
+    this.onJumpToPdfSource,
   });
 
   @override
@@ -251,25 +257,20 @@ class CanvasLayerStack extends StatelessWidget {
             },
           ),
 
-        // Camada 5: Cursor Halo da Borracha (Sub-camada isolada ultra-fluida)
+        // Camada 5: Cursor Halo da Borracha (Sub-camada isolada ultra-fluida sem widget rebuilds)
         if (!isSettingsOpen && activeTool == 'eraser')
-          ListenableBuilder(
-            listenable: mousePosNotifier,
-            builder: (context, _) {
-              final mousePos = mousePosNotifier.value;
-              if (mousePos == null) return const SizedBox.shrink();
-              return IgnorePointer(
-                child: RepaintBoundary(
-                  child: CustomPaint(
-                    size: Size.infinite,
-                    painter: _EraserHaloPainter(
-                      mousePosition: mousePos,
-                      radius: eraserRadius,
-                    ),
+          Positioned.fill(
+            child: IgnorePointer(
+              child: RepaintBoundary(
+                child: CustomPaint(
+                  size: Size.infinite,
+                  painter: _EraserHaloPainter(
+                    mousePosNotifier: mousePosNotifier,
+                    radius: eraserRadius,
                   ),
                 ),
-              );
-            },
+              ),
+            ),
           ),
 
         // Camada 6: Laser Pointer
@@ -356,32 +357,35 @@ class CanvasLayerStack extends StatelessWidget {
             onSelectCard: onSelectCard,
             onDeleteCard: onDeleteCard,
             onDuplicateCard: onDuplicateCard,
+            onAddCard: onAddCard,
             onSolveWithAi: onSolveWithAi,
+            onAskAiText: onAskAiText,
             onExtractLatex: onExtractLatex,
             onSyncCardStrokes: onSyncCardStrokes,
+            onJumpToPdfSource: onJumpToPdfSource,
           ),
 
-        // Camada 8.5: Traço Ativo da Caneta (Renderizado no topo dos cards para feedback visual instantâneo)
+        // Camada 8.5: Traço Ativo da Caneta (Zero Widget Rebuild — repinta direto no RenderObject a 180+ FPS)
         if (!isSettingsOpen && note != null)
-          ListenableBuilder(
-            listenable: Listenable.merge([panNotifier, zoomNotifier, activeStrokeUpdateNotifier]),
-            builder: (context, _) {
-              final pan = panNotifier.value;
-              final zoom = zoomNotifier.value;
-              return IgnorePointer(
-                child: RepaintBoundary(
-                  child: CustomPaint(
-                    size: Size.infinite,
-                    painter: ActiveStrokePainter(
-                      activeStroke: getActiveStroke?.call() ?? activeStroke,
-                      updateNotifier: activeStrokeUpdateNotifier,
-                      panOffset: pan,
-                      zoomScale: zoom,
-                    ),
+          Positioned.fill(
+            child: IgnorePointer(
+              child: RepaintBoundary(
+                child: CustomPaint(
+                  size: Size.infinite,
+                  willChange: true,
+                  painter: ActiveStrokePainter(
+                    activeStroke: activeStroke,
+                    getActiveStroke: getActiveStroke,
+                    updateNotifier: activeStrokeUpdateNotifier,
+                    panOffset: panNotifier.value,
+                    zoomScale: zoomNotifier.value,
+                    panNotifier: panNotifier,
+                    zoomNotifier: zoomNotifier,
+                    repaint: Listenable.merge([panNotifier, zoomNotifier, activeStrokeUpdateNotifier]),
                   ),
                 ),
-              );
-            },
+              ),
+            ),
           ),
       ],
     );
@@ -389,7 +393,7 @@ class CanvasLayerStack extends StatelessWidget {
 }
 
 class _EraserHaloPainter extends CustomPainter {
-  final Offset mousePosition;
+  final ValueNotifier<Offset?> mousePosNotifier;
   final double radius;
   final Paint _fillPaint = Paint()
     ..color = const Color(0x2200E1FF)
@@ -399,17 +403,20 @@ class _EraserHaloPainter extends CustomPainter {
     ..strokeWidth = 1.5
     ..style = PaintingStyle.stroke;
 
-  _EraserHaloPainter({required this.mousePosition, required this.radius});
+  _EraserHaloPainter({required this.mousePosNotifier, required this.radius})
+      : super(repaint: mousePosNotifier);
 
   @override
   void paint(Canvas canvas, Size size) {
-    canvas.drawCircle(mousePosition, radius, _fillPaint);
-    canvas.drawCircle(mousePosition, radius, _strokePaint);
+    final pos = mousePosNotifier.value;
+    if (pos == null) return;
+    canvas.drawCircle(pos, radius, _fillPaint);
+    canvas.drawCircle(pos, radius, _strokePaint);
   }
 
   @override
   bool shouldRepaint(covariant _EraserHaloPainter oldDelegate) {
-    return oldDelegate.mousePosition != mousePosition || oldDelegate.radius != radius;
+    return oldDelegate.radius != radius || oldDelegate.mousePosNotifier != mousePosNotifier;
   }
 }
 
@@ -442,6 +449,9 @@ class _OptimizedCommittedStrokesLayerState extends State<_OptimizedCommittedStro
   final ValueNotifier<int> _hideStateNotifier = ValueNotifier<int>(0);
   bool _lastHideSelected = false;
   Set<String>? _lastSelectedIds;
+  Set<String>? _cachedHiddenIds;
+  int _lastCachedStrokesVersion = -1;
+  int _lastCachedHideVersion = -1;
 
   @override
   void initState() {
@@ -455,6 +465,9 @@ class _OptimizedCommittedStrokesLayerState extends State<_OptimizedCommittedStro
     if (oldWidget.selectionUpdateNotifier != widget.selectionUpdateNotifier) {
       oldWidget.selectionUpdateNotifier?.removeListener(_onSelectionUpdate);
       widget.selectionUpdateNotifier?.addListener(_onSelectionUpdate);
+    }
+    if (oldWidget.note != widget.note) {
+      _lastCachedStrokesVersion = -1;
     }
   }
 
@@ -481,6 +494,29 @@ class _OptimizedCommittedStrokesLayerState extends State<_OptimizedCommittedStro
     }
   }
 
+  Set<String>? _resolveHiddenStrokeIds(SelectionState activeSel, bool hideSelected) {
+    final currentStrokesVer = widget.committedStrokesNotifier.value;
+    final currentHideVer = _hideStateNotifier.value;
+    if (_lastCachedStrokesVersion == currentStrokesVer && _lastCachedHideVersion == currentHideVer) {
+      return _cachedHiddenIds;
+    }
+    _lastCachedStrokesVersion = currentStrokesVer;
+    _lastCachedHideVersion = currentHideVer;
+
+    final attachedIds = <String>{};
+    for (final card in widget.note.cards) {
+      if (card.attachedStrokeIds.isNotEmpty) {
+        attachedIds.addAll(card.attachedStrokeIds);
+      }
+    }
+    if (hideSelected) {
+      _cachedHiddenIds = {...activeSel.selectedStrokeIds, ...attachedIds};
+    } else {
+      _cachedHiddenIds = attachedIds.isNotEmpty ? attachedIds : null;
+    }
+    return _cachedHiddenIds;
+  }
+
   @override
   Widget build(BuildContext context) {
     return ListenableBuilder(
@@ -488,13 +524,11 @@ class _OptimizedCommittedStrokesLayerState extends State<_OptimizedCommittedStro
         widget.panNotifier,
         widget.zoomNotifier,
         widget.committedStrokesNotifier,
-        widget.isInteractingNotifier,
         _hideStateNotifier,
       ]),
       builder: (context, _) {
         final pan = widget.panNotifier.value;
         final zoom = widget.zoomNotifier.value;
-        final isInteracting = widget.isInteractingNotifier.value;
         final activeSel = widget.getSelectionState?.call() ?? widget.selectionState;
         final hideSelected = activeSel.isDraggingSelection || activeSel.isTransforming;
 
@@ -508,21 +542,11 @@ class _OptimizedCommittedStrokesLayerState extends State<_OptimizedCommittedStro
                 strokes: widget.note.strokes,
                 strokesCount: widget.note.strokes.length,
                 strokesVersion: widget.committedStrokesNotifier.value,
-                hiddenStrokeIds: () {
-                  final attachedIds = <String>{};
-                  for (final card in widget.note.cards) {
-                    if (card.attachedStrokeIds.isNotEmpty) {
-                      attachedIds.addAll(card.attachedStrokeIds);
-                    }
-                  }
-                  return hideSelected 
-                      ? {...activeSel.selectedStrokeIds, ...attachedIds} 
-                      : (attachedIds.isNotEmpty ? attachedIds : null);
-                }(),
+                hiddenStrokeIds: _resolveHiddenStrokeIds(activeSel, hideSelected),
                 panOffset: pan,
                 zoomScale: zoom,
                 pictureCache: widget.note.pictureCache,
-                isInteracting: isInteracting,
+                isInteracting: false,
                 repaint: widget.committedStrokesNotifier,
               ),
             ),

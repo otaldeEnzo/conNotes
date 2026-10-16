@@ -73,6 +73,7 @@ class DevHubServer {
   void Function()? onRunBenchmark;
 
   bool get isRunning => _server != null;
+  bool get hasClients => _clients.isNotEmpty;
 
   /// Registra uma ação executada no canvas para correlação com janks
   void logAction(String actionName) {

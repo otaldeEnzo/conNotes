@@ -61,7 +61,17 @@ class CanvasCardModel {
   bool isDetached;
   Map<int, List<String>> pageAttachedStrokeIds;
   List<int> excludedPageIndices;
+  final List<int> bookmarkedPages;
+  final Map<int, int> pageRotations;
+  final List<int> pageOrder;
   String? sourceMasterCardId;
+  String? sourceDocumentTitle;
+  int? sourcePageNumber;
+  String? sourceText;
+  double? sourceBoundsX;
+  double? sourceBoundsY;
+  double? sourceBoundsWidth;
+  double? sourceBoundsHeight;
   final DateTime createdAt;
   DateTime updatedAt;
 
@@ -104,13 +114,26 @@ class CanvasCardModel {
     this.isPdfLocked = false,
     this.isDetached = false,
     this.sourceMasterCardId,
+    this.sourceDocumentTitle,
+    this.sourcePageNumber,
+    this.sourceText,
+    this.sourceBoundsX,
+    this.sourceBoundsY,
+    this.sourceBoundsWidth,
+    this.sourceBoundsHeight,
     Map<int, List<String>>? pageAttachedStrokeIds,
     List<int>? excludedPageIndices,
+    List<int>? bookmarkedPages,
+    Map<int, int>? pageRotations,
+    List<int>? pageOrder,
     DateTime? createdAt,
     DateTime? updatedAt,
   })  : _manualMinHeight = minHeight,
         pageAttachedStrokeIds = pageAttachedStrokeIds ?? <int, List<String>>{},
         excludedPageIndices = excludedPageIndices ?? <int>[],
+        bookmarkedPages = bookmarkedPages ?? <int>[],
+        pageRotations = pageRotations ?? <int, int>{},
+        pageOrder = pageOrder ?? <int>[],
         createdAt = createdAt ?? DateTime.now(),
         updatedAt = updatedAt ?? DateTime.now();
 
@@ -263,18 +286,22 @@ class CanvasCardModel {
         contentHeight += mathBlockH + 6.0;
       } else if (trimmed.startsWith('> [!')) {
         final lines = trimmed.split('\n');
-        double calloutInner = 36.0;
+        double calloutInner = 30.0; // Header do callout (ícone + título + padding interno)
         for (final l in lines) {
+          final trimmedLine = l.trim();
+          if (trimmedLine.startsWith('> [!')) continue; // Já coberto pelo header do callout
+          final cleanLine = trimmedLine.startsWith('>') ? trimmedLine.substring(1).trim() : trimmedLine;
+          if (cleanLine.isEmpty) continue;
           final tp = TextPainter(
             text: TextSpan(
-              text: l.startsWith('>') ? l.substring(1).trim() : l,
+              text: cleanLine,
               style: TextStyle(fontFamily: fontFamily, fontSize: fontSize * 0.95, height: 1.45),
             ),
             textDirection: TextDirection.ltr,
-          )..layout(maxWidth: math.max(40.0, availableTextWidth - 28.0));
+          )..layout(maxWidth: math.max(40.0, availableTextWidth - 32.0));
           calloutInner += tp.height + 4.0;
         }
-        contentHeight += calloutInner + 20.0;
+        contentHeight += calloutInner + 10.0;
       } else {
         final lines = chunk.split('\n');
         for (final line in lines) {
@@ -306,7 +333,137 @@ class CanvasCardModel {
       }
     }
 
-    final totalMin = headerHeight + paddingVertical + contentHeight;
+    final provenanceHeight = sourcePageNumber != null ? 44.0 : 0.0;
+    final totalMin = headerHeight + paddingVertical + contentHeight + provenanceHeight;
+    return math.max(90.0, totalMin);
+  }
+
+  /// Calcula a altura necessária durante a edição ativa de um bloco específico
+  /// acomodando o campo de texto do editor no bloco ativo e o formato renderizado nos demais blocos.
+  double calculateEditingMinHeight({
+    required int editingBlockIndex,
+    required String activeEditingText,
+  }) {
+    if (isCollapsed) return 36.0;
+
+    const headerHeight = 36.0;
+    const paddingVertical = 24.0;
+    final availableTextWidth = math.max(40.0, width - 46.0);
+
+    final rawChunks = content.split('\n---\n');
+    double contentHeight = 0.0;
+    final totalChunks = math.max(rawChunks.length, editingBlockIndex + 1);
+
+    for (int i = 0; i < totalChunks; i++) {
+      if (i == editingBlockIndex) {
+        // Bloco em modo de edição ativo: mede o texto bruto no editor + padding do campo
+        final text = activeEditingText;
+        final tp = TextPainter(
+          text: TextSpan(
+            text: text.isEmpty ? ' ' : text,
+            style: TextStyle(
+              fontFamily: fontFamily,
+              fontSize: fontSize,
+              height: 1.35,
+            ),
+          ),
+          textDirection: TextDirection.ltr,
+        )..layout(maxWidth: math.max(40.0, availableTextWidth - 100.0));
+
+        final fieldPadding = (math.max(6.0, fontSize * 0.22) * 2) + 16.0;
+        contentHeight += math.max(48.0, tp.height + fieldPadding) + 12.0;
+        continue;
+      }
+
+      final chunk = i < rawChunks.length ? rawChunks[i] : '';
+      final trimmed = chunk.trim();
+      if (trimmed.isEmpty && totalChunks > 1) continue;
+
+      if (trimmed.startsWith('```mermaid')) {
+        final lineCount = trimmed.split('\n').length;
+        contentHeight += math.max(160.0, lineCount * 22.0) + 20.0;
+      } else if (trimmed.startsWith('```')) {
+        final lineCount = trimmed.split('\n').length;
+        contentHeight += (lineCount * (fontSize * 1.45)) + 40.0;
+      } else if (trimmed.startsWith(r'$$')) {
+        var cleanTex = trimmed.replaceAll(r'$$', '').trim();
+        cleanTex = cleanTex
+            .replaceAll(RegExp(r'\\begin\{(?:aligned|gathered|matrix|bmatrix|pmatrix|cases)\}'), '')
+            .replaceAll(RegExp(r'\\end\{(?:aligned|gathered|matrix|bmatrix|pmatrix|cases)\}'), '');
+        final lines = cleanTex
+            .split(RegExp(r'\\\\|\n'))
+            .map((l) => l.trim())
+            .where((l) => l.isNotEmpty)
+            .toList();
+        double mathBlockH = 20.0;
+        for (final line in lines) {
+          final fracCount = RegExp(r'\\(?:frac|cfrac)').allMatches(line).length;
+          final sqrtCount = RegExp(r'\\sqrt').allMatches(line).length;
+          final hasBigOp = RegExp(r'\\(?:iint|iiint|oint|int|sum|prod)').hasMatch(line);
+          if (fracCount >= 2) {
+            mathBlockH += 56.0;
+          } else if (fracCount == 1) {
+            mathBlockH += 40.0;
+          } else if (hasBigOp) {
+            mathBlockH += 44.0;
+          } else if (sqrtCount > 0) {
+            mathBlockH += 30.0;
+          } else {
+            mathBlockH += 24.0;
+          }
+        }
+        contentHeight += mathBlockH + 6.0;
+      } else if (trimmed.startsWith('> [!')) {
+        final lines = trimmed.split('\n');
+        double calloutInner = 30.0;
+        for (final l in lines) {
+          final trimmedLine = l.trim();
+          if (trimmedLine.startsWith('> [!')) continue;
+          final cleanLine = trimmedLine.startsWith('>') ? trimmedLine.substring(1).trim() : trimmedLine;
+          if (cleanLine.isEmpty) continue;
+          final tp = TextPainter(
+            text: TextSpan(
+              text: cleanLine,
+              style: TextStyle(fontFamily: fontFamily, fontSize: fontSize * 0.95, height: 1.45),
+            ),
+            textDirection: TextDirection.ltr,
+          )..layout(maxWidth: math.max(40.0, availableTextWidth - 32.0));
+          calloutInner += tp.height + 4.0;
+        }
+        contentHeight += calloutInner + 10.0;
+      } else {
+        final lines = chunk.split('\n');
+        for (final line in lines) {
+          final trimmedLine = line.trim();
+          double lineFontSize = fontSize;
+          if (trimmedLine.startsWith('# ')) {
+            lineFontSize = fontSize * 1.5;
+          } else if (trimmedLine.startsWith('## ')) {
+            lineFontSize = fontSize * 1.3;
+          } else if (trimmedLine.startsWith('### ')) {
+            lineFontSize = fontSize * 1.15;
+          }
+
+          final tp = TextPainter(
+            text: TextSpan(
+              text: line.isEmpty ? ' ' : line,
+              style: TextStyle(
+                fontFamily: fontFamily,
+                fontSize: lineFontSize,
+                height: 1.45,
+              ),
+            ),
+            textDirection: TextDirection.ltr,
+          )..layout(maxWidth: availableTextWidth);
+
+          contentHeight += tp.height;
+        }
+        contentHeight += 12.0;
+      }
+    }
+
+    final provenanceHeight = sourcePageNumber != null ? 44.0 : 0.0;
+    final totalMin = headerHeight + paddingVertical + contentHeight + provenanceHeight;
     return math.max(90.0, totalMin);
   }
 
@@ -389,8 +546,18 @@ class CanvasCardModel {
     bool? isPdfLocked,
     bool? isDetached,
     String? sourceMasterCardId,
+    String? sourceDocumentTitle,
+    int? sourcePageNumber,
+    String? sourceText,
+    double? sourceBoundsX,
+    double? sourceBoundsY,
+    double? sourceBoundsWidth,
+    double? sourceBoundsHeight,
     Map<int, List<String>>? pageAttachedStrokeIds,
     List<int>? excludedPageIndices,
+    List<int>? bookmarkedPages,
+    Map<int, int>? pageRotations,
+    List<int>? pageOrder,
     DateTime? createdAt,
     DateTime? updatedAt,
   }) {
@@ -433,10 +600,23 @@ class CanvasCardModel {
       isPdfLocked: isPdfLocked ?? this.isPdfLocked,
       isDetached: isDetached ?? this.isDetached,
       sourceMasterCardId: sourceMasterCardId ?? this.sourceMasterCardId,
+      sourceDocumentTitle: sourceDocumentTitle ?? this.sourceDocumentTitle,
+      sourcePageNumber: sourcePageNumber ?? this.sourcePageNumber,
+      sourceText: sourceText ?? this.sourceText,
+      sourceBoundsX: sourceBoundsX ?? this.sourceBoundsX,
+      sourceBoundsY: sourceBoundsY ?? this.sourceBoundsY,
+      sourceBoundsWidth: sourceBoundsWidth ?? this.sourceBoundsWidth,
+      sourceBoundsHeight: sourceBoundsHeight ?? this.sourceBoundsHeight,
       pageAttachedStrokeIds: (pageAttachedStrokeIds ?? this.pageAttachedStrokeIds)
           .map((k, v) => MapEntry(k, List<String>.from(v))),
       excludedPageIndices:
           List<int>.from(excludedPageIndices ?? this.excludedPageIndices),
+      bookmarkedPages:
+          List<int>.from(bookmarkedPages ?? this.bookmarkedPages),
+      pageRotations:
+          Map<int, int>.from(pageRotations ?? this.pageRotations),
+      pageOrder:
+          List<int>.from(pageOrder ?? this.pageOrder),
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? DateTime.now(),
     );
@@ -482,10 +662,22 @@ class CanvasCardModel {
       'isPdfLocked': isPdfLocked,
       'isDetached': isDetached,
       'sourceMasterCardId': sourceMasterCardId,
+      'sourceDocumentTitle': sourceDocumentTitle,
+      'sourcePageNumber': sourcePageNumber,
+      'sourceText': sourceText,
+      'sourceBoundsX': sourceBoundsX,
+      'sourceBoundsY': sourceBoundsY,
+      'sourceBoundsWidth': sourceBoundsWidth,
+      'sourceBoundsHeight': sourceBoundsHeight,
       'pageAttachedStrokeIds': pageAttachedStrokeIds.map(
         (page, strokes) => MapEntry(page.toString(), strokes),
       ),
       'excludedPageIndices': excludedPageIndices,
+      'bookmarkedPages': bookmarkedPages,
+      'pageRotations': pageRotations.map(
+        (page, rot) => MapEntry(page.toString(), rot),
+      ),
+      'pageOrder': pageOrder,
       'createdAt': createdAt.toIso8601String(),
       'updatedAt': updatedAt.toIso8601String(),
     };
@@ -560,6 +752,40 @@ class CanvasCardModel {
       }
     }
 
+    final List<int> parsedBookmarkedPages = [];
+    if (map['bookmarkedPages'] is List) {
+      for (final item in map['bookmarkedPages'] as List) {
+        if (item is num) {
+          parsedBookmarkedPages.add(item.toInt());
+        } else if (item != null) {
+          final parsed = int.tryParse(item.toString());
+          if (parsed != null) parsedBookmarkedPages.add(parsed);
+        }
+      }
+    }
+
+    final Map<int, int> parsedPageRotations = {};
+    if (map['pageRotations'] is Map) {
+      (map['pageRotations'] as Map).forEach((k, v) {
+        final p = int.tryParse(k.toString());
+        if (p != null && v is num) {
+          parsedPageRotations[p] = v.toInt();
+        }
+      });
+    }
+
+    final List<int> parsedPageOrder = [];
+    if (map['pageOrder'] is List) {
+      for (final item in map['pageOrder'] as List) {
+        if (item is num) {
+          parsedPageOrder.add(item.toInt());
+        } else if (item != null) {
+          final parsed = int.tryParse(item.toString());
+          if (parsed != null) parsedPageOrder.add(parsed);
+        }
+      }
+    }
+
     String defaultTitle;
     if (parsedType == CardType.media) {
       defaultTitle = 'Media';
@@ -611,8 +837,18 @@ class CanvasCardModel {
       isPdfLocked: map['isPdfLocked'] == true,
       isDetached: map['isDetached'] == true,
       sourceMasterCardId: map['sourceMasterCardId']?.toString(),
+      sourceDocumentTitle: map['sourceDocumentTitle']?.toString(),
+      sourcePageNumber: (map['sourcePageNumber'] as num?)?.toInt(),
+      sourceText: map['sourceText']?.toString(),
+      sourceBoundsX: (map['sourceBoundsX'] as num?)?.toDouble(),
+      sourceBoundsY: (map['sourceBoundsY'] as num?)?.toDouble(),
+      sourceBoundsWidth: (map['sourceBoundsWidth'] as num?)?.toDouble(),
+      sourceBoundsHeight: (map['sourceBoundsHeight'] as num?)?.toDouble(),
       pageAttachedStrokeIds: parsedPageAttachedStrokes,
       excludedPageIndices: parsedExcludedPages,
+      bookmarkedPages: parsedBookmarkedPages,
+      pageRotations: parsedPageRotations,
+      pageOrder: parsedPageOrder,
       createdAt: map['createdAt'] != null ? DateTime.tryParse(map['createdAt'].toString()) : null,
       updatedAt: map['updatedAt'] != null ? DateTime.tryParse(map['updatedAt'].toString()) : null,
     );

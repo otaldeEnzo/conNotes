@@ -68,6 +68,8 @@ class SelectionState {
 
   bool get hasSelection => (selectedStrokeIds.isNotEmpty || selectedCardIds.isNotEmpty) && bounds != null;
   bool get isTransforming => activeHandle != SelectionHandleType.none;
+  bool get isEmpty => !hasSelection && !isSelectingArea;
+  bool get isNotEmpty => !isEmpty;
 
   SelectionState copyWith({
     SelectionType? type,

@@ -7,10 +7,12 @@ import '../models/canvas_card_model.dart';
 import '../services/pdf_document_service.dart';
 import '../services/pdf_search_engine.dart';
 import '../services/settings_service.dart';
+import '../services/diagnostics_override_controller.dart';
 import '../theme/moscaro_theme_controller.dart';
 import '../theme/moscaro_v2_tokens.dart';
 import 'card_format_floating_pill.dart';
 import 'ink_models.dart';
+import 'pdf_page_organizer_modal.dart';
 import 'pdf_search_pill_input.dart';
 import 'svg_icon.dart';
 
@@ -73,6 +75,13 @@ class PdfCardFloatingPill extends StatefulWidget {
   final Set<String>? selectedPageIds;
   final void Function(List<CanvasCardModel>)? onDuplicateMultipleCards;
   final void Function(List<String>)? onDeleteMultipleCards;
+  final VoidCallback? onToggleCrop;
+  final bool isCropActive;
+  final VoidCallback? onToggleToc;
+  final bool isTocOpen;
+  final VoidCallback? onToggleBookmark;
+  final bool isCurrentPageBookmarked;
+  final VoidCallback? onOpenPageOrganizer;
 
   const PdfCardFloatingPill({
     super.key,
@@ -88,6 +97,13 @@ class PdfCardFloatingPill extends StatefulWidget {
     this.onExportPdf,
     this.getAttachedStrokes,
     this.onSolveWithAi,
+    this.onToggleCrop,
+    this.isCropActive = false,
+    this.onToggleToc,
+    this.isTocOpen = false,
+    this.onToggleBookmark,
+    this.isCurrentPageBookmarked = false,
+    this.onOpenPageOrganizer,
     this.onExtractLatex,
     this.onExplainDiagram,
     this.onAiAction,
@@ -115,6 +131,7 @@ class PdfCardFloatingPill extends StatefulWidget {
 
   static const double pillHeight = 36.0;
   static const double pillRadius = 30.0;
+  static bool isEditingAnyPageInline = false;
 
   @override
   State<PdfCardFloatingPill> createState() => _PdfCardFloatingPillState();
@@ -128,14 +145,158 @@ class _PdfCardFloatingPillState extends State<PdfCardFloatingPill> {
 
   int? _localTargetPage;
 
+  bool _isEditingPageInline = false;
+  late final TextEditingController _pageInlineController;
+  late final FocusNode _pageInlineFocusNode;
+
+  @override
+  void initState() {
+    super.initState();
+    _pageInlineController = TextEditingController();
+    _pageInlineFocusNode = FocusNode(
+      debugLabel: 'PdfCardFloatingPill_InlinePageInput',
+      onKeyEvent: (node, event) {
+        if (event is KeyDownEvent) {
+          if (event.logicalKey == LogicalKeyboardKey.escape) {
+            _cancelInlinePageEditing();
+            return KeyEventResult.handled;
+          }
+          if (event.logicalKey == LogicalKeyboardKey.enter ||
+              event.logicalKey == LogicalKeyboardKey.numpadEnter) {
+            _submitInlinePageJump();
+            return KeyEventResult.handled;
+          }
+        }
+        return KeyEventResult.ignored;
+      },
+    );
+    _pageInlineFocusNode.addListener(_onPageInlineFocusChange);
+  }
+
+  @override
+  void dispose() {
+    if (_isEditingPageInline) {
+      PdfCardFloatingPill.isEditingAnyPageInline = false;
+      globalIsEditingText = false;
+    }
+    _pageInlineFocusNode.removeListener(_onPageInlineFocusChange);
+    _pageInlineFocusNode.dispose();
+    _pageInlineController.dispose();
+    super.dispose();
+  }
+
+  void _onPageInlineFocusChange() {
+    if (_pageInlineFocusNode.hasFocus && _isEditingPageInline) {
+      _pageInlineController.selection = TextSelection(
+        baseOffset: 0,
+        extentOffset: _pageInlineController.text.length,
+      );
+    } else if (!_pageInlineFocusNode.hasFocus && _isEditingPageInline) {
+      final val = _pageInlineController.text.trim();
+      final parsed = int.tryParse(val);
+      if (parsed != null && parsed != _currentPage && parsed >= 1 && parsed <= _totalPages) {
+        _submitInlinePageJump();
+      } else {
+        _cancelInlinePageEditing();
+      }
+    }
+  }
+
+  void _startInlinePageEditing() {
+    PdfCardFloatingPill.isEditingAnyPageInline = true;
+    globalIsEditingText = true;
+    final text = _currentPage.toString();
+    setState(() {
+      _isEditingPageInline = true;
+      _pageInlineController.value = TextEditingValue(
+        text: text,
+        selection: TextSelection(
+          baseOffset: 0,
+          extentOffset: text.length,
+        ),
+      );
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        _pageInlineFocusNode.requestFocus();
+        _pageInlineController.selection = TextSelection(
+          baseOffset: 0,
+          extentOffset: _pageInlineController.text.length,
+        );
+      }
+    });
+  }
+
+  void _cancelInlinePageEditing() {
+    PdfCardFloatingPill.isEditingAnyPageInline = false;
+    globalIsEditingText = false;
+    if (mounted) {
+      setState(() {
+        _isEditingPageInline = false;
+      });
+    }
+  }
+
+  void _submitInlinePageJump([String? explicitText]) {
+    if (!_isEditingPageInline) return;
+    PdfCardFloatingPill.isEditingAnyPageInline = false;
+    globalIsEditingText = false;
+    final val = explicitText?.trim() ?? _pageInlineController.text.trim();
+    final parsed = int.tryParse(val);
+    if (parsed != null && parsed >= 1 && parsed <= _totalPages) {
+      if (widget.onPageJump != null) {
+        widget.onPageJump!(parsed);
+      } else {
+        widget.onUpdateCard(widget.card.copyWith(currentPdfPage: parsed));
+      }
+      if (mounted) {
+        setState(() {
+          _localTargetPage = parsed;
+          _isEditingPageInline = false;
+        });
+      }
+    } else {
+      if (mounted) {
+        setState(() {
+          _isEditingPageInline = false;
+        });
+      }
+    }
+  }
+
+  void _openPageOrganizer() {
+    if (widget.onOpenPageOrganizer != null) {
+      widget.onOpenPageOrganizer!();
+    } else {
+      PdfPageOrganizerModal.show(
+        context,
+        card: widget.card,
+        onUpdateCard: widget.onUpdateCard,
+        onPageJump: (page) {
+          if (widget.onPageJump != null) {
+            widget.onPageJump!(page);
+          } else {
+            widget.onUpdateCard(widget.card.copyWith(currentPdfPage: page));
+          }
+        },
+        onDetachPageToCanvas: widget.onDetachCurrentPage != null
+            ? (page) {
+                widget.onUpdateCard(widget.card.copyWith(currentPdfPage: page));
+                widget.onDetachCurrentPage?.call();
+              }
+            : null,
+        onExportPdf: widget.onExportPdf,
+      );
+    }
+  }
+
   int get _currentPage =>
       _localTargetPage ?? (widget.activePageNumber ?? widget.card.currentPdfPage);
 
   int get _totalPages =>
       widget.totalPages ?? math.max(1, widget.card.totalPdfPages);
 
-  bool get _isEffectiveSisterPage =>
-      widget.isSisterPage || widget.card.sourceMasterCardId != null;
+  bool get _isEffectiveSisterPage => widget.isSisterPage;
 
   List<int> get _effectiveActivePages {
     if (widget.activePages != null && widget.activePages!.isNotEmpty) {
@@ -163,7 +324,56 @@ class _PdfCardFloatingPillState extends State<PdfCardFloatingPill> {
   void _selectDisplayMode(PdfDisplayMode mode) {
     setState(() => _activeSubPill = _SubPillType.none);
     if (widget.card.pdfDisplayMode == mode) return;
-    final updated = widget.card.copyWith(pdfDisplayMode: mode);
+
+    final masterId = widget.card.sourceMasterCardId ?? widget.card.id;
+    final isSister = widget.card.sourceMasterCardId != null;
+
+    final targetCard = isSister && widget.allCards != null
+        ? widget.allCards!.firstWhere(
+            (c) => c.id == masterId,
+            orElse: () => widget.card,
+          )
+        : widget.card;
+
+    final Map<int, List<String>> mergedStrokes =
+        Map<int, List<String>>.from(targetCard.pageAttachedStrokeIds);
+
+    if (widget.allCards != null) {
+      final sisterCards = widget.allCards!
+          .where((c) =>
+              c.cardType == CardType.pdf &&
+              c.sourceMasterCardId == masterId)
+          .toList();
+
+      if (sisterCards.isNotEmpty) {
+        for (final sister in sisterCards) {
+          sister.pageAttachedStrokeIds.forEach((page, strokeList) {
+            final existing = mergedStrokes[page] ?? <String>[];
+            mergedStrokes[page] = {...existing, ...strokeList}.toList();
+          });
+        }
+
+        if (widget.onDeleteMultipleCards != null) {
+          final sisterIds = sisterCards.map((c) => c.id).toList();
+          widget.onDeleteMultipleCards!(sisterIds);
+        }
+      }
+    }
+
+    double newWidth = targetCard.width;
+    if (mode == PdfDisplayMode.grid && targetCard.pdfDisplayMode != PdfDisplayMode.grid) {
+      newWidth = (targetCard.width * 2.0) + targetCard.pdfPageGap;
+    } else if (targetCard.pdfDisplayMode == PdfDisplayMode.grid && mode != PdfDisplayMode.grid) {
+      newWidth = ((targetCard.width - targetCard.pdfPageGap) / 2.0).clamp(320.0, 4800.0);
+    }
+
+    final updated = targetCard.copyWith(
+      pdfDisplayMode: mode,
+      currentPdfPage: _currentPage,
+      excludedPageIndices: const [],
+      pageAttachedStrokeIds: mergedStrokes,
+      width: newWidth,
+    );
     final newHeight = updated.calculateMinHeight();
     widget.onUpdateCard(updated.copyWith(height: newHeight));
   }
@@ -230,128 +440,6 @@ class _PdfCardFloatingPillState extends State<PdfCardFloatingPill> {
     widget.onPageJump?.call(clamped);
     widget.onPageChanged?.call(clamped);
     widget.onUpdateCard(widget.card.copyWith(currentPdfPage: clamped));
-  }
-
-  Future<void> _handleDirectPageJump(BuildContext context) async {
-    final textController = TextEditingController(text: _currentPage.toString());
-    final isLight = MoscaroTokens.isLight;
-
-    final result = await showDialog<int>(
-      context: context,
-      builder: (dialogCtx) {
-        return AlertDialog(
-          backgroundColor: MoscaroTokens.backgroundSurface,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16.0),
-            side: BorderSide(
-              color: MoscaroTokens.borderGlowActive.withValues(alpha: 0.35),
-              width: 1.0,
-            ),
-          ),
-          title: Row(
-            children: [
-              SvgIcon(
-                name: 'layers',
-                size: 18,
-                color: MoscaroTokens.auroraBlue,
-              ),
-              const SizedBox(width: 8),
-              Text(
-                'Ir para Página',
-                style: TextStyle(
-                  fontFamily: 'Inter',
-                  fontSize: 15,
-                  fontWeight: FontWeight.w600,
-                  color: isLight ? Colors.black : Colors.white,
-                ),
-              ),
-            ],
-          ),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                'Digite um número entre 1 e $_totalPages:',
-                style: TextStyle(
-                  fontFamily: 'Inter',
-                  fontSize: 12,
-                  color: MoscaroTokens.textSecondary,
-                ),
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: textController,
-                autofocus: true,
-                keyboardType: TextInputType.number,
-                style: TextStyle(
-                  fontFamily: 'Inter',
-                  color: isLight ? Colors.black : Colors.white,
-                ),
-                decoration: InputDecoration(
-                  filled: true,
-                  fillColor: isLight
-                      ? Colors.black.withValues(alpha: 0.05)
-                      : Colors.white.withValues(alpha: 0.07),
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(10.0),
-                    borderSide: BorderSide(
-                      color: MoscaroTokens.borderSubtle,
-                    ),
-                  ),
-                  focusedBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(10.0),
-                    borderSide: BorderSide(
-                      color: MoscaroTokens.auroraBlue,
-                      width: 1.4,
-                    ),
-                  ),
-                  contentPadding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 8,
-                  ),
-                ),
-                onSubmitted: (val) {
-                  final parsed = int.tryParse(val.trim());
-                  if (parsed != null && parsed >= 1 && parsed <= _totalPages) {
-                    Navigator.of(dialogCtx).pop(parsed);
-                  }
-                },
-              ),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(dialogCtx).pop(),
-              child: Text(
-                'Cancelar',
-                style: TextStyle(color: MoscaroTokens.textSecondary),
-              ),
-            ),
-            ElevatedButton(
-              style: ElevatedButton.styleFrom(
-                backgroundColor: MoscaroTokens.auroraBlue,
-                foregroundColor: Colors.black,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(8.0),
-                ),
-              ),
-              onPressed: () {
-                final parsed = int.tryParse(textController.text.trim());
-                if (parsed != null && parsed >= 1 && parsed <= _totalPages) {
-                  Navigator.of(dialogCtx).pop(parsed);
-                }
-              },
-              child: const Text('Ir', style: TextStyle(fontWeight: FontWeight.bold)),
-            ),
-          ],
-        );
-      },
-    );
-
-    if (result != null && mounted) {
-      _navigateToPage(result);
-    }
   }
 
   Future<void> _handleExportAnnotatedPdf(BuildContext context) async {
@@ -492,11 +580,18 @@ class _PdfCardFloatingPillState extends State<PdfCardFloatingPill> {
         final themeAccent = theme.accentPrimary;
         final textPrimary = MoscaroTokens.textPrimary;
         final glassTint = widget.card.customGlassColor ?? MoscaroTokens.glassTint;
-        final blur = (MoscaroTokens.enableToolbarBlur && MoscaroTokens.blurSigma > 0)
+        final bool bypass = DiagnosticsOverrideController.instance.bypassBackdropFilter;
+        final blur = (!bypass && MoscaroTokens.enableToolbarBlur && MoscaroTokens.blurSigma > 0)
             ? MoscaroTokens.blurSigma
             : 0.0;
         final settings = SettingsService.instance.currentSettings;
-        final isAiAvailable = settings.enableCloudAiFeatures && settings.enablePdfAiActions;
+        final hasAnyAiFeature = settings.enablePdfAiSummarize ||
+            settings.enablePdfAiExtractLatex ||
+            settings.enablePdfAiExplainDiagram ||
+            settings.enablePdfAiFlashcards;
+        final isAiAvailable = settings.enableCloudAiFeatures &&
+            settings.enablePdfAiActions &&
+            hasAnyAiFeature;
 
         Widget buildScaledPill(double currentZoom) {
           // Physical zoom invariance: scaleFactor = (1.0 / safeZoom).clamp(0.5, 3.0)
@@ -510,10 +605,14 @@ class _PdfCardFloatingPillState extends State<PdfCardFloatingPill> {
               scale: scaleFactor,
               alignment: Alignment.bottomCenter,
               child: FocusScope(
-                canRequestFocus: false,
+                canRequestFocus: true,
                 child: CallbackShortcuts(
                   bindings: <ShortcutActivator, VoidCallback>{
                     const SingleActivator(LogicalKeyboardKey.escape): () {
+                      if (_isEditingPageInline) {
+                        _cancelInlinePageEditing();
+                        return;
+                      }
                       if (_activeSubPill != _SubPillType.none) {
                         setState(() => _activeSubPill = _SubPillType.none);
                       }
@@ -608,9 +707,7 @@ class _PdfCardFloatingPillState extends State<PdfCardFloatingPill> {
       height: 32.0,
       padding: const EdgeInsets.symmetric(horizontal: 6.0, vertical: 2.0),
       decoration: BoxDecoration(
-        color: isLight
-            ? const Color(0xFFF8FAFC).withValues(alpha: 0.95)
-            : glassTint,
+        color: glassTint,
         borderRadius: BorderRadius.circular(20.0),
         border: Border.all(
           color: themeAccent.withValues(alpha: 0.45),
@@ -660,7 +757,7 @@ class _PdfCardFloatingPillState extends State<PdfCardFloatingPill> {
             onTap: () => _selectDisplayMode(PdfDisplayMode.grid),
           ),
           const SizedBox(width: 4.0),
-          _buildDivider(isLight ? Colors.black12 : Colors.white12),
+          _buildDivider(MoscaroTokens.borderSubtle),
           _PillActionButton(
             iconName: 'close',
             tooltip: 'Fechar modos (Esc)',
@@ -744,13 +841,13 @@ class _PdfCardFloatingPillState extends State<PdfCardFloatingPill> {
     required Color textPrimary,
     required double blur,
   }) {
+    final settings = SettingsService.instance.currentSettings;
+
     final inner = Container(
       height: 32.0,
       padding: const EdgeInsets.symmetric(horizontal: 6.0, vertical: 2.0),
       decoration: BoxDecoration(
-        color: isLight
-            ? const Color(0xFFF8FAFC).withValues(alpha: 0.95)
-            : glassTint,
+        color: glassTint,
         borderRadius: BorderRadius.circular(20.0),
         border: Border.all(
           color: themeAccent.withValues(alpha: 0.45),
@@ -776,49 +873,67 @@ class _PdfCardFloatingPillState extends State<PdfCardFloatingPill> {
             padding: const EdgeInsets.only(left: 4.0, right: 6.0),
             child: SvgIcon(name: 'sparkle', size: 13.0, color: themeAccent),
           ),
-          _buildSubPillAiAction(
-            title: 'Resumir Pág. $_currentPage',
-            icon: 'file',
-            themeAccent: themeAccent,
-            onTap: () {
-              setState(() => _activeSubPill = _SubPillType.none);
-              if (widget.onAiAction != null) {
-                widget.onAiAction!(PdfAiAction.summarizePage);
-              } else {
-                widget.onSolveWithAi?.call();
-              }
-            },
-          ),
-          const SizedBox(width: 4.0),
-          _buildSubPillAiAction(
-            title: 'Extrair LaTeX',
-            icon: 'math',
-            themeAccent: themeAccent,
-            onTap: () {
-              setState(() => _activeSubPill = _SubPillType.none);
-              if (widget.onAiAction != null) {
-                widget.onAiAction!(PdfAiAction.extractLatex);
-              } else {
-                widget.onExtractLatex?.call();
-              }
-            },
-          ),
-          const SizedBox(width: 4.0),
-          _buildSubPillAiAction(
-            title: 'Explicar Diagrama',
-            icon: 'ai',
-            themeAccent: themeAccent,
-            onTap: () {
-              setState(() => _activeSubPill = _SubPillType.none);
-              if (widget.onAiAction != null) {
-                widget.onAiAction!(PdfAiAction.explainDiagram);
-              } else {
-                widget.onExplainDiagram?.call();
-              }
-            },
-          ),
-          const SizedBox(width: 4.0),
-          _buildDivider(isLight ? Colors.black12 : Colors.white12),
+          if (settings.enablePdfAiSummarize) ...[
+            _buildSubPillAiAction(
+              title: 'Resumir Pág. $_currentPage',
+              icon: 'file',
+              themeAccent: themeAccent,
+              onTap: () {
+                setState(() => _activeSubPill = _SubPillType.none);
+                if (widget.onAiAction != null) {
+                  widget.onAiAction!(PdfAiAction.summarizePage);
+                } else {
+                  widget.onSolveWithAi?.call();
+                }
+              },
+            ),
+            const SizedBox(width: 4.0),
+          ],
+          if (settings.enablePdfAiExtractLatex) ...[
+            _buildSubPillAiAction(
+              title: 'Extrair LaTeX',
+              icon: 'math',
+              themeAccent: themeAccent,
+              onTap: () {
+                setState(() => _activeSubPill = _SubPillType.none);
+                if (widget.onAiAction != null) {
+                  widget.onAiAction!(PdfAiAction.extractLatex);
+                } else {
+                  widget.onExtractLatex?.call();
+                }
+              },
+            ),
+            const SizedBox(width: 4.0),
+          ],
+          if (settings.enablePdfAiExplainDiagram) ...[
+            _buildSubPillAiAction(
+              title: 'Explicar Diagrama',
+              icon: 'ai',
+              themeAccent: themeAccent,
+              onTap: () {
+                setState(() => _activeSubPill = _SubPillType.none);
+                if (widget.onAiAction != null) {
+                  widget.onAiAction!(PdfAiAction.explainDiagram);
+                } else {
+                  widget.onExplainDiagram?.call();
+                }
+              },
+            ),
+            const SizedBox(width: 4.0),
+          ],
+          if (settings.enablePdfAiFlashcards) ...[
+            _buildSubPillAiAction(
+              title: 'Flashcards',
+              icon: 'sparkle',
+              themeAccent: themeAccent,
+              onTap: () {
+                setState(() => _activeSubPill = _SubPillType.none);
+                widget.onAiAction?.call(PdfAiAction.generateFlashcards);
+              },
+            ),
+            const SizedBox(width: 4.0),
+          ],
+          _buildDivider(MoscaroTokens.borderSubtle),
           _PillActionButton(
             iconName: 'close',
             tooltip: 'Fechar ações de IA (Esc)',
@@ -900,9 +1015,7 @@ class _PdfCardFloatingPillState extends State<PdfCardFloatingPill> {
       height: PdfCardFloatingPill.pillHeight,
       padding: const EdgeInsets.symmetric(horizontal: 6.0, vertical: 2.0),
       decoration: BoxDecoration(
-        color: isLight
-            ? const Color(0xFFF8FAFC).withValues(alpha: 0.95)
-            : glassTint,
+        color: glassTint,
         borderRadius: BorderRadius.circular(PdfCardFloatingPill.pillRadius),
         border: Border.all(
           color: isLight
@@ -951,7 +1064,7 @@ class _PdfCardFloatingPillState extends State<PdfCardFloatingPill> {
     Color textPrimary,
     bool isAiAvailable,
   ) {
-    final dividerColor = isLight ? Colors.black12 : Colors.white12;
+    final dividerColor = MoscaroTokens.borderSubtle;
     final isSinglePage = widget.card.pdfDisplayMode == PdfDisplayMode.singlePage;
     final hasPrevPage = _currentPage > 1;
     final hasNextPage = _currentPage < _totalPages;
@@ -1062,6 +1175,29 @@ class _PdfCardFloatingPillState extends State<PdfCardFloatingPill> {
           onPressed: _toggleLock,
         ),
 
+        // 4b. Quick Bookmark
+        if (widget.onToggleBookmark != null)
+          _PillActionButton(
+            iconName: widget.isCurrentPageBookmarked ? 'star_filled' : 'star',
+            tooltip: widget.isCurrentPageBookmarked
+                ? 'Remover marcador da página'
+                : 'Marcar página atual',
+            isActive: widget.isCurrentPageBookmarked,
+            iconColor: widget.isCurrentPageBookmarked
+                ? MoscaroTokens.auroraAmber
+                : null,
+            onPressed: widget.onToggleBookmark,
+          ),
+
+        // 4c. Table of Contents & Bookmarks Drawer
+        if (widget.onToggleToc != null)
+          _PillActionButton(
+            iconName: 'list',
+            tooltip: 'Sumário & Marcadores',
+            isActive: widget.isTocOpen,
+            onPressed: widget.onToggleToc,
+          ),
+
         _buildDivider(dividerColor),
 
         // 5. Page Navigator: < 01 / 18 > (Apenas no Modo de Folha Única)
@@ -1074,26 +1210,99 @@ class _PdfCardFloatingPillState extends State<PdfCardFloatingPill> {
             isEnabled: hasPrevPage,
             onPressed: hasPrevPage ? _goToPreviousPage : null,
           ),
-          Tooltip(
-            message: 'Clique para ir diretamente a uma página',
-            child: MouseRegion(
-              cursor: SystemMouseCursors.click,
-              child: GestureDetector(
-                onTap: () => _handleDirectPageJump(context),
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 4.0),
+          if (!_isEditingPageInline)
+            Tooltip(
+              message: 'Clique para digitar a página | Duplo clique para o organizador de páginas',
+              child: MouseRegion(
+                cursor: SystemMouseCursors.click,
+                child: GestureDetector(
+                  onTap: _startInlinePageEditing,
+                  onDoubleTap: _openPageOrganizer,
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 4.0),
+                    child: Text(
+                      '${_currentPage.toString().padLeft(2, '0')} / ${_totalPages.toString().padLeft(2, '0')}',
+                      style: TextStyle(
+                        fontSize: 11.5,
+                        fontWeight: FontWeight.w600,
+                        color: textPrimary,
+                        letterSpacing: 0.5,
+                        fontFeatures: const [FontFeature.tabularFigures()],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            )
+          else
+            TapRegion(
+              onTapOutside: (_) => _submitInlinePageJump(),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  Container(
+                    width: math.max(30.0, (_currentPage.toString().length * 9.0) + 16.0),
+                    height: 22.0,
+                    alignment: Alignment.center,
+                    decoration: BoxDecoration(
+                      color: MoscaroTokens.backgroundSurface.withValues(alpha: 0.70),
+                      borderRadius: BorderRadius.circular(5.0),
+                      border: Border.all(
+                        color: themeAccent.withValues(alpha: 0.65),
+                        width: 1.0,
+                      ),
+                    ),
+                    child: Theme(
+                      data: Theme.of(context).copyWith(
+                        textSelectionTheme: TextSelectionThemeData(
+                          selectionColor: themeAccent.withValues(alpha: 0.35),
+                          selectionHandleColor: themeAccent,
+                          cursorColor: themeAccent,
+                        ),
+                      ),
+                      child: TextField(
+                        controller: _pageInlineController,
+                        focusNode: _pageInlineFocusNode,
+                        autofocus: true,
+                        keyboardType: TextInputType.number,
+                        textInputAction: TextInputAction.done,
+                        textAlign: TextAlign.center,
+                        textAlignVertical: TextAlignVertical.center,
+                        cursorColor: themeAccent,
+                        cursorWidth: 1.5,
+                        cursorHeight: 12.0,
+                        style: TextStyle(
+                          fontFamily: 'Inter',
+                          fontSize: 11.5,
+                          fontWeight: FontWeight.w700,
+                          color: themeAccent,
+                          fontFeatures: const [FontFeature.tabularFigures()],
+                        ),
+                        decoration: const InputDecoration(
+                          border: InputBorder.none,
+                          isCollapsed: true,
+                          contentPadding: EdgeInsets.only(bottom: 2.5),
+                        ),
+                        onEditingComplete: _submitInlinePageJump,
+                        onSubmitted: (text) => _submitInlinePageJump(text),
+                      ),
+                    ),
+                  ),
+                Padding(
+                  padding: const EdgeInsets.only(left: 3.0, right: 4.0),
                   child: Text(
-                    '${_currentPage.toString().padLeft(2, '0')} / ${_totalPages.toString().padLeft(2, '0')}',
+                    '/ ${_totalPages.toString().padLeft(2, '0')}',
                     style: TextStyle(
                       fontSize: 11.5,
                       fontWeight: FontWeight.w600,
-                      color: textPrimary,
+                      color: textPrimary.withValues(alpha: 0.7),
                       letterSpacing: 0.5,
                       fontFeatures: const [FontFeature.tabularFigures()],
                     ),
                   ),
                 ),
-              ),
+              ],
             ),
           ),
           _PillActionButton(
@@ -1133,6 +1342,17 @@ class _PdfCardFloatingPillState extends State<PdfCardFloatingPill> {
           isActive: _isExporting,
           onPressed: _isExporting ? null : () => _handleExportAnnotatedPdf(context),
         ),
+
+        // 7.1 STEM Region Snip / Crop Tool
+        if (widget.onToggleCrop != null) ...[
+          _PillActionButton(
+            iconName: 'crop',
+            tooltip: widget.isCropActive ? 'Cancelar recorte' : 'Recortar região STEM',
+            iconColor: widget.isCropActive ? themeAccent : null,
+            isActive: widget.isCropActive,
+            onPressed: widget.onToggleCrop,
+          ),
+        ],
 
         // 8. Desprender Página Atual (Standalone card)
         // Apenas para páginas pertencentes à coluna/documento mestre que ainda NÃO foram desprendidas
@@ -1193,7 +1413,7 @@ class _PdfCardFloatingPillState extends State<PdfCardFloatingPill> {
             tooltip: (widget.selectedPageIds != null && widget.selectedPageIds!.length > 1)
                 ? 'Excluir páginas selecionadas (${widget.selectedPageIds!.length})'
                 : 'Excluir página',
-            iconColor: const Color(0xFFFF5252),
+            iconColor: MoscaroTokens.auroraPink,
             onPressed: () {
               if (widget.onDeleteMultipleCards != null &&
                   widget.selectedPageIds != null &&
@@ -1386,9 +1606,7 @@ class _PillActionButtonState extends State<_PillActionButton> {
                 color: widget.isActive
                     ? themeAccent.withValues(alpha: 0.25)
                     : (_isHovered && widget.isEnabled
-                        ? (isLight
-                            ? Colors.black.withValues(alpha: 0.06)
-                            : Colors.white.withValues(alpha: 0.08))
+                        ? themeAccent.withValues(alpha: isLight ? 0.12 : 0.16)
                         : Colors.transparent),
                 border: widget.isActive
                     ? Border.all(

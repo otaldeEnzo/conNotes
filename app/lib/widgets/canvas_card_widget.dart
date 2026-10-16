@@ -19,6 +19,7 @@ import 'card_streaming_preview_view.dart';
 import 'canvas_card_pdf_view.dart';
 import 'pdf_corner_resize_handle.dart';
 import 'pdf_card_floating_pill.dart';
+import 'pdf_toc_sidebar_drawer.dart';
 import 'pdf_delete_confirm_dialog.dart';
 import '../services/pdf_search_engine.dart';
 import '../controllers/pdf_family_live_preview_controller.dart';
@@ -37,14 +38,18 @@ class CanvasCardWidget extends StatefulWidget {
   final ValueChanged<String> onSelectCard;
   final ValueChanged<String> onDeleteCard;
   final ValueChanged<CanvasCardModel> onDuplicateCard;
+  final ValueChanged<CanvasCardModel>? onAddCard;
   final List<CanvasCardModel>? allCards;
   final double gridSpacing;
   final VoidCallback? onSolveWithAi;
+  final ValueChanged<CanvasCardModel>? onSolveCardWithAi;
+  final ValueChanged<String>? onAskAiText;
   final VoidCallback? onExtractLatex;
   final List<InkStroke> Function(Set<String> ids)? getAttachedStrokes;
   final bool isPrimarySelected;
   final String activeTool;
   final void Function(List<InkStroke> finalStrokes, String cardId)? onSyncCardStrokes;
+  final void Function(String masterCardId, int pageNumber, String? text, [CanvasCardModel? sourceCard])? onJumpToPdfSource;
 
   const CanvasCardWidget({
     super.key,
@@ -58,13 +63,17 @@ class CanvasCardWidget extends StatefulWidget {
     required this.onSelectCard,
     required this.onDeleteCard,
     required this.onDuplicateCard,
+    this.onAddCard,
     this.allCards,
     this.gridSpacing = 28.0,
     this.onSolveWithAi,
+    this.onSolveCardWithAi,
+    this.onAskAiText,
     this.onExtractLatex,
     this.getAttachedStrokes,
     this.activeTool = 'pen',
     this.onSyncCardStrokes,
+    this.onJumpToPdfSource,
   });
 
   @override
@@ -84,6 +93,9 @@ class _CanvasCardWidgetState extends State<CanvasCardWidget> {
   double? _initialCardY;
   bool _isEditingTitle = false;
   bool _isEditingBlock = false;
+  double? _elasticEditingHeight;
+  bool _isPdfCropActive = false;
+  bool _isPdfTocOpen = false;
   late TextEditingController _titleController;
   final FocusNode _titleFocusNode = FocusNode();
   final GlobalKey<MarkdownLatexBlockViewState> _blockViewKey = GlobalKey<MarkdownLatexBlockViewState>();
@@ -130,10 +142,13 @@ class _CanvasCardWidgetState extends State<CanvasCardWidget> {
     final pageHeight = widget.card.width / ratio;
     final pageStrokes = widget.card.getStrokesForPage(pageNum);
 
+    final cleanBaseTitle = widget.card.title.replaceAll(RegExp(r'\s*\((Pág|Pag)\.?\s*\d+\)', caseSensitive: false), '').trim();
+    final detachedTitle = cleanBaseTitle.isNotEmpty ? cleanBaseTitle : 'Documento PDF';
+
     final detachedCard = CanvasCardModel(
       id: 'pdf_page_${widget.card.id}_p${pageNum}_${DateTime.now().millisecondsSinceEpoch}',
       cardType: CardType.pdf,
-      title: '${widget.card.title} (Pag. $pageNum)',
+      title: detachedTitle,
       x: widget.card.x + widget.card.width + 40.0,
       y: widget.card.y,
       width: widget.card.width,
@@ -310,8 +325,15 @@ class _CanvasCardWidgetState extends State<CanvasCardWidget> {
   void _submitTitle() {
     globalIsEditingText = false;
     final clean = _titleController.text.trim();
-    widget.onUpdateCard(widget.card.copyWith(title: clean.isNotEmpty ? clean : 'Card STEM'));
+    final defaultTitle = widget.card.cardType == CardType.pdf ? 'Documento PDF' : 'Card STEM';
+    widget.onUpdateCard(widget.card.copyWith(title: clean.isNotEmpty ? clean : defaultTitle));
     setState(() => _isEditingTitle = false);
+  }
+
+  String get _displayPdfTitle {
+    final raw = widget.card.title.isNotEmpty ? widget.card.title : 'Documento PDF';
+    final cleaned = raw.replaceAll(RegExp(r'\s*\((Pág|Pag)\.?\s*\d+\)', caseSensitive: false), '').trim();
+    return cleaned.isNotEmpty ? cleaned : raw;
   }
 
   Offset? _currentDelta;
@@ -514,10 +536,17 @@ class _CanvasCardWidgetState extends State<CanvasCardWidget> {
                           onSelectCard: () => widget.onSelectCard(widget.card.id),
                           onDeleteCard: () => widget.onDeleteCard(widget.card.id),
                           onDuplicateCard: widget.onDuplicateCard,
+                          onAddCard: widget.onAddCard,
+                          onSolveCardWithAi: widget.onSolveCardWithAi,
+                          onAskAiText: widget.onAskAiText,
                           getAttachedStrokes: widget.getAttachedStrokes,
                           activeTool: widget.activeTool,
                           onSyncCardStrokes: widget.onSyncCardStrokes,
                           searchEngine: _pdfSearchEngine,
+                          isCropActive: _isPdfCropActive,
+                          onCancelCrop: () => setState(() => _isPdfCropActive = false),
+                          isTocOpen: false,
+                          onCloseToc: () => setState(() => _isPdfTocOpen = false),
                         )
                       : (isMediaCard
                           ? CanvasCardMediaView(
@@ -536,7 +565,19 @@ class _CanvasCardWidgetState extends State<CanvasCardWidget> {
                               onSelectCard: () => widget.onSelectCard(widget.card.id),
                               onEditingModeChanged: (editing) {
                                 if (mounted && _isEditingBlock != editing) {
-                                  setState(() => _isEditingBlock = editing);
+                                  setState(() {
+                                    _isEditingBlock = editing;
+                                    if (!editing) {
+                                      _elasticEditingHeight = null;
+                                    }
+                                  });
+                                }
+                              },
+                              onRequiredEditingHeightChanged: (reqHeight) {
+                                if (mounted) {
+                                  setState(() {
+                                    _elasticEditingHeight = (reqHeight > 0.0) ? reqHeight : null;
+                                  });
                                 }
                               },
                               onActiveStylesChanged: (styles) {
@@ -547,22 +588,38 @@ class _CanvasCardWidgetState extends State<CanvasCardWidget> {
                               onContentChanged: (newContent) {
                                 final updatedCard = widget.card.copyWith(content: newContent);
                                 final calculatedMin = updatedCard.calculateMinHeight();
-                                final finalHeight = math.max(widget.card.height, calculatedMin);
+                                final finalHeight = math.max(widget.card.height, calculatedMin + 8.0);
                                 widget.onUpdateCard(updatedCard.copyWith(height: finalHeight));
                               },
+                              onJumpToSource: (widget.card.sourceMasterCardId != null && widget.card.sourcePageNumber != null)
+                                  ? () => widget.onJumpToPdfSource?.call(
+                                        widget.card.sourceMasterCardId!,
+                                        widget.card.sourcePageNumber!,
+                                        widget.card.sourceText,
+                                        widget.card,
+                                      )
+                                  : null,
                             ))))
               : const SizedBox.shrink();
 
-          Widget frameBuilder(BuildContext context, Size currentSize) {
+          Widget frameBuilder(BuildContext context, Size currentSize, [Widget? resizeHandle]) {
             final isMasterPdfCard = isPdfCard && (widget.card.sourceMasterCardId == null || widget.card.isDetached);
-            final cardBodyHeight = currentSize.height + (isMasterPdfCard ? 28.0 : 0.0);
+            final double effectiveTextCardHeight = (_isEditingBlock && _elasticEditingHeight != null)
+                ? math.max(currentSize.height, _elasticEditingHeight!)
+                : currentSize.height;
+            final double cardBodyHeight = isPdfCard
+                ? (currentSize.height + (isMasterPdfCard ? 28.0 : 0.0))
+                : effectiveTextCardHeight;
+            final Size effectiveContainerSize = isPdfCard
+                ? currentSize
+                : Size(currentSize.width, effectiveTextCardHeight);
 
             final cardMainBodyWidget = Positioned(
               key: const ValueKey('card_main_body'),
               top: 60.0,
               left: 0,
               width: currentSize.width,
-              height: cardBodyHeight,
+              height: isPdfCard ? null : cardBodyHeight,
               child: TapRegion(
                   groupId: 'card_block_editor_${widget.card.id}',
                   onTapOutside: (_) {
@@ -585,6 +642,7 @@ class _CanvasCardWidgetState extends State<CanvasCardWidget> {
                             isCollapsed: isCollapsed,
                             currentSize: currentSize,
                             child: cardBody,
+                            resizeHandle: resizeHandle,
                           ),
                         )
                       : ClipRRect(
@@ -599,7 +657,7 @@ class _CanvasCardWidgetState extends State<CanvasCardWidget> {
                               textPrimary: textPrimary,
                               textSecondary: textSecondary,
                               isCollapsed: isCollapsed,
-                              currentSize: currentSize,
+                              currentSize: effectiveContainerSize,
                               child: cardBody,
                             ),
                           ),
@@ -747,6 +805,21 @@ class _CanvasCardWidgetState extends State<CanvasCardWidget> {
                                                 onDetachCurrentPage: _handleDetachCurrentPage,
                                                 onReattachPage: _handleReattachPage,
                                                 onReattachToMaster: _handleReattachToMaster,
+                                                onToggleCrop: () => setState(() => _isPdfCropActive = !_isPdfCropActive),
+                                                isCropActive: _isPdfCropActive,
+                                                onToggleToc: () => setState(() => _isPdfTocOpen = !_isPdfTocOpen),
+                                                isTocOpen: _isPdfTocOpen,
+                                                onToggleBookmark: () {
+                                                  final page = widget.card.currentPdfPage;
+                                                  final bookmarks = List<int>.from(widget.card.bookmarkedPages);
+                                                  if (bookmarks.contains(page)) {
+                                                    bookmarks.remove(page);
+                                                  } else {
+                                                    bookmarks.add(page);
+                                                  }
+                                                  widget.onUpdateCard(widget.card.copyWith(bookmarkedPages: bookmarks));
+                                                },
+                                                isCurrentPageBookmarked: widget.card.bookmarkedPages.contains(widget.card.currentPdfPage),
                                               );
                                             },
                                           )
@@ -807,6 +880,30 @@ class _CanvasCardWidgetState extends State<CanvasCardWidget> {
                       ),
                     ),
 
+                      // 3. Gaveta Lateral de Sumario e Marcadores (TOC Drawer desimpedida de ClipRect)
+                      if (isPdfCard && _isPdfTocOpen)
+                        Positioned(
+                          left: currentSize.width + 12.0,
+                          top: 60.0,
+                          child: PdfTocSidebarDrawer(
+                            card: widget.card,
+                            exactHeight: cardBodyHeight,
+                            onPageJump: (page) {
+                              _onPdfPageJump(page);
+                            },
+                            onToggleBookmark: (page) {
+                              final bookmarks = List<int>.from(widget.card.bookmarkedPages);
+                              if (bookmarks.contains(page)) {
+                                bookmarks.remove(page);
+                              } else {
+                                bookmarks.add(page);
+                              }
+                              widget.onUpdateCard(widget.card.copyWith(bookmarkedPages: bookmarks));
+                            },
+                            onClose: () => setState(() => _isPdfTocOpen = false),
+                          ),
+                        ),
+
                     ],
                   );
             },
@@ -848,19 +945,24 @@ class _CanvasCardWidgetState extends State<CanvasCardWidget> {
     required bool isCollapsed,
     required Size currentSize,
     required Widget child,
+    Widget? resizeHandle,
   }) {
-    final borderColor = isSelected
+    final isElevated = _isEditingBlock;
+    final borderColor = (isElevated || isSelected)
         ? themeAccent
         : (isLight ? MoscaroTokens.borderSubtle : MoscaroTokens.borderGlow);
 
     final cardShadows = [
       BoxShadow(
-        color: isSelected
-            ? themeAccent.withValues(alpha: 0.3)
-            : (isLight ? const Color(0x180F172A) : Colors.black.withValues(alpha: 0.45)),
-        blurRadius: isSelected ? 24 : 16,
-        spreadRadius: isSelected ? 1 : 0,
-        offset: const Offset(0, 8),
+        color: themeAccent.withValues(alpha: isElevated ? (isLight ? 0.22 : 0.38) : (isSelected ? 0.28 : 0.0)),
+        blurRadius: isElevated ? 32 : (isSelected ? 20 : 14),
+        spreadRadius: isElevated ? 2 : (isSelected ? 1 : 0),
+        offset: Offset(0, isElevated ? 12 : 6),
+      ),
+      BoxShadow(
+        color: Colors.black.withValues(alpha: isElevated ? (isLight ? 0.25 : 0.55) : (isLight ? 0.08 : 0.40)),
+        blurRadius: isElevated ? 24 : 16,
+        offset: Offset(0, isElevated ? 8 : 4),
       ),
     ];
 
@@ -877,10 +979,13 @@ class _CanvasCardWidgetState extends State<CanvasCardWidget> {
       return SizedBox(
         width: currentSize.width,
         child: ClipRect(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
+          child: Stack(
+            clipBehavior: Clip.none,
             children: [
+              Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
               // Cabecalho de Arraste do PDF (Vidro Liquido Moscaro v2)
               GestureDetector(
                 behavior: HitTestBehavior.opaque,
@@ -890,7 +995,7 @@ class _CanvasCardWidgetState extends State<CanvasCardWidget> {
                   globalIsEditingText = true;
                   setState(() {
                     _isEditingTitle = true;
-                    _titleController.text = widget.card.title;
+                    _titleController.text = _displayPdfTitle;
                   });
                   _titleFocusNode.requestFocus();
                 },
@@ -938,7 +1043,7 @@ class _CanvasCardWidgetState extends State<CanvasCardWidget> {
                               : Tooltip(
                                   message: 'Clique duas vezes para renomear',
                                   child: Text(
-                                    widget.card.title.isNotEmpty ? widget.card.title : 'Documento PDF',
+                                    _displayPdfTitle,
                                     style: TextStyle(
                                       color: textPrimary,
                                       fontSize: 11.0,
@@ -977,8 +1082,12 @@ class _CanvasCardWidgetState extends State<CanvasCardWidget> {
               child,
             ],
           ),
-        ),
-      );
+          if (resizeHandle != null)
+            resizeHandle,
+        ],
+      ),
+    ),
+  );
     }
 
     if (widget.card.cardType == CardType.media) {
@@ -1082,7 +1191,9 @@ class _CanvasCardWidgetState extends State<CanvasCardWidget> {
       );
     }
 
-    return SizedBox(
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 180),
+      curve: Curves.easeOutCubic,
       width: currentSize.width,
       height: currentSize.height,
       child: ClipRect(
@@ -1172,7 +1283,7 @@ class _CanvasCardWidgetState extends State<CanvasCardWidget> {
           borderRadius: 14,
           backgroundColor: glassTint,
           borderColor: borderColor,
-          borderWidth: isSelected ? 1.5 : 1.0,
+          borderWidth: isElevated ? 1.8 : (isSelected ? 1.5 : 1.0),
           customShadows: cardShadows,
           padding: EdgeInsets.zero,
           enableBlur: MoscaroTokens.enableCardsBlur && MoscaroTokens.blurSigma > 0,

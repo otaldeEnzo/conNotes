@@ -313,7 +313,7 @@ class StrokePictureCache {
           isTapered: stroke.toolType == InkToolType.fountain,
         );
       } else if (!stroke.isShape) {
-        stroke.cachedPath = _buildSmoothCatmullRomPath(stroke.points);
+        stroke.cachedPath = buildSmoothCatmullRomPath(stroke.points);
       }
     }
     final bounds = stroke.boundingBox ?? SelectionGeometry.computeStrokeBounds(stroke);
@@ -519,7 +519,7 @@ class StrokePictureCache {
           ..strokeJoin = StrokeJoin.miter
           ..style = PaintingStyle.stroke;
 
-        stroke.cachedPath ??= _buildSmoothCatmullRomPath(stroke.points);
+        stroke.cachedPath ??= buildSmoothCatmullRomPath(stroke.points);
         canvas.drawPath(stroke.cachedPath!, reusablePaint);
         return;
       }
@@ -533,7 +533,7 @@ class StrokePictureCache {
           ..strokeJoin = StrokeJoin.round
           ..style = PaintingStyle.stroke;
 
-        stroke.cachedPath ??= _buildSmoothCatmullRomPath(stroke.points);
+        stroke.cachedPath ??= buildSmoothCatmullRomPath(stroke.points);
         canvas.drawPath(stroke.cachedPath!, reusablePaint);
         return;
       }
@@ -546,7 +546,7 @@ class StrokePictureCache {
         ..strokeJoin = StrokeJoin.round
         ..style = PaintingStyle.stroke;
 
-      stroke.cachedPath ??= _buildSmoothCatmullRomPath(stroke.points);
+      stroke.cachedPath ??= buildSmoothCatmullRomPath(stroke.points);
       canvas.drawPath(stroke.cachedPath!, reusablePaint);
     } finally {
       if (hasTransform) {
@@ -562,36 +562,40 @@ class StrokePictureCache {
     return adapted;
   }
 
-  static Path _buildSmoothCatmullRomPath(List<StrokePoint> points) {
+  static Path buildSmoothCatmullRomPath(List<StrokePoint> points) {
     final path = Path();
-    if (points.isEmpty) return path;
-    if (points.length == 1) {
+    final len = points.length;
+    if (len == 0) return path;
+    if (len == 1) {
       path.moveTo(points[0].point.dx, points[0].point.dy);
       path.lineTo(points[0].point.dx, points[0].point.dy);
       return path;
     }
-    if (points.length == 2) {
+    if (len == 2) {
       final p0 = points[0].point;
       final p1 = points[1].point;
-      final mid = Offset((p0.dx + p1.dx) / 2, (p0.dy + p1.dy) / 2);
       path.moveTo(p0.dx, p0.dy);
-      path.quadraticBezierTo(p0.dx, p0.dy, mid.dx, mid.dy);
       path.lineTo(p1.dx, p1.dy);
       return path;
     }
 
-    path.moveTo(points[0].point.dx, points[0].point.dy);
+    // Spline Quadrática por Pontos Médios (Variation-Diminishing B-Spline):
+    // Elimina 100% do overshoot/oscilação de Catmull-Rom uniforme em espaçamentos irregulares.
+    final p0 = points[0].point;
+    final p1 = points[1].point;
+    path.moveTo(p0.dx, p0.dy);
+    path.lineTo((p0.dx + p1.dx) * 0.5, (p0.dy + p1.dy) * 0.5);
 
-    for (int i = 0; i < points.length - 1; i++) {
-      final p0 = i > 0 ? points[i - 1].point : points[i].point;
-      final p1 = points[i].point;
-      final p2 = points[i + 1].point;
-      final p3 = i < points.length - 2 ? points[i + 2].point : p2;
-
-      final cp1 = Offset(p1.dx + (p2.dx - p0.dx) / 6.0, p1.dy + (p2.dy - p0.dy) / 6.0);
-      final cp2 = Offset(p2.dx - (p3.dx - p1.dx) / 6.0, p2.dy - (p3.dy - p1.dy) / 6.0);
-      path.cubicTo(cp1.dx, cp1.dy, cp2.dx, cp2.dy, p2.dx, p2.dy);
+    for (int i = 1; i < len - 1; i++) {
+      final curr = points[i].point;
+      final next = points[i + 1].point;
+      final midX = (curr.dx + next.dx) * 0.5;
+      final midY = (curr.dy + next.dy) * 0.5;
+      path.quadraticBezierTo(curr.dx, curr.dy, midX, midY);
     }
+
+    final last = points[len - 1].point;
+    path.lineTo(last.dx, last.dy);
     return path;
   }
 }
@@ -601,6 +605,7 @@ class FreehandOutlineRenderer {
   static Path generateOutlinePath(List<StrokePoint> points, {
     required double baseWidth,
     bool isTapered = true,
+    bool isLive = false,
   }) {
     final path = Path();
     final len = points.length;
@@ -636,27 +641,44 @@ class FreehandOutlineRenderer {
       return path;
     }
 
-    // 1. Calcula normais e raios dinâmicos para cada ponto da coluna vertebral
-    final leftPoints = <Offset>[];
-    final rightPoints = <Offset>[];
+    // 1. Suaviza a coluna vertebral (spine) localmente para calcular tangentes e normais livres de jitter
+    final leftPoints = List<Offset>.filled(len, Offset.zero);
+    final rightPoints = List<Offset>.filled(len, Offset.zero);
+    Offset prevNormal = const Offset(0, 1);
+    double prevRadius = baseWidth * 0.5;
 
     for (int i = 0; i < len; i++) {
       final curr = points[i].point;
       Offset tangent;
       if (i == 0) {
-        tangent = points[1].point - curr;
+        tangent = points[math.min(2, len - 1)].point - curr;
       } else if (i == len - 1) {
-        tangent = curr - points[i - 1].point;
+        tangent = curr - points[math.max(0, len - 3)].point;
       } else {
-        tangent = points[i + 1].point - points[i - 1].point;
+        final prev1 = points[i - 1].point;
+        final next1 = points[i + 1].point;
+        final prev2 = i >= 2 ? points[i - 2].point : prev1;
+        final next2 = i + 2 < len ? points[i + 2].point : next1;
+        tangent = (next1 - prev1) * 0.7 + (next2 - prev2) * 0.3;
       }
 
       final dist = tangent.distance;
       Offset normal;
       if (dist < 0.0001) {
-        normal = const Offset(0, 1);
+        normal = prevNormal;
       } else {
-        normal = Offset(-tangent.dy / dist, tangent.dx / dist);
+        final rawNormal = Offset(-tangent.dy / dist, tangent.dx / dist);
+        if (i > 0) {
+          final blended = Offset(
+            prevNormal.dx * 0.35 + rawNormal.dx * 0.65,
+            prevNormal.dy * 0.35 + rawNormal.dy * 0.65,
+          );
+          final bLen = blended.distance;
+          normal = bLen > 0.0001 ? blended / bLen : rawNormal;
+        } else {
+          normal = rawNormal;
+        }
+        prevNormal = normal;
       }
 
       // Caneta tinteiro aplica modulação direcional a 45 graus
@@ -671,26 +693,28 @@ class FreehandOutlineRenderer {
       const int taperCount = 5;
       if (i < taperCount) {
         taper = (i + 1) / (taperCount + 1);
-      } else if (i >= len - taperCount) {
+      } else if (!isLive && i >= len - taperCount) {
         taper = (len - i) / (taperCount + 1);
       }
       taper = taper.clamp(0.2, 1.0);
 
       final double pFactor = points[i].pressure.clamp(0.15, 2.0);
-      final double radius = (baseWidth * 0.5 * pFactor * angleMod * taper).clamp(0.6, baseWidth * 2.5);
+      final double rawRadius = (baseWidth * 0.5 * pFactor * angleMod * taper).clamp(0.6, baseWidth * 2.5);
+      final double radius = i == 0 ? rawRadius : (prevRadius * 0.4 + rawRadius * 0.6);
+      prevRadius = radius;
 
-      leftPoints.add(Offset(curr.dx + normal.dx * radius, curr.dy + normal.dy * radius));
-      rightPoints.add(Offset(curr.dx - normal.dx * radius, curr.dy - normal.dy * radius));
+      leftPoints[i] = Offset(curr.dx + normal.dx * radius, curr.dy + normal.dy * radius);
+      rightPoints[i] = Offset(curr.dx - normal.dx * radius, curr.dy - normal.dy * radius);
     }
 
     // 2. Constrói contorno de fita spline contínuo fechado
     path.moveTo(leftPoints[0].dx, leftPoints[0].dy);
 
     // Lado Esquerdo (Spline por pontos médios)
-    for (int i = 0; i < leftPoints.length - 1; i++) {
+    for (int i = 0; i < len - 1; i++) {
       final p0 = leftPoints[i];
       final p1 = leftPoints[i + 1];
-      final mid = Offset((p0.dx + p1.dx) / 2, (p0.dy + p1.dy) / 2);
+      final mid = Offset((p0.dx + p1.dx) * 0.5, (p0.dy + p1.dy) * 0.5);
       path.quadraticBezierTo(p0.dx, p0.dy, mid.dx, mid.dy);
     }
     path.lineTo(leftPoints.last.dx, leftPoints.last.dy);
@@ -704,10 +728,10 @@ class FreehandOutlineRenderer {
     );
 
     // Lado Direito Reverso (Spline por pontos médios)
-    for (int i = rightPoints.length - 1; i > 0; i--) {
+    for (int i = len - 1; i > 0; i--) {
       final p0 = rightPoints[i];
       final p1 = rightPoints[i - 1];
-      final mid = Offset((p0.dx + p1.dx) / 2, (p0.dy + p1.dy) / 2);
+      final mid = Offset((p0.dx + p1.dx) * 0.5, (p0.dy + p1.dy) * 0.5);
       path.quadraticBezierTo(p0.dx, p0.dy, mid.dx, mid.dy);
     }
     path.lineTo(rightPoints[0].dx, rightPoints[0].dy);
@@ -780,8 +804,7 @@ class CommittedStrokesPainter extends CustomPainter {
         oldDelegate.strokesCount != strokesCount ||
         oldDelegate.hiddenStrokeIds != hiddenStrokeIds ||
         oldDelegate.panOffset != panOffset ||
-        oldDelegate.zoomScale != zoomScale ||
-        oldDelegate.isInteracting != isInteracting;
+        oldDelegate.zoomScale != zoomScale;
   }
 }
 
@@ -812,7 +835,7 @@ class TransientStrokesPictureCache {
         canvas.translate(stroke.transform.dx, stroke.transform.dy);
       }
       final color = StrokePictureCache._getStrokeColor(stroke);
-      stroke.cachedPath ??= StrokePictureCache._buildSmoothCatmullRomPath(stroke.points);
+      stroke.cachedPath ??= StrokePictureCache.buildSmoothCatmullRomPath(stroke.points);
       reusablePaint
         ..color = color
         ..strokeWidth = stroke.strokeWidth
@@ -877,29 +900,39 @@ class TransientStrokesPainter extends CustomPainter {
   }
 }
 
-/// Painter ultra-eficiente para o traço em desenho ativo (144 Hz).
+/// Painter ultra-eficiente para o traço em desenho ativo (180+ Hz, Zero Widget Rebuild).
 class ActiveStrokePainter extends CustomPainter {
   final InkStroke? activeStroke;
+  final InkStroke? Function()? getActiveStroke;
   final ValueNotifier<int>? updateNotifier;
   final Offset panOffset;
   final double zoomScale;
+  final ValueNotifier<Offset>? panNotifier;
+  final ValueNotifier<double>? zoomNotifier;
   final Paint _reusablePaint = Paint();
 
   ActiveStrokePainter({
-    required this.activeStroke,
+    this.activeStroke,
+    this.getActiveStroke,
     this.updateNotifier,
     required this.panOffset,
     required this.zoomScale,
-  }) : super(repaint: updateNotifier);
+    this.panNotifier,
+    this.zoomNotifier,
+    Listenable? repaint,
+  }) : super(repaint: repaint ?? updateNotifier);
 
   @override
   void paint(Canvas canvas, Size size) {
-    final stroke = activeStroke;
+    final stroke = getActiveStroke != null ? getActiveStroke!() : activeStroke;
     if (stroke == null || stroke.points.isEmpty) return;
 
+    final effPan = panNotifier != null ? panNotifier!.value : panOffset;
+    final effZoom = zoomNotifier != null ? zoomNotifier!.value : zoomScale;
+
     canvas.save();
-    canvas.translate(panOffset.dx, panOffset.dy);
-    canvas.scale(zoomScale);
+    canvas.translate(effPan.dx, effPan.dy);
+    canvas.scale(effZoom);
 
     final hasTransform = stroke.transform != Offset.zero;
     if (hasTransform) {
@@ -917,25 +950,33 @@ class ActiveStrokePainter extends CustomPainter {
         return;
       }
 
+      // 0. Formas Geométricas / Smart Shapes com cachedPath pronto
+      if (stroke.isShape && stroke.cachedPath != null) {
+        _reusablePaint
+          ..color = _getStrokeColor(stroke)
+          ..strokeWidth = stroke.toolType == InkToolType.highlighter
+              ? stroke.strokeWidth * 3.5
+              : stroke.strokeWidth
+          ..strokeCap = stroke.toolType == InkToolType.highlighter ? StrokeCap.square : StrokeCap.round
+          ..strokeJoin = stroke.toolType == InkToolType.highlighter ? StrokeJoin.miter : StrokeJoin.round
+          ..style = PaintingStyle.stroke;
+        canvas.drawPath(stroke.cachedPath!, _reusablePaint);
+        return;
+      }
+
       // 1. Caneta Tinteiro / Caligráfica / Pressão Orgânica (Perfect Freehand)
       if ((stroke.toolType == InkToolType.fountain || stroke.enablePressure) && !stroke.isShape) {
         _reusablePaint
           ..color = _getStrokeColor(stroke)
           ..style = PaintingStyle.fill;
 
-        if (stroke.cachedPath != null) {
-          canvas.drawPath(stroke.cachedPath!, _reusablePaint);
-        }
-
-        final tailLen = math.min(stroke.points.length, 4);
-        if (tailLen > 0) {
-          final tailPath = FreehandOutlineRenderer.generateOutlinePath(
-            stroke.points.sublist(stroke.points.length - tailLen),
-            baseWidth: stroke.strokeWidth,
-            isTapered: stroke.toolType == InkToolType.fountain,
-          );
-          canvas.drawPath(tailPath, _reusablePaint);
-        }
+        stroke.cachedPath ??= FreehandOutlineRenderer.generateOutlinePath(
+          stroke.points,
+          baseWidth: stroke.strokeWidth,
+          isTapered: stroke.toolType == InkToolType.fountain,
+          isLive: true,
+        );
+        canvas.drawPath(stroke.cachedPath!, _reusablePaint);
         return;
       }
 
@@ -948,40 +989,12 @@ class ActiveStrokePainter extends CustomPainter {
           ..strokeJoin = StrokeJoin.miter
           ..style = PaintingStyle.stroke;
 
-        final path = Path();
-        if (stroke.cachedPath != null) {
-          path.addPath(stroke.cachedPath!, Offset.zero);
-        }
-        final tailLen = math.min(stroke.points.length, 4);
-        if (tailLen > 1) {
-          path.addPath(_buildSmoothCatmullRomPath(stroke.points.sublist(stroke.points.length - tailLen)), Offset.zero);
-        }
-        canvas.drawPath(path, _reusablePaint);
+        stroke.cachedPath ??= StrokePictureCache.buildSmoothCatmullRomPath(stroke.points);
+        canvas.drawPath(stroke.cachedPath!, _reusablePaint);
         return;
       }
 
-      // 3. Lápis Grafite (Pencil)
-      if (stroke.toolType == InkToolType.pencil) {
-        _reusablePaint
-          ..color = _getStrokeColor(stroke)
-          ..strokeWidth = stroke.strokeWidth
-          ..strokeCap = StrokeCap.round
-          ..strokeJoin = StrokeJoin.round
-          ..style = PaintingStyle.stroke;
-
-        final path = Path();
-        if (stroke.cachedPath != null) {
-          path.addPath(stroke.cachedPath!, Offset.zero);
-        }
-        final tailLen = math.min(stroke.points.length, 4);
-        if (tailLen > 1) {
-          path.addPath(_buildSmoothCatmullRomPath(stroke.points.sublist(stroke.points.length - tailLen)), Offset.zero);
-        }
-        canvas.drawPath(path, _reusablePaint);
-        return;
-      }
-
-      // 4. Traço Técnico Uniforme
+      // 3. Lápis Grafite (Pencil) e 4. Traço Técnico Uniforme
       _reusablePaint
         ..color = _getStrokeColor(stroke)
         ..strokeWidth = stroke.strokeWidth
@@ -989,15 +1002,8 @@ class ActiveStrokePainter extends CustomPainter {
         ..strokeJoin = StrokeJoin.round
         ..style = PaintingStyle.stroke;
 
-      final path = Path();
-      if (stroke.cachedPath != null) {
-        path.addPath(stroke.cachedPath!, Offset.zero);
-      }
-      final tailLen = math.min(stroke.points.length, 4);
-      if (tailLen > 1) {
-        path.addPath(_buildSmoothCatmullRomPath(stroke.points.sublist(stroke.points.length - tailLen)), Offset.zero);
-      }
-      canvas.drawPath(path, _reusablePaint);
+      stroke.cachedPath ??= StrokePictureCache.buildSmoothCatmullRomPath(stroke.points);
+      canvas.drawPath(stroke.cachedPath!, _reusablePaint);
     } finally {
       if (hasTransform) {
         canvas.restore();
@@ -1013,42 +1019,12 @@ class ActiveStrokePainter extends CustomPainter {
     return adapted;
   }
 
-  Path _buildSmoothCatmullRomPath(List<StrokePoint> points) {
-    final path = Path();
-    if (points.isEmpty) return path;
-    if (points.length == 1) {
-      path.moveTo(points[0].point.dx, points[0].point.dy);
-      path.lineTo(points[0].point.dx, points[0].point.dy);
-      return path;
-    }
-    if (points.length == 2) {
-      final p0 = points[0].point;
-      final p1 = points[1].point;
-      final mid = Offset((p0.dx + p1.dx) / 2, (p0.dy + p1.dy) / 2);
-      path.moveTo(p0.dx, p0.dy);
-      path.quadraticBezierTo(p0.dx, p0.dy, mid.dx, mid.dy);
-      path.lineTo(p1.dx, p1.dy);
-      return path;
-    }
-
-    path.moveTo(points[0].point.dx, points[0].point.dy);
-
-    for (int i = 0; i < points.length - 1; i++) {
-      final p0 = i > 0 ? points[i - 1].point : points[i].point;
-      final p1 = points[i].point;
-      final p2 = points[i + 1].point;
-      final p3 = i < points.length - 2 ? points[i + 2].point : p2;
-
-      final cp1 = Offset(p1.dx + (p2.dx - p0.dx) / 6.0, p1.dy + (p2.dy - p0.dy) / 6.0);
-      final cp2 = Offset(p2.dx - (p3.dx - p1.dx) / 6.0, p2.dy - (p3.dy - p1.dy) / 6.0);
-      path.cubicTo(cp1.dx, cp1.dy, cp2.dx, cp2.dy, p2.dx, p2.dy);
-    }
-    return path;
-  }
-
   @override
   bool shouldRepaint(covariant ActiveStrokePainter oldDelegate) {
-    return oldDelegate.panOffset != panOffset || oldDelegate.zoomScale != zoomScale;
+    return oldDelegate.panOffset != panOffset ||
+        oldDelegate.zoomScale != zoomScale ||
+        oldDelegate.activeStroke != activeStroke ||
+        oldDelegate.getActiveStroke != getActiveStroke;
   }
 }
 

@@ -1,12 +1,20 @@
+import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:pdfrx/pdfrx.dart' hide PdfTextMatch;
+import '../models/pdf_internal_object_models.dart';
 import '../models/pdf_text_search_models.dart';
+import '../models/pdf_text_selection_models.dart';
+import '../services/pdf_image_bounds_service.dart';
+import '../services/pdf_page_spatial_index.dart';
 import '../theme/moscaro_theme_controller.dart';
 import '../theme/moscaro_v2_tokens.dart';
 import 'canvas_layers.dart';
 import 'ink_models.dart';
 import 'pdf_search_highlight_painter.dart';
+import 'pdf_smart_cursor_overlay.dart';
+import 'pdf_text_context_menu.dart';
+import 'pdf_text_selection_painter.dart';
 import 'svg_icon.dart';
 
 /// Hardware-accelerated GPU color filter matrix for Moscaro Dark Mode.
@@ -103,6 +111,33 @@ class PdfPageSubcardWidget extends StatefulWidget {
   /// The active focused search match (if on this page sheet).
   final PdfTextMatch? activeSearchMatch;
 
+  /// Active tool in canvas ('select', 'pen', 'highlighter', etc.).
+  final String activeTool;
+
+  /// Active text selection state on this page sheet (if any).
+  final PdfTextSelectionState? textSelection;
+
+  /// Callback when text selection changes, expands, or is cleared.
+  final ValueChanged<PdfTextSelectionState?>? onTextSelectionChanged;
+
+  /// Callback to instantiate a STEM card from the current text selection.
+  final VoidCallback? onGenerateStemCardFromSelection;
+
+  /// Callback to apply an aligned highlighter stroke over the selected text.
+  final VoidCallback? onHighlightSelection;
+
+  /// Clockwise rotation in quarter turns (0 = 0 deg, 1 = 90 deg, 2 = 180 deg, 3 = 270 deg).
+  final int rotationQuarterTurns;
+
+  /// Optional callback to instantiate a card for a detected object (image, formula, table).
+  final ValueChanged<PdfInternalObject>? onSpawnCardForObject;
+
+  /// Optional callback to send a detected object to AI.
+  final ValueChanged<PdfInternalObject>? onAskAiObject;
+
+  /// Optional callback to send the current text selection to AI.
+  final VoidCallback? onAskAiSelection;
+
   const PdfPageSubcardWidget({
     super.key,
     required this.document,
@@ -128,6 +163,15 @@ class PdfPageSubcardWidget extends StatefulWidget {
     this.resizeHandles,
     this.searchMatches,
     this.activeSearchMatch,
+    this.activeTool = 'pen',
+    this.textSelection,
+    this.onTextSelectionChanged,
+    this.onGenerateStemCardFromSelection,
+    this.onHighlightSelection,
+    this.rotationQuarterTurns = 0,
+    this.onSpawnCardForObject,
+    this.onAskAiObject,
+    this.onAskAiSelection,
   });
 
   /// Standard corner radius for PDF page sheets in conNotes.
@@ -139,50 +183,129 @@ class PdfPageSubcardWidget extends StatefulWidget {
 
 class _PdfPageSubcardWidgetState extends State<PdfPageSubcardWidget> {
   bool _isHovered = false;
+  PdfPageText? _pageText;
+  PdfPageSpatialIndex? _spatialIndex;
 
-  /// Resolves the effective height of the page sheet based on intrinsic aspect ratio.
+  @override
+  void initState() {
+    super.initState();
+    _ensurePageTextLoaded();
+  }
+
+  @override
+  void didUpdateWidget(covariant PdfPageSubcardWidget oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.document != widget.document ||
+        oldWidget.pageNumber != widget.pageNumber ||
+        oldWidget.rotationQuarterTurns != widget.rotationQuarterTurns ||
+        oldWidget.width != widget.width ||
+        oldWidget.height != widget.height) {
+      if (oldWidget.document != widget.document || oldWidget.pageNumber != widget.pageNumber) {
+        _pageText = null;
+        _spatialIndex = null;
+        _ensurePageTextLoaded();
+      } else {
+        _rebuildSpatialIndex();
+      }
+    }
+  }
+
+  void _rebuildSpatialIndex() {
+    if (_pageText != null) {
+      final docPath = widget.document?.sourceName ?? '';
+      final imageRects = docPath.isNotEmpty
+          ? PdfImageBoundsService.instance.getImageRectsForPageSync(
+              pdfPath: docPath,
+              pageNumber: widget.pageNumber,
+              nativePageWidth: _nativePageWidth,
+              nativePageHeight: _nativePageHeight,
+            )
+          : <Rect>[];
+      _spatialIndex = PdfPageSpatialIndex.fromPageText(
+        pageText: _pageText!,
+        pageNumber: widget.pageNumber,
+        nativeWidth: _nativePageWidth,
+        nativeHeight: _nativePageHeight,
+        excludedImageRects: imageRects,
+      );
+    } else {
+      _spatialIndex = null;
+    }
+  }
+
+  Future<void> _ensurePageTextLoaded() async {
+    if (_pageText != null || widget.document == null) return;
+    if (widget.pageNumber < 1 || widget.pageNumber > widget.document!.pages.length) return;
+    try {
+      final page = widget.document!.pages[widget.pageNumber - 1];
+      final loaded = await page.loadText();
+      if (mounted) {
+        setState(() {
+          _pageText = loaded;
+          _rebuildSpatialIndex();
+        });
+      }
+    } catch (e) {
+      debugPrint('[PdfPageSubcardWidget] Error loading text for page ${widget.pageNumber}: $e');
+    }
+  }
+
+  /// Resolves the effective height of the page sheet based on intrinsic aspect ratio and rotation.
   double get _effectiveHeight {
     if (widget.height != null && widget.height! > 0) {
       return widget.height!;
     }
 
+    final isTransposed = (widget.rotationQuarterTurns % 2) != 0;
     final doc = widget.document;
     if (doc != null &&
         widget.pageNumber >= 1 &&
         widget.pageNumber <= doc.pages.length) {
       final page = doc.pages[widget.pageNumber - 1];
       if (page.width > 0 && page.height > 0) {
-        return widget.width * (page.height / page.width);
+        final ratio = isTransposed ? (page.width / page.height) : (page.height / page.width);
+        return widget.width * ratio;
       }
     }
 
     // Default to standard A4 ratio (1 : sqrt(2) ~ 1.4142) while loading
-    return widget.width * 1.4142;
+    final defaultRatio = isTransposed ? (1.0 / 1.4142) : 1.4142;
+    return widget.width * defaultRatio;
   }
 
   double get _nativePageWidth {
+    final isTransposed = (widget.rotationQuarterTurns % 2) != 0;
     final doc = widget.document;
     if (doc != null &&
         widget.pageNumber >= 1 &&
         widget.pageNumber <= doc.pages.length) {
       final page = doc.pages[widget.pageNumber - 1];
-      if (page.width > 0) return page.width;
+      if (page.width > 0 && page.height > 0) {
+        return isTransposed ? page.height : page.width;
+      }
     }
     return widget.width;
   }
 
   double get _nativePageHeight {
+    final isTransposed = (widget.rotationQuarterTurns % 2) != 0;
     final doc = widget.document;
     if (doc != null &&
         widget.pageNumber >= 1 &&
         widget.pageNumber <= doc.pages.length) {
       final page = doc.pages[widget.pageNumber - 1];
-      if (page.height > 0) return page.height;
+      if (page.width > 0 && page.height > 0) {
+        return isTransposed ? page.width : page.height;
+      }
     }
     return _effectiveHeight;
   }
 
   void _handleTap() {
+    if (widget.textSelection != null && widget.textSelection!.isNotEmpty) {
+      widget.onTextSelectionChanged?.call(null);
+      return;
+    }
     final isCtrl = HardwareKeyboard.instance.isControlPressed ||
         HardwareKeyboard.instance.isMetaPressed;
 
@@ -232,105 +355,207 @@ class _PdfPageSubcardWidgetState extends State<PdfPageSubcardWidget> {
     ];
 
     final strokes = widget.attachedStrokes ?? const <InkStroke>[];
-    final canDrag = (isSelected || isDocSelected) && !widget.isPdfLocked;
+    final canDrag = widget.onPanUpdate != null;
+    final hasTextSelection = widget.textSelection != null &&
+        widget.textSelection!.isNotEmpty &&
+        widget.textSelection!.pageNumber == widget.pageNumber;
 
     return MouseRegion(
+      cursor: _pageText != null
+          ? SystemMouseCursors.text
+          : MouseCursor.defer,
       onEnter: (_) => setState(() => _isHovered = true),
       onExit: (_) => setState(() => _isHovered = false),
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,
-        onTap: _handleTap,
-        onDoubleTap: widget.onDoubleTap,
-        onPanStart: canDrag ? widget.onPanStart : null,
-        onPanUpdate: canDrag ? widget.onPanUpdate : null,
-        onPanEnd: canDrag ? widget.onPanEnd : null,
-        onPanCancel: canDrag ? widget.onPanCancel : null,
-        child: Container(
-          width: widget.width,
-          height: effectiveHeight,
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(PdfPageSubcardWidget.borderRadius),
-            boxShadow: boxShadow,
-          ),
-          child: Stack(
-            clipBehavior: Clip.none,
-            children: [
-              // 1. Clipped Page Sheet Body
-              ClipRRect(
-                borderRadius: BorderRadius.circular(PdfPageSubcardWidget.borderRadius),
-                child: Stack(
-                  children: [
-                    // A. Base PDF Document Page Sheet
-                    Positioned.fill(
-                      child: _buildPageSheet(widget.width, effectiveHeight),
-                    ),
-
-                    // A.2 Search Highlights Overlay (between base PDF and ink strokes)
-                    if (widget.searchMatches != null && widget.searchMatches!.isNotEmpty)
+        onTap: _pageText != null ? null : _handleTap,
+        onDoubleTap: _pageText != null ? null : widget.onDoubleTap,
+        onPanStart: (_pageText != null || !canDrag) ? null : widget.onPanStart,
+        onPanUpdate: (_pageText != null || !canDrag) ? null : widget.onPanUpdate,
+        onPanEnd: (_pageText != null || !canDrag) ? null : widget.onPanEnd,
+        onPanCancel: (_pageText != null || !canDrag) ? null : widget.onPanCancel,
+        child: Focus(
+          autofocus: hasTextSelection,
+          child: CallbackShortcuts(
+            bindings: <ShortcutActivator, VoidCallback>{
+              const SingleActivator(LogicalKeyboardKey.keyC, control: true): () {
+                if (hasTextSelection) {
+                  Clipboard.setData(ClipboardData(text: widget.textSelection!.selectedText));
+                }
+              },
+              const SingleActivator(LogicalKeyboardKey.keyC, meta: true): () {
+                if (hasTextSelection) {
+                  Clipboard.setData(ClipboardData(text: widget.textSelection!.selectedText));
+                }
+              },
+              const SingleActivator(LogicalKeyboardKey.escape): () {
+                if (hasTextSelection) {
+                  widget.onTextSelectionChanged?.call(null);
+                }
+              },
+            },
+            child: Container(
+            width: widget.width,
+            height: effectiveHeight,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(PdfPageSubcardWidget.borderRadius),
+              boxShadow: boxShadow,
+            ),
+            child: Stack(
+              clipBehavior: Clip.none,
+              children: [
+                // 1. Clipped Page Sheet Body
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(PdfPageSubcardWidget.borderRadius),
+                  child: Stack(
+                    children: [
+                      // A. Base PDF Document Page Sheet
                       Positioned.fill(
+                        child: _buildPageSheet(widget.width, effectiveHeight),
+                      ),
+
+                      // A.2 Search Highlights Overlay
+                      if (widget.searchMatches != null && widget.searchMatches!.isNotEmpty)
+                        Positioned.fill(
+                          child: IgnorePointer(
+                            child: RepaintBoundary(
+                              child: CustomPaint(
+                                painter: PdfPageSearchHighlightPainter(
+                                  matches: widget.searchMatches!,
+                                  activeMatch: widget.activeSearchMatch,
+                                  pageWidth: widget.width,
+                                  pageHeight: effectiveHeight,
+                                  pdfNativeWidth: _nativePageWidth,
+                                  pdfNativeHeight: _nativePageHeight,
+                                  accentColor: themeAccent,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+
+                      // A.3 Native Text Selection Highlight Overlay (estável na árvore para preservar State do Cursor)
+                      Positioned.fill(
+                        key: ValueKey('pdf_text_selection_highlight_${widget.pageNumber}'),
                         child: IgnorePointer(
                           child: RepaintBoundary(
                             child: CustomPaint(
-                              painter: PdfPageSearchHighlightPainter(
-                                matches: widget.searchMatches!,
-                                activeMatch: widget.activeSearchMatch,
-                                pageWidth: widget.width,
-                                pageHeight: effectiveHeight,
-                                pdfNativeWidth: _nativePageWidth,
-                                pdfNativeHeight: _nativePageHeight,
+                              painter: PdfTextSelectionPainter(
+                                rects: hasTextSelection ? widget.textSelection!.rects : const [],
+                                isSelecting: hasTextSelection ? widget.textSelection!.isSelecting : false,
+                                accentColor: themeAccent,
                               ),
                             ),
                           ),
                         ),
                       ),
 
-                    // B. Anchored Ink Strokes Overlay
-                    if (strokes.isNotEmpty)
-                      Positioned.fill(
-                        child: IgnorePointer(
-                          child: RepaintBoundary(
-                            child: CustomPaint(
-                              painter: _PdfPageStrokesPainter(
-                                strokes: strokes,
-                                pageX: widget.pageX,
-                                pageY: widget.pageY,
-                                pageWidth: widget.width,
-                                pageHeight: effectiveHeight,
+                      // B. Anchored Ink Strokes Overlay
+                      if (strokes.isNotEmpty)
+                        Positioned.fill(
+                          key: ValueKey('pdf_page_strokes_${widget.pageNumber}'),
+                          child: IgnorePointer(
+                            child: RepaintBoundary(
+                              child: CustomPaint(
+                                painter: _PdfPageStrokesPainter(
+                                  strokes: strokes,
+                                  pageX: widget.pageX,
+                                  pageY: widget.pageY,
+                                  pageWidth: widget.width,
+                                  pageHeight: effectiveHeight,
+                                ),
                               ),
                             ),
                           ),
                         ),
-                      ),
 
-                    // C. Hover Badge: Page Number Indicator (Top-Left)
-                    _buildPageIndexBadge(),
-                  ],
+                      // B.2 Universal Smart Cursor & Text Selection Overlay (preserva _clickCount e foco através de Key persistente)
+                      if (_pageText != null)
+                        Positioned.fill(
+                          key: ValueKey('pdf_smart_cursor_overlay_pos_${widget.pageNumber}'),
+                          child: PdfSmartCursorOverlay(
+                            key: ValueKey('pdf_smart_cursor_overlay_${widget.pageNumber}'),
+                            pageNumber: widget.pageNumber,
+                            pageWidth: widget.width,
+                            pageHeight: effectiveHeight,
+                            nativeWidth: _nativePageWidth,
+                            nativeHeight: _nativePageHeight,
+                            spatialIndex: _spatialIndex,
+                            activeTextSelection: widget.textSelection,
+                            onTextSelectionChanged: widget.onTextSelectionChanged,
+                            onHighlightText: widget.onHighlightSelection,
+                            onDismissSelection: () {
+                              widget.onTextSelectionChanged?.call(null);
+                            },
+                            onSelectPage: widget.onSelectPage,
+                            onGenerateStemCard: widget.onGenerateStemCardFromSelection,
+                            onAskAi: widget.onAskAiSelection,
+                          ),
+                        ),
+
+                      // C. Hover Badge: Page Number Indicator (Top-Left)
+                      _buildPageIndexBadge(),
+                    ],
+                  ),
                 ),
-              ),
 
-              // 2. Crisp Moscaro Cyan Border Overlay (Guaranteed top-layer anti-aliased edge)
-              Positioned.fill(
-                child: IgnorePointer(
-                  child: Container(
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(PdfPageSubcardWidget.borderRadius),
-                      border: Border.all(
-                        color: borderColor,
-                        width: borderWidth,
+                // 2. Crisp Moscaro Cyan Border Overlay (Guaranteed top-layer anti-aliased edge)
+                Positioned.fill(
+                  child: IgnorePointer(
+                    child: Container(
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(PdfPageSubcardWidget.borderRadius),
+                        border: Border.all(
+                          color: borderColor,
+                          width: borderWidth,
+                        ),
                       ),
                     ),
                   ),
                 ),
-              ),
 
-              // 3. External Corner Resize Handles Layer (unclipped for smooth handle grabbing)
-              if (widget.resizeHandles != null && (isSelected || isDocSelected))
-                Positioned.fill(
-                  child: widget.resizeHandles!,
-                ),
-            ],
+                // 3. External Corner Resize Handles Layer
+                if (widget.resizeHandles != null && (isSelected || isDocSelected))
+                  Positioned.fill(
+                    child: widget.resizeHandles!,
+                  ),
+
+                // 4. Contextual Mini-Pill fallback (only if SmartCursorOverlay is not active)
+                if (hasTextSelection && !widget.textSelection!.isSelecting && _pageText == null)
+                  _buildContextMenu(widget.textSelection!),
+              ],
+            ),
           ),
         ),
+      ),
+    ),
+  );
+}
+
+  Widget _buildContextMenu(PdfTextSelectionState selection) {
+    final bounds = selection.bounds;
+    const double menuWidth = 240.0;
+
+    double top = bounds.top - 40.0;
+    if (top < 10.0) {
+      top = bounds.bottom + 8.0;
+    }
+    final double left = (bounds.left + bounds.width / 2.0 - (menuWidth / 2.0))
+        .clamp(8.0, math.max(8.0, widget.width - menuWidth - 8.0));
+
+    return Positioned(
+      left: left,
+      top: top,
+      child: PdfTextContextMenu(
+        onGenerateStemCard: () {
+          widget.onGenerateStemCardFromSelection?.call();
+          widget.onTextSelectionChanged?.call(null);
+        },
+        onHighlight: () {
+          widget.onHighlightSelection?.call();
+          widget.onTextSelectionChanged?.call(null);
+        },
+        onDismiss: () => widget.onTextSelectionChanged?.call(null),
       ),
     );
   }
@@ -362,6 +587,13 @@ class _PdfPageSubcardWidgetState extends State<PdfPageSubcardWidget> {
     if (widget.invertLuminance) {
       pageView = ColorFiltered(
         colorFilter: moscaroDarkLuminanceFilter,
+        child: pageView,
+      );
+    }
+
+    if (widget.rotationQuarterTurns != 0) {
+      pageView = RotatedBox(
+        quarterTurns: widget.rotationQuarterTurns,
         child: pageView,
       );
     }

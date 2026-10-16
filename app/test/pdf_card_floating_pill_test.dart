@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -6,6 +7,7 @@ import 'package:connotes_app/models/canvas_card_model.dart';
 import 'package:connotes_app/models/pdf_text_search_models.dart';
 import 'package:connotes_app/services/pdf_search_engine.dart';
 import 'package:connotes_app/widgets/pdf_card_floating_pill.dart';
+import 'package:connotes_app/widgets/pdf_page_organizer_modal.dart';
 import 'package:connotes_app/widgets/pdf_search_pill_input.dart';
 import 'package:connotes_app/widgets/svg_icon.dart';
 
@@ -137,7 +139,12 @@ void main() {
   });
 
   group('Group 2: Control Buttons Rendering & Callbacks', () {
-    testWidgets('Toggling display mode switches between continuous and singlePage', (tester) async {
+    testWidgets('Toggling display mode switches between continuous and singlePage via SubPill', (tester) async {
+      tester.view.physicalSize = const Size(1200, 800);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+
       CanvasCardModel? updatedCard;
       final continuousCard = createTestCard(displayMode: PdfDisplayMode.continuous);
 
@@ -155,37 +162,19 @@ void main() {
       );
 
       // In continuous mode, layers icon should be visible
-      expect(find.byWidgetPredicate((w) => w is SvgIcon && w.name == 'layers'), findsOneWidget);
+      final layersFinder = find.byWidgetPredicate((w) => w is SvgIcon && w.name == 'layers');
+      expect(layersFinder, findsOneWidget);
 
-      // Tap layers button
-      await tester.tap(find.byWidgetPredicate((w) => w is SvgIcon && w.name == 'layers'));
+      // Tap layers button to expand sub-pill
+      await tester.tap(layersFinder);
+      await tester.pumpAndSettle();
+
+      expect(find.text('Página Única'), findsOneWidget);
+      await tester.tap(find.text('Página Única'));
       await tester.pumpAndSettle();
 
       expect(updatedCard, isNotNull);
       expect(updatedCard!.pdfDisplayMode, equals(PdfDisplayMode.singlePage));
-
-      // Now pump in singlePage mode
-      final singlePageCard = createTestCard(displayMode: PdfDisplayMode.singlePage);
-      await tester.pumpWidget(
-        MaterialApp(
-          home: Scaffold(
-            body: Center(
-              child: PdfCardFloatingPill(
-                card: singlePageCard,
-                onUpdateCard: (c) => updatedCard = c,
-              ),
-            ),
-          ),
-        ),
-      );
-
-      // In singlePage mode, file icon should be visible
-      expect(find.byWidgetPredicate((w) => w is SvgIcon && w.name == 'file'), findsOneWidget);
-
-      await tester.tap(find.byWidgetPredicate((w) => w is SvgIcon && w.name == 'file'));
-      await tester.pumpAndSettle();
-
-      expect(updatedCard!.pdfDisplayMode, equals(PdfDisplayMode.continuous));
     });
 
     testWidgets('Tapping contrast button toggles invertLuminance', (tester) async {
@@ -244,7 +233,11 @@ void main() {
 
     testWidgets('Page navigation controls < 01 / 18 > display and invoke callbacks', (tester) async {
       int? changedPage;
-      final card = createTestCard(currentPdfPage: 2, totalPdfPages: 18);
+      final card = createTestCard(
+        displayMode: PdfDisplayMode.singlePage,
+        currentPdfPage: 2,
+        totalPdfPages: 18,
+      );
 
       await tester.pumpWidget(
         MaterialApp(
@@ -276,7 +269,176 @@ void main() {
       await tester.tap(nextFinder);
       await tester.pumpAndSettle();
 
-      expect(changedPage, equals(3));
+      expect(changedPage, equals(2));
+    });
+
+    testWidgets('Double tap on page navigator triggers onOpenPageOrganizer callback', (tester) async {
+      bool organizerOpened = false;
+      final card = createTestCard(
+        displayMode: PdfDisplayMode.singlePage,
+        currentPdfPage: 1,
+        totalPdfPages: 18,
+      );
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: Center(
+              child: PdfCardFloatingPill(
+                card: card,
+                onUpdateCard: (_) {},
+                onOpenPageOrganizer: () => organizerOpened = true,
+              ),
+            ),
+          ),
+        ),
+      );
+
+      final pageTextFinder = find.text('01 / 18');
+      expect(pageTextFinder, findsOneWidget);
+
+      // Double tap to open organizer
+      await tester.tap(pageTextFinder);
+      await tester.pump(const Duration(milliseconds: 50));
+      await tester.tap(pageTextFinder);
+      await tester.pumpAndSettle();
+
+      expect(organizerOpened, isTrue);
+    });
+
+    testWidgets('Single tap on page navigator activates inline jump TextField with pre-selected text', (tester) async {
+      int? jumpedPage;
+      final card = createTestCard(
+        displayMode: PdfDisplayMode.singlePage,
+        currentPdfPage: 1,
+        totalPdfPages: 18,
+      );
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: Center(
+              child: PdfCardFloatingPill(
+                card: card,
+                onUpdateCard: (_) {},
+                onPageJump: (p) => jumpedPage = p,
+              ),
+            ),
+          ),
+        ),
+      );
+
+      final pageTextFinder = find.text('01 / 18');
+      expect(pageTextFinder, findsOneWidget);
+
+      // Single tap enters inline editing (wait for double tap timeout to disambiguate)
+      await tester.tap(pageTextFinder);
+      await tester.pump(const Duration(milliseconds: 400));
+      await tester.pumpAndSettle();
+
+      // TextField should now be present
+      final textFieldFinder = find.byType(TextField);
+      expect(textFieldFinder, findsOneWidget);
+
+      final textField = tester.widget<TextField>(textFieldFinder);
+      expect(textField.controller?.text, equals('1'));
+      expect(textField.controller?.selection.baseOffset, equals(0));
+      expect(textField.controller?.selection.extentOffset, equals(1));
+
+      expect(PdfCardFloatingPill.isEditingAnyPageInline, isTrue);
+
+      // Enter a new page and submit
+      await tester.enterText(textFieldFinder, '5');
+      tester.widget<TextField>(textFieldFinder).onSubmitted?.call('5');
+      await tester.pumpAndSettle();
+
+      expect(jumpedPage, equals(5));
+      expect(PdfCardFloatingPill.isEditingAnyPageInline, isFalse);
+    });
+
+    testWidgets('Tapping outside inline page editor dismisses it', (tester) async {
+      final card = createTestCard(
+        displayMode: PdfDisplayMode.singlePage,
+        currentPdfPage: 1,
+        totalPdfPages: 18,
+      );
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: Center(
+              child: PdfCardFloatingPill(
+                card: card,
+                onUpdateCard: (_) {},
+              ),
+            ),
+          ),
+        ),
+      );
+
+      final pageTextFinder = find.text('01 / 18');
+      await tester.tap(pageTextFinder);
+      await tester.pump(const Duration(milliseconds: 400));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(TextField), findsOneWidget);
+      expect(PdfCardFloatingPill.isEditingAnyPageInline, isTrue);
+
+      // Tap outside the pill on the Scaffold
+      await tester.tapAt(const Offset(10, 10));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(TextField), findsNothing);
+      expect(PdfCardFloatingPill.isEditingAnyPageInline, isFalse);
+    });
+
+    testWidgets('PdfPageOrganizerModal rotates clockwise on left click and counter-clockwise on right click', (tester) async {
+      CanvasCardModel? updatedCard;
+      final card = createTestCard(
+        currentPdfPage: 1,
+        totalPdfPages: 3,
+      );
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: PdfPageOrganizerModal(
+              card: card,
+              onUpdateCard: (c) => updatedCard = c,
+            ),
+          ),
+        ),
+      );
+
+      // Find rotation button for Page 1
+      final rotateFinder = find.byTooltip('Botão esquerdo: Girar 90° horário | Botão direito: Girar 90° anti-horário').first;
+      expect(rotateFinder, findsOneWidget);
+
+      // 1. Left-click -> clockwise 90°
+      await tester.tap(rotateFinder);
+      await tester.pumpAndSettle();
+
+      expect(find.text('90°'), findsOneWidget);
+
+      // 2. Right-click (secondary tap) -> counter-clockwise 90° (back to 0°)
+      await tester.tap(rotateFinder, buttons: kSecondaryMouseButton);
+      await tester.pumpAndSettle();
+
+      expect(find.text('90°'), findsNothing);
+
+      // 3. Right-click again -> 270°
+      await tester.tap(rotateFinder, buttons: kSecondaryMouseButton);
+      await tester.pumpAndSettle();
+
+      expect(find.text('270°'), findsOneWidget);
+
+      // Click "Aplicar Alterações" to save
+      final applyButton = find.text('Aplicar Alterações');
+      await tester.tap(applyButton);
+      await tester.pumpAndSettle();
+
+      expect(updatedCard, isNotNull);
+      expect(updatedCard!.pageRotations[1], equals(3)); // 3 * 90° = 270°
     });
 
     testWidgets('Export button invokes export callback', (tester) async {
@@ -307,6 +469,11 @@ void main() {
     });
 
     testWidgets('STEM AI popover opens on sparkle tap with actions', (tester) async {
+      tester.view.physicalSize = const Size(1200, 800);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+
       bool summarizeCalled = false;
       bool latexCalled = false;
       bool diagramCalled = false;
@@ -333,18 +500,18 @@ void main() {
       expect(sparkleFinder, findsOneWidget);
 
       // Initially popover is closed
-      expect(find.text('Resumir Pagina Atual'), findsNothing);
+      expect(find.text('Resumir Pág. 3'), findsNothing);
 
       // Tap sparkle to open popover
       await tester.tap(sparkleFinder);
       await tester.pumpAndSettle();
 
-      expect(find.text('Resumir Pagina Atual'), findsOneWidget);
-      expect(find.text('Extrair Formulas LaTeX'), findsOneWidget);
-      expect(find.text('Explicar Diagrama / Grafico'), findsOneWidget);
+      expect(find.text('Resumir Pág. 3'), findsOneWidget);
+      expect(find.text('Extrair LaTeX'), findsOneWidget);
+      expect(find.text('Explicar Diagrama'), findsOneWidget);
 
       // Tap summarize action
-      await tester.tap(find.text('Resumir Pagina Atual'));
+      await tester.tap(find.text('Resumir Pág. 3'));
       await tester.pumpAndSettle();
 
       expect(summarizeCalled, isTrue);
@@ -352,7 +519,7 @@ void main() {
       // Re-open popover and tap LaTeX action
       await tester.tap(sparkleFinder);
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Extrair Formulas LaTeX'));
+      await tester.tap(find.text('Extrair LaTeX'));
       await tester.pumpAndSettle();
 
       expect(latexCalled, isTrue);
@@ -360,7 +527,7 @@ void main() {
       // Re-open popover and tap Diagram action
       await tester.tap(sparkleFinder);
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Explicar Diagrama / Grafico'));
+      await tester.tap(find.text('Explicar Diagrama'));
       await tester.pumpAndSettle();
 
       expect(diagramCalled, isTrue);

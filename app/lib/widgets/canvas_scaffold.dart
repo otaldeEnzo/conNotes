@@ -9,6 +9,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter/scheduler.dart';
 import 'moscaro_window_title_bar.dart';
 import '../controllers/canvas_input_context.dart';
+import '../controllers/pdf_provenance_highlight_controller.dart';
 import 'canvas_input_router.dart';
 import 'canvas_layer_stack.dart';
 import '../theme/moscaro_v2_tokens.dart';
@@ -44,6 +45,7 @@ import 'undo_commands.dart';
 import '../dev_hub/dev_hub_server.dart';
 import '../models/canvas_card_model.dart';
 import 'card_format_floating_pill.dart';
+import 'pdf_card_floating_pill.dart';
 import 'media_lightbox_modal.dart';
 import 'cards_sub_bar.dart';
 import '../models/ai_message_model.dart';
@@ -240,6 +242,11 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
   @override
   void updateSelectionState(SelectionState state) {
     _selectionState = state;
+    if (!state.isSelectingArea && state.selectedCardIds.length == 1 && state.selectedStrokeIds.isEmpty) {
+      _selectedCardId = state.selectedCardIds.first;
+    } else if (state.isEmpty && _activeTool == 'select') {
+      _selectedCardId = null;
+    }
     _selectionUpdateNotifier.value++;
   }
   @override
@@ -299,11 +306,27 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
   }
   // -----------------------------------------
 
+  int _lastInteractionMs = 0;
+
   void _setInteracting() {
-    _isInteractingNotifier.value = true;
-    _interactionTimer?.cancel();
-    _interactionTimer = Timer(const Duration(milliseconds: 150), () {
-      _isInteractingNotifier.value = false;
+    _lastInteractionMs = DateTime.now().millisecondsSinceEpoch;
+    if (!_isInteractingNotifier.value) {
+      _isInteractingNotifier.value = true;
+    }
+    if (_interactionTimer == null || !_interactionTimer!.isActive) {
+      _scheduleInteractionEnd(160);
+    }
+  }
+
+  void _scheduleInteractionEnd(int delayMs) {
+    _interactionTimer = Timer(Duration(milliseconds: delayMs), () {
+      if (!mounted) return;
+      final elapsed = DateTime.now().millisecondsSinceEpoch - _lastInteractionMs;
+      if (elapsed < 150) {
+        _scheduleInteractionEnd(160 - elapsed);
+      } else {
+        _isInteractingNotifier.value = false;
+      }
     });
   }
 
@@ -505,10 +528,10 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
     };
     DevHubServer.instance.start();
 
-    // Sincronizar métricas do conNotes com o Dev Hub (10x por segundo)
+    // Sincronizar métricas do conNotes com o Dev Hub (10x por segundo apenas se houver clientes conectados)
     _telemetrySyncTimer = Timer.periodic(const Duration(milliseconds: 100), (_) {
       final note = _currentNote;
-      if (note != null) {
+      if (note != null && DevHubServer.instance.hasClients) {
         // Usar contadores cacheados (zero-iteration, O(1))
         DevHubServer.instance.strokeCount = note.strokeCount;
         DevHubServer.instance.pointCount = note.pointCount;
@@ -766,6 +789,11 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
           _isSettingsOpen = false;
           return true;
         }
+        return false;
+      }
+
+      // Se estiver editando página inline na barra do PDF, repassa 100% dos eventos para o campo de texto
+      if (PdfCardFloatingPill.isEditingAnyPageInline) {
         return false;
       }
 
@@ -1303,34 +1331,27 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
       double currentY = canvasPoint.dy;
       final cardsToAdd = <CanvasCardModel>[];
 
-      for (int i = 1; i <= totalPages; i++) {
-        final page = doc.pages[i - 1];
-        final ratio = (page.width > 0 && page.height > 0)
-            ? (page.width / page.height)
-            : (1.0 / 1.4142);
-        final pageHeight = targetWidth / ratio;
-        final cardId = (totalPages == 1) ? baseId : '${baseId}_p$i';
+      final page1 = doc.pages.isNotEmpty ? doc.pages[0] : null;
+      final ratio = (page1 != null && page1.width > 0 && page1.height > 0)
+          ? (page1.width / page1.height)
+          : (1.0 / 1.4142);
+      final pageHeight = targetWidth / ratio;
 
-        cardsToAdd.add(CanvasCardModel(
-          id: cardId,
-          cardType: CardType.pdf,
-          title: totalPages > 1 ? '$fileName (Pág. $i)' : (fileName.isNotEmpty ? fileName : 'Documento PDF'),
-          pdfPath: path,
-          pdfDisplayMode: PdfDisplayMode.singlePage,
-          currentPdfPage: i,
-          totalPdfPages: totalPages,
-          originalAspectRatio: ratio,
-          pdfPageGap: 56.0,
-          x: canvasPoint.dx,
-          y: currentY,
-          width: targetWidth,
-          height: pageHeight,
-          sourceMasterCardId: (i > 1) ? '${baseId}_p1' : null,
-        ));
-
-        final headerH = (i == 1) ? 28.0 : 0.0;
-        currentY += pageHeight + headerH + 56.0;
-      }
+      cardsToAdd.add(CanvasCardModel(
+        id: baseId,
+        cardType: CardType.pdf,
+        title: fileName.isNotEmpty ? fileName : 'Documento PDF',
+        pdfPath: path,
+        pdfDisplayMode: PdfDisplayMode.singlePage,
+        currentPdfPage: 1,
+        totalPdfPages: totalPages,
+        originalAspectRatio: ratio,
+        pdfPageGap: 56.0,
+        x: canvasPoint.dx,
+        y: canvasPoint.dy,
+        width: targetWidth,
+        height: pageHeight + 28.0,
+      ));
 
       for (final card in cardsToAdd) {
         _undoManager.pushCommand(
@@ -1608,8 +1629,9 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
                       final n = _currentNote;
                       if (n != null) {
                         InkStroke strokeToAdd = newStroke;
+                        bool cardAttachmentChanged = false;
                         // Se >= 50% dos pontos do traço estiverem dentro da área de imagem da mídia ou do PDF
-                        if (newStroke.points.isNotEmpty) {
+                        if (newStroke.points.isNotEmpty && n.cards.isNotEmpty) {
                           for (final card in n.cards) {
                             if (card.cardType == CardType.media) {
                               final imgRect = Rect.fromLTWH(
@@ -1632,6 +1654,7 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
                                   n.cards[cardIdx] = card.copyWith(
                                     attachedStrokeIds: [...card.attachedStrokeIds, newStroke.id],
                                   );
+                                  cardAttachmentChanged = true;
                                 }
                                 break;
                               }
@@ -1656,6 +1679,7 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
                                   n.cards[cardIdx] = card.copyWith(
                                     attachedStrokeIds: [...card.attachedStrokeIds, newStroke.id],
                                   );
+                                  cardAttachmentChanged = true;
                                 }
                                 break;
                               }
@@ -1670,10 +1694,10 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
                           note: n,
                         );
                         _strokesVersion++;
-                        _strokeUpdateNotifier.value++;
                         _committedStrokesNotifier.value++;
-                        _canvasUpdateNotifier.value++;
-                        setState(() {});
+                        if (cardAttachmentChanged) {
+                          setState(() {});
+                        }
                         WorkspaceStorageService.instance.scheduleAutoSave(n);
                       }
                     },
@@ -1978,6 +2002,7 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
                             execute: true,
                             note: n,
                           );
+                          _canvasUpdateNotifier.value++;
                           setState(() {
                             _selectedCardId = dup.id;
                           });
@@ -2009,7 +2034,10 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
                         _rulerUpdateNotifier.value++;
                       },
                       onSolveWithAi: _handleSolveCardWithAi,
+                      onAskAiText: _handleAskAiFromText,
                       onExtractLatex: _handleExtractLatexFromCard,
+                      onAddCard: _handleAddCard,
+                      onJumpToPdfSource: _handleJumpToPdfSource,
                     ),
                   ),
                 ),
@@ -2989,7 +3017,7 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
   }
 
   /// Ação no card de mídia: Enviar imagem diretamente para o painel de IA resolver o exercício
-  void _handleSolveCardWithAi(CanvasCardModel card) {
+  void _handleSolveCardWithAi(CanvasCardModel card, {String? defaultPrompt, bool? clearPrompt}) {
     final mediaData = card.mediaData;
     if (mediaData == null || mediaData.isEmpty) return;
 
@@ -3011,10 +3039,17 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
         setState(() {
           _isAIOpen = true;
         });
+        final isCropCard = card.id.startsWith('crop_');
+        final prompt = isCropCard
+            ? null
+            : (defaultPrompt ?? 'Resolva este exercício passo a passo detalhando todas as fórmulas e deduções em KaTeX:');
+        final shouldClear = clearPrompt ?? isCropCard;
+
         _aiSidebarKey.currentState?.attachImage(
           bytes: bytes,
           base64: mediaData,
-          defaultPrompt: 'Resolva este exercício passo a passo detalhando todas as fórmulas e deduções em KaTeX:',
+          defaultPrompt: prompt,
+          clearPrompt: shouldClear,
         );
       }
     } catch (e) {
@@ -3038,6 +3073,136 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
         setState(() {});
       },
     );
+  }
+
+  /// Ação: Abrir painel de IA com texto de referência citado
+  void _handleAskAiFromText(String text) {
+    if (text.trim().isEmpty) return;
+    setState(() {
+      _isAIOpen = true;
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _aiSidebarKey.currentState?.attachTextReference(text);
+    });
+  }
+
+  /// Ação: Inserir card diretamente no Canvas e garantir enquadramento na viewport visível
+  void _handleAddCard(CanvasCardModel card) {
+    final note = _currentNote;
+    if (note == null) return;
+
+    _undoManager.pushCommand(
+      AddCardCommand(card),
+      execute: true,
+      note: note,
+    );
+
+    // Ajusta o pan do Canvas suavemente caso o novo card esteja ultrapassando a borda direita da tela
+    final screenSize = MediaQuery.of(context).size;
+    final cardScreenLeft = card.x * _zoomScale + _panOffset.dx;
+    final cardScreenRight = (card.x + card.width) * _zoomScale + _panOffset.dx;
+    final cardScreenTop = card.y * _zoomScale + _panOffset.dy;
+
+    double newPanX = _panOffset.dx;
+    double newPanY = _panOffset.dy;
+    const margin = 40.0;
+
+    // Se o card está saindo pela direita da tela, faz apenas o nudge horizontal necessário
+    if (cardScreenRight > screenSize.width - margin) {
+      newPanX -= (cardScreenRight - (screenSize.width - margin));
+    } else if (cardScreenLeft < margin) {
+      newPanX += (margin - cardScreenLeft);
+    }
+
+    // Só ajusta Y se o topo do card estiver totalmente invisível fora do topo ou base
+    if (cardScreenTop < margin) {
+      newPanY += (margin - cardScreenTop);
+    } else if (cardScreenTop > screenSize.height - margin) {
+      newPanY -= (cardScreenTop - (screenSize.height - margin - 100.0));
+    }
+
+    if (newPanX != _panOffset.dx || newPanY != _panOffset.dy) {
+      _panNotifier.value = Offset(newPanX, newPanY);
+    }
+
+    setState(() {
+      _selectedCardId = card.id;
+      _activeTool = 'select';
+    });
+
+    _canvasUpdateNotifier.value++;
+    WorkspaceStorageService.instance.scheduleAutoSave(note);
+    DevHubServer.instance.logAction('Card criado no Canvas (${card.title})');
+  }
+
+  void _handleJumpToPdfSource(String masterCardId, int pageNumber, String? text, [CanvasCardModel? sourceCard]) {
+    final note = _currentNote;
+    if (note == null) return;
+    final cardIdx = note.cards.indexWhere((c) => c.id == masterCardId || c.sourceMasterCardId == masterCardId);
+    if (cardIdx == -1) return;
+    final targetCard = note.cards[cardIdx];
+
+    // Atualiza a pagina ativa do PDF se for diferente
+    if (targetCard.currentPdfPage != pageNumber) {
+      final updated = targetCard.copyWith(currentPdfPage: pageNumber);
+      final newMinH = updated.calculateMinHeight();
+      note.cards[cardIdx] = updated.copyWith(height: newMinH);
+    }
+
+    setState(() {
+      _selectedCardId = targetCard.id;
+      _selectionState = SelectionState.empty();
+    });
+
+    final size = MediaQuery.of(context).size;
+    final card = sourceCard ??
+        note.cards.cast<CanvasCardModel?>().firstWhere(
+              (c) => c != null && c.sourceMasterCardId == masterCardId && c.sourcePageNumber == pageNumber,
+              orElse: () => null,
+            );
+
+    final normX = card?.sourceBoundsX ?? 0.5;
+    final normY = card?.sourceBoundsY ?? 0.5;
+    final normW = card?.sourceBoundsWidth ?? 0.0;
+    final normH = card?.sourceBoundsHeight ?? 0.0;
+
+    double pageY = targetCard.y;
+    double pageH = targetCard.height;
+    if (targetCard.pdfDisplayMode != PdfDisplayMode.singlePage) {
+      final gap = targetCard.pdfPageGap > 0 ? targetCard.pdfPageGap : 56.0;
+      final ratio = (targetCard.originalAspectRatio != null && targetCard.originalAspectRatio! > 0)
+          ? targetCard.originalAspectRatio!
+          : (1.0 / 1.4142);
+      pageH = targetCard.width / ratio;
+      pageY = targetCard.y + 60.0 + (pageNumber - 1) * (pageH + gap);
+    }
+
+    // Coordenada global exata do trecho de origem no canvas
+    final targetFocusX = targetCard.x + (normX + normW / 2.0) * targetCard.width;
+    final targetFocusY = pageY + (normY + normH / 2.0) * pageH;
+
+    final targetPanX = math.min(0.0, size.width / 2.0 - targetFocusX * _zoomScale);
+    final targetPanY = math.min(0.0, size.height / 2.0 - targetFocusY * _zoomScale);
+    _panNotifier.value = Offset(targetPanX, targetPanY);
+    _canvasUpdateNotifier.value++;
+
+    // Ativa imediatamente o highlight visual luminoso do texto original no PDF
+    PdfProvenanceHighlightController.instance.triggerHighlight(
+      cardId: targetCard.id,
+      pageNumber: pageNumber,
+      text: text,
+      normalizedBounds: (card?.sourceBoundsX != null && card?.sourceBoundsY != null)
+          ? Rect.fromLTWH(
+              card!.sourceBoundsX!,
+              card.sourceBoundsY!,
+              card.sourceBoundsWidth ?? 0.2,
+              card.sourceBoundsHeight ?? 0.05,
+            )
+          : null,
+    );
+
+    WorkspaceStorageService.instance.scheduleAutoSave(note);
+    DevHubServer.instance.logAction('Redirecionado para PDF ($masterCardId, Pagina $pageNumber, Foco [$normX, $normY])');
   }
 
   void _handleInsertAiMessageIntoCanvas(AiMessage message, [Offset? screenPosition]) {
@@ -3076,45 +3241,92 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
     WorkspaceStorageService.instance.scheduleAutoSave(note);
   }
 
+  Offset? _lastEraseCanvasPoint;
+
   void _eraseStrokesNear(Offset canvasPoint, {EraserMode? mode}) {
     final note = _currentNote;
     if (note == null) return;
-    
+
     final eraserRadius = _eraserConfig.radius / _zoomScale;
+    final prevPoint = _lastEraseCanvasPoint;
+    _lastEraseCanvasPoint = canvasPoint;
+
+    if (prevPoint != null) {
+      final delta = canvasPoint - prevPoint;
+      final dist = delta.distance;
+      final stepDist = math.max(2.0, eraserRadius * 0.55);
+      if (dist > stepDist) {
+        final steps = (dist / stepDist).ceil().clamp(1, 24);
+        for (int i = 1; i <= steps; i++) {
+          final t = i / steps;
+          _eraseStrokesAtSinglePoint(
+            note,
+            Offset(prevPoint.dx + delta.dx * t, prevPoint.dy + delta.dy * t),
+            eraserRadius,
+            mode: mode,
+          );
+        }
+        return;
+      }
+    }
+
+    _eraseStrokesAtSinglePoint(note, canvasPoint, eraserRadius, mode: mode);
+  }
+
+  void _eraseStrokesAtSinglePoint(
+    NoteDocument note,
+    Offset canvasPoint,
+    double eraserRadius, {
+    EraserMode? mode,
+  }) {
     final eraserRadiusSq = eraserRadius * eraserRadius;
 
     final candidateIds = note.spatialIndex.queryPoint(canvasPoint, eraserRadius);
-    final candidateStrokes = candidateIds
-        .map((id) => note.getStroke(id))
-        .whereType<InkStroke>()
-        .where((s) => !_eraserConfig.eraseHighlighterOnly || s.toolType == InkToolType.highlighter)
-        .toList();
+    if (candidateIds.isEmpty) return;
+
+    final candidateStrokes = <InkStroke>[];
+    final highlighterOnly = _eraserConfig.eraseHighlighterOnly;
+    for (final id in candidateIds) {
+      final s = note.getStroke(id);
+      if (s != null && (!highlighterOnly || s.toolType == InkToolType.highlighter)) {
+        candidateStrokes.add(s);
+      }
+    }
 
     if (candidateStrokes.isEmpty) return;
 
     final effectiveMode = mode ?? _eraserConfig.mode;
     if (effectiveMode == EraserMode.stroke) {
-      // 1. Borracha de Traço Inteiro
-      final toRemove = candidateStrokes
-          .where((stroke) => SelectionGeometry.isPointNearStroke(canvasPoint, stroke, eraserRadius))
-          .toList();
+      // 1. Borracha de Traço Inteiro (Batch Undo + Zero setState desnecessário)
+      final toRemove = <InkStroke>[];
+      for (final stroke in candidateStrokes) {
+        if (SelectionGeometry.isPointNearStroke(canvasPoint, stroke, eraserRadius)) {
+          toRemove.add(stroke);
+        }
+      }
 
       if (toRemove.isNotEmpty) {
-        _undoManager.pushCommand(RemoveStrokesCommand(toRemove), execute: true, note: note);
-        final removedIds = toRemove.map((s) => s.id).toSet();
+        note.removeStrokes(toRemove);
+        final removedIds = <String>{};
+        for (final s in toRemove) {
+          _pendingErasures[s.id] = s;
+          removedIds.add(s.id);
+        }
+        bool anyCardUpdated = false;
         for (int cIdx = 0; cIdx < note.cards.length; cIdx++) {
           final c = note.cards[cIdx];
           if (c.attachedStrokeIds.any(removedIds.contains)) {
             note.cards[cIdx] = c.copyWith(
               attachedStrokeIds: c.attachedStrokeIds.where((id) => !removedIds.contains(id)).toList(),
             );
+            anyCardUpdated = true;
           }
         }
         _strokesVersion++;
         _committedStrokesNotifier.value++;
-        _strokeUpdateNotifier.value++;
-        _canvasUpdateNotifier.value++;
-        setState(() {});
+        if (anyCardUpdated) {
+          setState(() {});
+        }
       }
     } else {
       // 2. Borracha de Precisão / Segmentação
@@ -3174,6 +3386,7 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
           note.addAllStrokes(addedNew);
         }
         final removedIds = removedOld.map((s) => s.id).toSet();
+        bool anyCardUpdated = false;
         for (int cIdx = 0; cIdx < note.cards.length; cIdx++) {
           final c = note.cards[cIdx];
           if (c.attachedStrokeIds.any(removedIds.contains)) {
@@ -3182,13 +3395,15 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
             note.cards[cIdx] = c.copyWith(
               attachedStrokeIds: [...survivingAttachedIds, ...newSegmentsForThisCard],
             );
+            anyCardUpdated = true;
           }
         }
         _strokesVersion++;
         _committedStrokesNotifier.value++;
-        _strokeUpdateNotifier.value++;
-        _canvasUpdateNotifier.value++;
-        setState(() {});
+        if (anyCardUpdated) {
+          setState(() {});
+        }
+        WorkspaceStorageService.instance.scheduleAutoSave(note);
       }
     }
   }
@@ -3218,9 +3433,7 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
         }
 
         _strokesVersion++;
-        _strokeUpdateNotifier.value++;
         _committedStrokesNotifier.value++;
-        _canvasUpdateNotifier.value++;
         WorkspaceStorageService.instance.scheduleAutoSave(note);
       }
     }
@@ -3262,6 +3475,7 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
 
   @override
   void scheduleEraseCommit() {
+    _lastEraseCanvasPoint = null;
     final note = _currentNote;
     if (note != null) _scheduleEraseCommit(note);
   }
@@ -3293,9 +3507,8 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
       if (!mounted || _pendingErasures.isEmpty) return;
       final erased = _pendingErasures.values.toList(growable: false);
       _pendingErasures.clear();
-      _undoManager.pushCommand(RemoveStrokesCommand(erased), execute: true, note: note);
-      _strokesVersion++;
-      _committedStrokesNotifier.value++;
+      _undoManager.pushCommand(RemoveStrokesCommand(erased), execute: false, note: note);
+      WorkspaceStorageService.instance.scheduleAutoSave(note);
     });
   }
 

@@ -119,7 +119,7 @@ class PdfSearchEngine {
           if (matchStart == -1) break;
 
           final matchLength = query.length;
-          final matchRects = _extractMatchRects(pageText, matchStart, matchLength);
+          final matchRects = _extractMatchRects(pageText, matchStart, matchLength, doc.pages[pageNum - 1].height);
 
           allMatches.add(
             PdfTextMatch(
@@ -163,7 +163,7 @@ class PdfSearchEngine {
   }
 
   /// Extracts and consolidates bounding rectangles for a text match from page fragments.
-  List<Rect> _extractMatchRects(PdfPageText pageText, int matchStart, int matchLength) {
+  List<Rect> _extractMatchRects(PdfPageText pageText, int matchStart, int matchLength, double pageHeight) {
     final matchEnd = matchStart + matchLength;
     final rawRects = <Rect>[];
 
@@ -182,12 +182,12 @@ class PdfSearchEngine {
             final charIdxInFrag = c - fragStart;
             if (charIdxInFrag >= 0 && charIdxInFrag < charRects.length) {
               final r = charRects[charIdxInFrag];
-              rawRects.add(Rect.fromLTRB(r.left, r.top, r.right, r.bottom));
+              rawRects.add(Rect.fromLTRB(r.left, pageHeight - r.top, r.right, pageHeight - r.bottom));
             }
           }
         } else {
           final b = fragment.bounds;
-          rawRects.add(Rect.fromLTRB(b.left, b.top, b.right, b.bottom));
+          rawRects.add(Rect.fromLTRB(b.left, pageHeight - b.top, b.right, pageHeight - b.bottom));
         }
       }
     }

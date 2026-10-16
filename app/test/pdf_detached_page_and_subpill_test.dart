@@ -231,6 +231,39 @@ void main() {
 
       expect(selectedMode, equals(PdfDisplayMode.continuous));
     });
+
+    testWidgets('Detached card with sourceMasterCardId still shows display modes trigger', (tester) async {
+      final detachedCard = CanvasCardModel(
+        id: 'detached_pdf_page_22',
+        cardType: CardType.pdf,
+        x: 600,
+        y: 100,
+        width: 400,
+        height: 600,
+        totalPdfPages: 400,
+        currentPdfPage: 1,
+        sourceMasterCardId: 'master_pdf',
+        isDetached: true,
+      );
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: PdfCardFloatingPill(
+              card: detachedCard,
+              zoomScale: 1.0,
+              onUpdateCard: (_) {},
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final layersTrigger = find.byWidgetPredicate(
+        (w) => w is SvgIcon && w.name == 'layers',
+      );
+      expect(layersTrigger, findsOneWidget);
+    });
   });
 
   group('Zero Emojis Compliance', () {

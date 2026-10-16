@@ -3,13 +3,13 @@ import 'dart:io';
 import 'dart:math' as math;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:pasteboard/pasteboard.dart';
 import '../models/canvas_card_model.dart';
 import '../widgets/ink_models.dart';
 import '../widgets/note_models.dart';
 import '../widgets/selection_models.dart';
 import '../widgets/undo_commands.dart';
-import '../widgets/selection_overlay_painter.dart';
 import 'media_compression_service.dart';
 import '../dev_hub/dev_hub_server.dart';
 import 'workspace_storage_service.dart';
@@ -40,6 +40,12 @@ class CanvasClipboardService {
   int _counter = 0;
 
   bool get hasInternalClipboard => _clipboardCards.isNotEmpty || _clipboardStrokes.isNotEmpty;
+
+  /// Limpa o clipboard interno para que dados de texto/mídia externos tenham prioridade.
+  void clearInternal() {
+    _clipboardCards.clear();
+    _clipboardStrokes.clear();
+  }
 
   /// Executa o fluxo de cópia (Ctrl+C).
   /// Se um card de mídia estiver selecionado, extrai a imagem pura e grava no clipboard do OS.
@@ -97,7 +103,7 @@ class CanvasClipboardService {
           }
         }
 
-        if (bytes != null && bytes.isNotEmpty) {
+        if (bytes.isNotEmpty) {
           await Pasteboard.writeImage(bytes);
           try {
             final tempDir = Directory.systemTemp;
@@ -316,7 +322,7 @@ class CanvasClipboardService {
           final nowMicro = DateTime.now().microsecondsSinceEpoch;
           final newId = 'card_media_${nowMicro}_${_counter++}';
 
-          final visualDesiredWidth = 420.0;
+          const visualDesiredWidth = 420.0;
           final zoomScaledWidth = visualDesiredWidth / (zoomScale > 0 ? zoomScale : 1.0);
           final targetWidth = zoomScaledWidth.clamp(160.0, 1400.0);
           final targetHeight = compressed.aspectRatio > 0
@@ -352,6 +358,48 @@ class CanvasClipboardService {
             newSelectionState: SelectionState.empty(),
           );
         }
+      }
+
+      // 4. Se não for imagem nem arquivo, consome texto puro do clipboard do sistema (ex: texto copiado do PDF)
+      final clipboardTextData = await Clipboard.getData(Clipboard.kTextPlain);
+      final rawText = clipboardTextData?.text?.trim();
+      if (rawText != null && rawText.isNotEmpty) {
+        final nowMicro = DateTime.now().microsecondsSinceEpoch;
+        final newId = 'card_text_${nowMicro}_${_counter++}';
+
+        final lines = rawText.split('\n');
+        final lineCount = lines.length;
+        final maxLineLen = lines.fold<int>(0, (prev, line) => math.max(prev, line.length));
+
+        final targetWidth = (maxLineLen * 9.5 + 56.0).clamp(320.0, 720.0);
+        final targetHeight = (lineCount * 24.0 + 90.0).clamp(180.0, 600.0);
+
+        final newCard = CanvasCardModel(
+          id: newId,
+          cardType: CardType.textLatex,
+          title: 'Texto',
+          content: rawText,
+          x: canvasMousePos.dx - (targetWidth / 2),
+          y: canvasMousePos.dy - (targetHeight / 2),
+          width: targetWidth,
+          height: targetHeight,
+        );
+
+        undoManager.pushCommand(
+          AddCardCommand(newCard),
+          execute: true,
+          note: note,
+        );
+
+        WorkspaceStorageService.instance.scheduleAutoSave(note);
+        DevHubServer.instance.logAction('Colar Texto do Clipboard (${rawText.length} chars)');
+
+        return CanvasPasteResult(
+          pastedCards: [newCard],
+          pastedStrokes: [],
+          singleSelectedCardId: newCard.id,
+          newSelectionState: SelectionState.empty(),
+        );
       }
     } catch (e) {
       debugPrint('[CanvasClipboardService] Erro ao obter dados da área de transferência: $e');

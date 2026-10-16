@@ -174,13 +174,18 @@ class NoteDocument {
 
   /// Remove múltiplos traços em lote cirúrgico
   void removeAllStrokes(Iterable<String> ids) {
-    final idSet = ids.toSet();
+    final idSet = ids is Set<String> ? ids : ids.toSet();
     if (idSet.isEmpty) return;
     final removedBounds = <String, Rect>{};
+    int minRemovedIndex = _strokesList.length;
 
     for (final id in idSet) {
       final stroke = _strokeMap.remove(id);
       if (stroke != null) {
+        final idx = _strokeIndex.remove(id);
+        if (idx != null && idx < minRemovedIndex) {
+          minRemovedIndex = idx;
+        }
         _cachedPointCount -= stroke.points.length;
         final bounds = stroke.boundingBox ?? SelectionGeometry.computeStrokeBounds(stroke);
         spatialIndex.remove(id, bounds);
@@ -190,8 +195,16 @@ class NoteDocument {
 
     if (removedBounds.isEmpty) return;
 
-    _strokesList.removeWhere((s) => idSet.contains(s.id));
-    _rebuildStrokeIndices();
+    if (removedBounds.length == 1 && minRemovedIndex < _strokesList.length && idSet.contains(_strokesList[minRemovedIndex].id)) {
+      _strokesList.removeAt(minRemovedIndex);
+    } else {
+      _strokesList.removeWhere((s) => idSet.contains(s.id));
+      minRemovedIndex = 0;
+    }
+
+    for (int i = minRemovedIndex; i < _strokesList.length; i++) {
+      _strokeIndex[_strokesList[i].id] = i;
+    }
     pictureCache.removeStrokesFromTiles(removedBounds);
   }
 
@@ -238,11 +251,10 @@ class NoteDocument {
   }
 
   void _rebuildStrokeIndices() {
-    _strokeIndex
-      ..clear()
-      ..addEntries(_strokesList.asMap().entries.map(
-        (entry) => MapEntry(entry.value.id, entry.key),
-      ));
+    _strokeIndex.clear();
+    for (int i = 0; i < _strokesList.length; i++) {
+      _strokeIndex[_strokesList[i].id] = i;
+    }
   }
 
   /// Limpa todos os traços do documento.

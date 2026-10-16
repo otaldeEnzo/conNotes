@@ -1764,10 +1764,44 @@ class _SettingsPageViewState extends State<SettingsPageView> {
 
         SettingsToggleTile(
           title: 'Ações de IA nos Cards de PDF',
-          description: 'Habilita subpílula de IA nos documentos PDF (Resumir, Extrair LaTeX e Explicar Diagrama).',
+          description: 'Habilita a subpílula e as ações inteligentes integradas aos documentos PDF no canvas.',
           value: widget.settings.enablePdfAiActions,
           onChanged: (val) => widget.onUpdateSettings(widget.settings.copyWith(enablePdfAiActions: val)),
         ),
+
+        if (widget.settings.enablePdfAiActions) ...[
+          Padding(
+            padding: const EdgeInsets.only(left: 18),
+            child: Column(
+              children: [
+                SettingsToggleTile(
+                  title: 'Resumo Estruturado de Página',
+                  description: 'Gera síntese da página com tópicos-chave, definições e fórmulas essenciais.',
+                  value: widget.settings.enablePdfAiSummarize,
+                  onChanged: (val) => widget.onUpdateSettings(widget.settings.copyWith(enablePdfAiSummarize: val)),
+                ),
+                SettingsToggleTile(
+                  title: 'Extração de LaTeX (OCR Matemático)',
+                  description: 'Reconhece equações e expressões matemáticas no PDF e converte em KaTeX renderizável.',
+                  value: widget.settings.enablePdfAiExtractLatex,
+                  onChanged: (val) => widget.onUpdateSettings(widget.settings.copyWith(enablePdfAiExtractLatex: val)),
+                ),
+                SettingsToggleTile(
+                  title: 'Explicação de Diagramas & Esquemas',
+                  description: 'Analisa gráficos, circuitos e ilustrações técnicas do PDF gerando explicações analíticas.',
+                  value: widget.settings.enablePdfAiExplainDiagram,
+                  onChanged: (val) => widget.onUpdateSettings(widget.settings.copyWith(enablePdfAiExplainDiagram: val)),
+                ),
+                SettingsToggleTile(
+                  title: 'Geração de Flashcards da Página',
+                  description: 'Cria cartões de memorização ativa (pergunta e resposta) a partir do conteúdo da página.',
+                  value: widget.settings.enablePdfAiFlashcards,
+                  onChanged: (val) => widget.onUpdateSettings(widget.settings.copyWith(enablePdfAiFlashcards: val)),
+                ),
+              ],
+            ),
+          ),
+        ],
 
         const SizedBox(height: 14),
 

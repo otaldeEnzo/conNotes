@@ -31,28 +31,20 @@ class PdfPageSearchHighlightPainter extends CustomPainter {
   /// Native height of the PDF page in 72 DPI points (from PdfPage.height).
   final double pdfNativeHeight;
 
-  final Paint _inactiveFillPaint = Paint()
-    ..style = PaintingStyle.fill
-    ..color = const Color(0x4D00E1FF); // 30% translucent cyan
+  /// Active theme accent color (defaults to MoscaroTokens.auroraBlue).
+  final Color? accentColor;
 
+  final Paint _inactiveFillPaint = Paint()..style = PaintingStyle.fill;
   final Paint _inactiveBorderPaint = Paint()
     ..style = PaintingStyle.stroke
-    ..strokeWidth = 1.0
-    ..color = MoscaroTokens.auroraBlue.withValues(alpha: 0.45);
-
-  final Paint _activeFillPaint = Paint()
-    ..style = PaintingStyle.fill
-    ..color = MoscaroTokens.auroraBlue.withValues(alpha: 0.55);
-
+    ..strokeWidth = 1.0;
+  final Paint _activeFillPaint = Paint()..style = PaintingStyle.fill;
   final Paint _activeBorderPaint = Paint()
     ..style = PaintingStyle.stroke
-    ..strokeWidth = 1.6
-    ..color = MoscaroTokens.auroraBlue;
-
+    ..strokeWidth = 1.6;
   final Paint _activeGlowPaint = Paint()
     ..style = PaintingStyle.stroke
     ..strokeWidth = 3.5
-    ..color = MoscaroTokens.auroraBlue.withValues(alpha: 0.35)
     ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 2.0);
 
   PdfPageSearchHighlightPainter({
@@ -62,7 +54,15 @@ class PdfPageSearchHighlightPainter extends CustomPainter {
     required this.pageHeight,
     required this.pdfNativeWidth,
     required this.pdfNativeHeight,
-  });
+    this.accentColor,
+  }) {
+    final effectiveAccent = accentColor ?? MoscaroTokens.auroraBlue;
+    _inactiveFillPaint.color = effectiveAccent.withValues(alpha: 0.28);
+    _inactiveBorderPaint.color = effectiveAccent.withValues(alpha: 0.45);
+    _activeFillPaint.color = effectiveAccent.withValues(alpha: 0.55);
+    _activeBorderPaint.color = effectiveAccent;
+    _activeGlowPaint.color = effectiveAccent.withValues(alpha: 0.35);
+  }
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -118,6 +118,7 @@ class PdfPageSearchHighlightPainter extends CustomPainter {
         oldDelegate.pageWidth != pageWidth ||
         oldDelegate.pageHeight != pageHeight ||
         oldDelegate.pdfNativeWidth != pdfNativeWidth ||
-        oldDelegate.pdfNativeHeight != pdfNativeHeight;
+        oldDelegate.pdfNativeHeight != pdfNativeHeight ||
+        oldDelegate.accentColor != accentColor;
   }
 }

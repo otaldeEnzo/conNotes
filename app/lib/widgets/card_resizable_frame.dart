@@ -59,7 +59,10 @@ class _CardResizableFrameState extends State<CardResizableFrame> {
         oldWidget.card.width != widget.card.width ||
         oldWidget.card.fontSize != widget.card.fontSize ||
         oldWidget.card.fontFamily != widget.card.fontFamily ||
-        oldWidget.card.isCollapsed != widget.card.isCollapsed) {
+        oldWidget.card.isCollapsed != widget.card.isCollapsed ||
+        oldWidget.card.pdfDisplayMode != widget.card.pdfDisplayMode ||
+        oldWidget.card.totalPdfPages != widget.card.totalPdfPages ||
+        oldWidget.card.excludedPageIndices != widget.card.excludedPageIndices) {
       _cachedStaticMinHeight = widget.card.calculateMinHeight();
     }
   }

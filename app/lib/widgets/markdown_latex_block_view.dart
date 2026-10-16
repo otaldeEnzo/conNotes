@@ -11,7 +11,16 @@ import 'card_slash_command_popover.dart';
 import 'card_format_floating_pill.dart';
 import 'card_latex_editor_popover.dart';
 import 'stem_callout_box_view.dart';
+import 'card_source_provenance_badge.dart';
 import 'svg_icon.dart';
+
+class _NoScrollbarBehavior extends ScrollBehavior {
+  const _NoScrollbarBehavior();
+  @override
+  Widget buildScrollbar(BuildContext context, Widget child, ScrollableDetails details) => child;
+  @override
+  Widget buildOverscrollIndicator(BuildContext context, Widget child, ScrollableDetails details) => child;
+}
 
 enum BlockType {
   heading,
@@ -44,8 +53,10 @@ class MarkdownLatexBlockView extends StatefulWidget {
   final ValueChanged<String> onContentChanged;
   final ValueChanged<CardActiveTextStyles>? onActiveStylesChanged;
   final ValueChanged<bool>? onEditingModeChanged;
+  final ValueChanged<double>? onRequiredEditingHeightChanged;
   final bool isInteractive;
   final VoidCallback? onSelectCard;
+  final VoidCallback? onJumpToSource;
   final bool isSelected;
 
   const MarkdownLatexBlockView({
@@ -54,8 +65,10 @@ class MarkdownLatexBlockView extends StatefulWidget {
     required this.onContentChanged,
     this.onActiveStylesChanged,
     this.onEditingModeChanged,
+    this.onRequiredEditingHeightChanged,
     this.isInteractive = true,
     this.onSelectCard,
+    this.onJumpToSource,
     this.isSelected = false,
   });
 
@@ -146,6 +159,9 @@ class MarkdownLatexBlockViewState extends State<MarkdownLatexBlockView> {
 
     // Notifica estilos ativos para iluminar botões na barra flutuante
     widget.onActiveStylesChanged?.call(getActiveStyles());
+
+    // Notifica altura requerida pelo editor ativo para expansão elástica do card
+    _notifyRequiredEditingHeight();
 
     // Detecção ESTRITA de Slash Commands (/):
     // Nunca abre se houver seleção de texto ativa
@@ -268,6 +284,18 @@ class MarkdownLatexBlockViewState extends State<MarkdownLatexBlockView> {
     return StemCalloutType.tip;
   }
 
+  void _notifyRequiredEditingHeight() {
+    if (_editingBlockIndex != null) {
+      final req = widget.card.calculateEditingMinHeight(
+        editingBlockIndex: _editingBlockIndex!,
+        activeEditingText: _blockController.text,
+      );
+      widget.onRequiredEditingHeightChanged?.call(req);
+    } else {
+      widget.onRequiredEditingHeightChanged?.call(0.0);
+    }
+  }
+
   void _startEditingBlock(ParsedContentBlock block) {
     if (!widget.isInteractive) {
       return;
@@ -280,6 +308,7 @@ class MarkdownLatexBlockViewState extends State<MarkdownLatexBlockView> {
       _showSlashMenu = false;
     });
     widget.onEditingModeChanged?.call(true);
+    _notifyRequiredEditingHeight();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) {
         _blockFocusNode.requestFocus();
@@ -362,6 +391,7 @@ class MarkdownLatexBlockViewState extends State<MarkdownLatexBlockView> {
       _cachedBlockWidgets.clear();
     });
     widget.onEditingModeChanged?.call(false);
+    widget.onRequiredEditingHeightChanged?.call(0.0);
     globalIsEditingText = false;
   }
 
@@ -822,12 +852,14 @@ class MarkdownLatexBlockViewState extends State<MarkdownLatexBlockView> {
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
         child: ClipRect(
-          child: SingleChildScrollView(
-            physics: const ClampingScrollPhysics(),
-            child: Container(
-              constraints: BoxConstraints(minHeight: availableBodyHeight),
-              alignment: Alignment.topLeft,
-              child: Column(
+          child: ScrollConfiguration(
+            behavior: const _NoScrollbarBehavior(),
+            child: SingleChildScrollView(
+              physics: const NeverScrollableScrollPhysics(),
+              child: Container(
+                constraints: BoxConstraints(minHeight: availableBodyHeight),
+                alignment: Alignment.topLeft,
+                child: Column(
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
@@ -865,13 +897,20 @@ class MarkdownLatexBlockViewState extends State<MarkdownLatexBlockView> {
                       fontFamily,
                       fontSize,
                     ),
+                  if (widget.card.sourcePageNumber != null)
+                    CardSourceProvenanceBadge(
+                      pageNumber: widget.card.sourcePageNumber!,
+                      documentTitle: widget.card.sourceDocumentTitle ?? widget.card.title,
+                      onTap: widget.onJumpToSource,
+                    ),
                 ],
               ),
             ),
           ),
         ),
       ),
-    );
+    ),
+  );
   }
 
   Widget _buildPlaceholderSuggestionView({

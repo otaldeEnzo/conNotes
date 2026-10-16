@@ -23,6 +23,7 @@ class PdfDocumentService {
 
   final Map<String, PdfDocument> _documentCache = <String, PdfDocument>{};
   final Map<String, Map<int, PdfPageText>> _pageTextCache = <String, Map<int, PdfPageText>>{};
+  final Map<String, List<PdfOutlineNode>> _outlineCache = <String, List<PdfOutlineNode>>{};
   bool _isInitialized = false;
 
   /// Indicates whether pdfrx engine has been initialized.
@@ -44,7 +45,7 @@ class PdfDocumentService {
   }
 
   /// Opens and caches a PdfDocument from a local filesystem path.
-  Future<PdfDocument> loadDocument(String filePath) async {
+  Future<PdfDocument> loadDocument(String filePath, {PdfPasswordProvider? passwordProvider}) async {
     await initialize();
 
     final cached = _documentCache[filePath];
@@ -52,9 +53,27 @@ class PdfDocumentService {
       return cached;
     }
 
-    final doc = await PdfDocument.openFile(filePath);
+    final doc = await PdfDocument.openFile(filePath, passwordProvider: passwordProvider);
     _documentCache[filePath] = doc;
     return doc;
+  }
+
+  /// Asynchronously loads and caches the table of contents / outline hierarchy of the PDF.
+  Future<List<PdfOutlineNode>> loadOutline(String filePath) async {
+    final cached = _outlineCache[filePath];
+    if (cached != null) {
+      return cached;
+    }
+
+    try {
+      final doc = await loadDocument(filePath);
+      final outline = await doc.loadOutline();
+      _outlineCache[filePath] = outline;
+      return outline;
+    } catch (e) {
+      debugPrint('PdfDocumentService.loadOutline error on $filePath: $e');
+      return const [];
+    }
   }
 
   /// Asynchronously parses and caches text fragment metrics from a specific page.
