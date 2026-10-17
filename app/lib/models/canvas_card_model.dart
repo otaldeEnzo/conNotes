@@ -185,8 +185,8 @@ class CanvasCardModel {
               : (1.0 / 1.4142); // Proporcao padrao A4 (0.7071)
       final double singlePageHeight = width / effectiveAspectRatio;
 
+      final double headerH = (sourceMasterCardId == null || isDetached) ? 28.0 : 0.0;
       if (pdfDisplayMode == PdfDisplayMode.singlePage || sourceMasterCardId != null) {
-        final double headerH = (sourceMasterCardId == null || isDetached) ? 28.0 : 0.0;
         return math.max(100.0, singlePageHeight + headerH);
       }
 
@@ -198,12 +198,12 @@ class CanvasCardModel {
         final double itemWidth = (width - pdfPageGap) / 2.0;
         final double itemHeight = itemWidth / effectiveAspectRatio;
         final double totalHeight = (rows * itemHeight) + (math.max(0, rows - 1) * pdfPageGap);
-        return math.max(100.0, totalHeight);
+        return math.max(100.0, totalHeight + headerH);
       }
 
       final double totalGaps = (activePages - 1) * pdfPageGap;
       final double totalHeight = (activePages * singlePageHeight) + totalGaps;
-      return math.max(100.0, totalHeight);
+      return math.max(100.0, totalHeight + headerH);
     }
 
     const headerHeight = 36.0;

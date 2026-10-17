@@ -327,7 +327,7 @@ class _PdfRegionCropOverlayState extends State<PdfRegionCropOverlay> {
         border: Border.all(
           color: isLight
               ? MoscaroTokens.borderSubtle
-              : themeAccent.withValues(alpha: 0.45),
+              : MoscaroTokens.borderGlow,
           width: MoscaroTokens.borderWidthSubtle,
         ),
         boxShadow: [
@@ -337,10 +337,6 @@ class _PdfRegionCropOverlayState extends State<PdfRegionCropOverlay> {
                 : Colors.black.withValues(alpha: 0.40),
             blurRadius: 14.0,
             offset: const Offset(0, 4),
-          ),
-          BoxShadow(
-            color: themeAccent.withValues(alpha: isLight ? 0.08 : 0.20),
-            blurRadius: 8.0,
           ),
         ],
       ),

@@ -710,18 +710,16 @@ class _PdfCardFloatingPillState extends State<PdfCardFloatingPill> {
         color: glassTint,
         borderRadius: BorderRadius.circular(20.0),
         border: Border.all(
-          color: themeAccent.withValues(alpha: 0.45),
+          color: isLight ? MoscaroTokens.borderSubtle : MoscaroTokens.borderGlow,
           width: 1.0,
         ),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.35),
+            color: isLight
+                ? const Color(0x180F172A)
+                : Colors.black.withValues(alpha: 0.35),
             blurRadius: 14.0,
             offset: const Offset(0, 4),
-          ),
-          BoxShadow(
-            color: themeAccent.withValues(alpha: 0.15),
-            blurRadius: 10.0,
           ),
         ],
       ),
@@ -731,7 +729,7 @@ class _PdfCardFloatingPillState extends State<PdfCardFloatingPill> {
         children: [
           Padding(
             padding: const EdgeInsets.only(left: 4.0, right: 6.0),
-            child: SvgIcon(name: 'layers', size: 13.0, color: themeAccent),
+            child: SvgIcon(name: 'layers', size: 13.0, color: MoscaroTokens.textSecondary),
           ),
           _buildSubPillModeOption(
             title: 'Coluna Contínua',
@@ -850,18 +848,16 @@ class _PdfCardFloatingPillState extends State<PdfCardFloatingPill> {
         color: glassTint,
         borderRadius: BorderRadius.circular(20.0),
         border: Border.all(
-          color: themeAccent.withValues(alpha: 0.45),
+          color: isLight ? MoscaroTokens.borderSubtle : MoscaroTokens.borderGlow,
           width: 1.0,
         ),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.35),
+            color: isLight
+                ? const Color(0x180F172A)
+                : Colors.black.withValues(alpha: 0.35),
             blurRadius: 14.0,
             offset: const Offset(0, 4),
-          ),
-          BoxShadow(
-            color: themeAccent.withValues(alpha: 0.15),
-            blurRadius: 10.0,
           ),
         ],
       ),
@@ -871,7 +867,7 @@ class _PdfCardFloatingPillState extends State<PdfCardFloatingPill> {
         children: [
           Padding(
             padding: const EdgeInsets.only(left: 4.0, right: 6.0),
-            child: SvgIcon(name: 'sparkle', size: 13.0, color: themeAccent),
+            child: SvgIcon(name: 'sparkle', size: 13.0, color: MoscaroTokens.textSecondary),
           ),
           if (settings.enablePdfAiSummarize) ...[
             _buildSubPillAiAction(
@@ -1020,7 +1016,7 @@ class _PdfCardFloatingPillState extends State<PdfCardFloatingPill> {
         border: Border.all(
           color: isLight
               ? MoscaroTokens.borderSubtle
-              : MoscaroTokens.borderGlowActive.withValues(alpha: 0.35),
+              : MoscaroTokens.borderGlow,
           width: MoscaroTokens.borderWidthSubtle,
         ),
         boxShadow: [
@@ -1031,11 +1027,6 @@ class _PdfCardFloatingPillState extends State<PdfCardFloatingPill> {
             blurRadius: 18.0,
             spreadRadius: -2,
             offset: const Offset(0, 6),
-          ),
-          BoxShadow(
-            color: themeAccent.withValues(alpha: 0.12),
-            blurRadius: 14.0,
-            spreadRadius: 0.0,
           ),
         ],
       ),
@@ -1321,7 +1312,7 @@ class _PdfCardFloatingPillState extends State<PdfCardFloatingPill> {
           _PillActionButton(
             iconName: 'sparkle',
             tooltip: 'Ações de IA STEM (Resumo, LaTeX, Diagramas)',
-            iconColor: themeAccent,
+            iconColor: _activeSubPill == _SubPillType.ai ? themeAccent : null,
             isActive: _activeSubPill == _SubPillType.ai,
             onPressed: () {
               setState(() {
@@ -1371,7 +1362,7 @@ class _PdfCardFloatingPillState extends State<PdfCardFloatingPill> {
           _PillActionButton(
             iconName: 'link',
             tooltip: 'Prender de volta ao PDF original',
-            iconColor: themeAccent,
+
             onPressed: widget.onReattachToMaster,
           ),
         ] else if (widget.card.excludedPageIndices.isNotEmpty && widget.onReattachPage != null) ...[
@@ -1379,7 +1370,7 @@ class _PdfCardFloatingPillState extends State<PdfCardFloatingPill> {
           _PillActionButton(
             iconName: 'link',
             tooltip: 'Prender páginas desprendidas (${widget.card.excludedPageIndices.length})',
-            iconColor: themeAccent,
+
             onPressed: () => _handleReattachMenu(context),
           ),
         ],

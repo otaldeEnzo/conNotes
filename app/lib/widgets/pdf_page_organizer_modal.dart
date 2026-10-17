@@ -167,7 +167,7 @@ class _PdfPageOrganizerModalState extends State<PdfPageOrganizerModal> {
         border: Border.all(
           color: isLight
               ? MoscaroTokens.borderSubtle
-              : themeAccent.withValues(alpha: 0.35),
+              : MoscaroTokens.borderGlow,
           width: MoscaroTokens.borderWidthSubtle,
         ),
         boxShadow: [
@@ -177,10 +177,6 @@ class _PdfPageOrganizerModalState extends State<PdfPageOrganizerModal> {
                 : Colors.black.withValues(alpha: 0.50),
             blurRadius: isLight ? 20.0 : 28.0,
             offset: const Offset(0, 10),
-          ),
-          BoxShadow(
-            color: themeAccent.withValues(alpha: isLight ? 0.08 : 0.15),
-            blurRadius: 16.0,
           ),
         ],
       ),
@@ -571,94 +567,114 @@ class _PageCardItem extends StatelessWidget {
 
           // Central Sheet Representation (Real Rendered PDF Page View)
           Expanded(
-            child: Center(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 6.0, vertical: 4.0),
               child: Tooltip(
                 message: 'Clique para ir para a pág. $pageNumber',
                 child: MouseRegion(
                   cursor: SystemMouseCursors.click,
                   child: GestureDetector(
                     onTap: onJumpToPage,
-                    child: RotatedBox(
-                      quarterTurns: rotationQuarterTurns,
-                      child: Container(
-                        width: 76.0,
-                        height: 104.0,
-                        decoration: BoxDecoration(
-                          color: isExcluded
-                              ? (isLight ? Colors.black12 : Colors.white10)
-                              : (isLight ? const Color(0xFFF1F5F9) : MoscaroTokens.backgroundDeep),
-                          borderRadius: BorderRadius.circular(6.0),
-                          border: Border.all(
-                            color: isCurrentPage
-                                ? themeAccent
-                                : (isExcluded
-                                    ? Colors.transparent
-                                    : MoscaroTokens.borderSubtle),
-                            width: isCurrentPage ? 1.8 : 1.0,
-                          ),
-                          boxShadow: [
-                            if (isCurrentPage)
+                    child: LayoutBuilder(
+                      builder: (context, constraints) {
+                        return Container(
+                          width: constraints.maxWidth,
+                          height: constraints.maxHeight,
+                          decoration: BoxDecoration(
+                            color: isExcluded
+                                ? (isLight ? Colors.black12 : Colors.white10)
+                                : MoscaroTokens.glassTint,
+                            borderRadius: BorderRadius.circular(8.0),
+                            border: Border.all(
+                              color: isCurrentPage
+                                  ? themeAccent
+                                  : (isExcluded
+                                      ? Colors.transparent
+                                      : (isLight ? MoscaroTokens.borderSubtle : MoscaroTokens.borderGlow)),
+                              width: isCurrentPage ? 1.8 : 1.0,
+                            ),
+                            boxShadow: [
+                              if (isCurrentPage)
+                                BoxShadow(
+                                  color: themeAccent.withValues(alpha: 0.35),
+                                  blurRadius: 10.0,
+                                ),
                               BoxShadow(
-                                color: themeAccent.withValues(alpha: 0.35),
-                                blurRadius: 8.0,
+                                color: Colors.black.withValues(alpha: isLight ? 0.08 : 0.30),
+                                blurRadius: 6.0,
+                                offset: const Offset(0, 2),
                               ),
-                          ],
-                        ),
-                        child: ClipRRect(
-                          borderRadius: BorderRadius.circular(5.0),
-                          child: Stack(
-                            fit: StackFit.expand,
-                            children: [
-                              if (pdfDocument != null &&
-                                  pageNumber >= 1 &&
-                                  pageNumber <= pdfDocument!.pages.length) ...[
-                                if (invertLuminance)
-                                  ColorFiltered(
-                                    colorFilter: moscaroDarkLuminanceFilter,
-                                    child: PdfPageView(
-                                      key: ValueKey('organizer_thumb_$pageNumber'),
-                                      document: pdfDocument!,
-                                      pageNumber: pageNumber,
-                                      maximumDpi: 120,
-                                      alignment: Alignment.center,
-                                      decoration: const BoxDecoration(color: Colors.white),
-                                    ),
-                                  )
-                                else
-                                  PdfPageView(
-                                    key: ValueKey('organizer_thumb_$pageNumber'),
-                                    document: pdfDocument!,
-                                    pageNumber: pageNumber,
-                                    maximumDpi: 120,
-                                    alignment: Alignment.center,
-                                    decoration: const BoxDecoration(color: Colors.white),
-                                  ),
-                              ] else ...[
-                                Center(
-                                  child: SvgIcon(
-                                    name: 'file',
-                                    size: 24.0,
-                                    color: isExcluded
-                                        ? MoscaroTokens.iconInactive
-                                        : themeAccent.withValues(alpha: 0.60),
-                                  ),
-                                ),
-                              ],
-                              if (isExcluded)
-                                Container(
-                                  color: Colors.black.withValues(alpha: 0.45),
-                                  child: const Center(
-                                    child: SvgIcon(
-                                      name: 'close',
-                                      size: 18.0,
-                                      color: MoscaroTokens.auroraPink,
-                                    ),
-                                  ),
-                                ),
                             ],
                           ),
-                        ),
-                      ),
+                          child: ClipRRect(
+                            borderRadius: BorderRadius.circular(7.0),
+                            child: Stack(
+                              fit: StackFit.expand,
+                              children: [
+                                if (pdfDocument != null &&
+                                    pageNumber >= 1 &&
+                                    pageNumber <= pdfDocument!.pages.length) ...[
+                                  FittedBox(
+                                    fit: BoxFit.contain,
+                                    child: RotatedBox(
+                                      quarterTurns: rotationQuarterTurns,
+                                      child: SizedBox(
+                                        width: pdfDocument!.pages[pageNumber - 1].width > 0
+                                            ? pdfDocument!.pages[pageNumber - 1].width
+                                            : 595.0,
+                                        height: pdfDocument!.pages[pageNumber - 1].height > 0
+                                            ? pdfDocument!.pages[pageNumber - 1].height
+                                            : 842.0,
+                                        child: invertLuminance
+                                            ? ColorFiltered(
+                                                colorFilter: moscaroDarkLuminanceFilter,
+                                                child: PdfPageView(
+                                                  key: ValueKey('organizer_thumb_$pageNumber'),
+                                                  document: pdfDocument!,
+                                                  pageNumber: pageNumber,
+                                                  maximumDpi: 150,
+                                                  alignment: Alignment.center,
+                                                  decoration: const BoxDecoration(color: Colors.white),
+                                                ),
+                                              )
+                                            : PdfPageView(
+                                                key: ValueKey('organizer_thumb_$pageNumber'),
+                                                document: pdfDocument!,
+                                                pageNumber: pageNumber,
+                                                maximumDpi: 150,
+                                                alignment: Alignment.center,
+                                                decoration: const BoxDecoration(color: Colors.white),
+                                              ),
+                                      ),
+                                    ),
+                                  ),
+                                ] else ...[
+                                  Center(
+                                    child: SvgIcon(
+                                      name: 'file',
+                                      size: 26.0,
+                                      color: isExcluded
+                                          ? MoscaroTokens.iconInactive
+                                          : themeAccent.withValues(alpha: 0.60),
+                                    ),
+                                  ),
+                                ],
+                                if (isExcluded)
+                                  Container(
+                                    color: Colors.black.withValues(alpha: 0.45),
+                                    child: const Center(
+                                      child: SvgIcon(
+                                        name: 'close',
+                                        size: 20.0,
+                                        color: MoscaroTokens.auroraPink,
+                                      ),
+                                    ),
+                                  ),
+                              ],
+                            ),
+                          ),
+                        );
+                      },
                     ),
                   ),
                 ),

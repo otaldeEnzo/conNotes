@@ -1,5 +1,7 @@
 import 'dart:math' as math;
+import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
+import '../services/diagnostics_override_controller.dart';
 import '../theme/moscaro_v2_tokens.dart';
 import '../theme/moscaro_v2_extension.dart';
 import '../theme/moscaro_theme_controller.dart';
@@ -677,9 +679,10 @@ class _CanvasCardWidgetState extends State<CanvasCardWidget> {
                   final sinTheta = math.sin(theta);
                   final cosTheta = math.cos(theta);
                   final isSisterPdfPage = isPdfCard && widget.card.sourceMasterCardId != null && !widget.card.isDetached;
+                  final isMasterPdfCard = isPdfCard && (widget.card.sourceMasterCardId == null || widget.card.isDetached);
                   final halfBoundingH = halfW * sinTheta.abs() + halfH * cosTheta.abs();
                   final pageGap = widget.card.pdfPageGap > 0 ? widget.card.pdfPageGap : 56.0;
-                  final d = halfBoundingH + (isSisterPdfPage ? ((pageGap / 2.0) + 6.0) : 46.0);
+                  final d = halfBoundingH + (isSisterPdfPage ? ((pageGap / 2.0) + 6.0) : (46.0 + (isMasterPdfCard ? 20.0 : 0.0)));
 
                   // Posição local da pílula para que, após a rotação do pai por theta,
                   // ela fique exatamente no topo da AABB do card em tela, horizontal e sem sobreposição
@@ -986,7 +989,7 @@ class _CanvasCardWidgetState extends State<CanvasCardWidget> {
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-              // Cabecalho de Arraste do PDF (Vidro Liquido Moscaro v2)
+              // Cabecalho de Arraste do PDF (Vidro Liquido Moscaro v2 com Blur)
               GestureDetector(
                 behavior: HitTestBehavior.opaque,
                 onTap: () => widget.onSelectCard(widget.card.id),
@@ -1005,16 +1008,31 @@ class _CanvasCardWidgetState extends State<CanvasCardWidget> {
                 onPanCancel: _onHeaderPanCancel,
                 child: MouseRegion(
                   cursor: SystemMouseCursors.move,
-                  child: Container(
-                    height: 28,
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                    decoration: BoxDecoration(
-                      color: isLight ? Colors.black.withValues(alpha: 0.04) : Colors.white.withValues(alpha: 0.05),
-                      borderRadius: const BorderRadius.vertical(top: Radius.circular(14)),
-                    ),
-                    child: Row(
-                      children: [
-                        SvgIcon(name: 'pdf', size: 13, color: themeAccent),
+                  child: Builder(
+                    builder: (context) {
+                      final bool bypass = DiagnosticsOverrideController.instance.bypassBackdropFilter;
+                      final double headerBlur = (!bypass && MoscaroTokens.enableCardsBlur && MoscaroTokens.blurSigma > 0)
+                          ? MoscaroTokens.blurSigma
+                          : 0.0;
+                      final headerChild = Container(
+                        height: 28,
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: glassTint,
+                          borderRadius: const BorderRadius.vertical(top: Radius.circular(14)),
+                          border: Border(
+                            top: BorderSide(color: borderColor, width: isSelected ? 1.5 : 1.0),
+                            left: BorderSide(color: borderColor, width: isSelected ? 1.5 : 1.0),
+                            right: BorderSide(color: borderColor, width: isSelected ? 1.5 : 1.0),
+                            bottom: BorderSide(
+                              color: isLight ? MoscaroTokens.borderSubtle : MoscaroTokens.borderGlow,
+                              width: 0.8,
+                            ),
+                          ),
+                        ),
+                        child: Row(
+                          children: [
+                            SvgIcon(name: 'pdf', size: 13, color: themeAccent),
                         const SizedBox(width: 6),
                         Expanded(
                           child: _isEditingTitle
@@ -1074,9 +1092,25 @@ class _CanvasCardWidgetState extends State<CanvasCardWidget> {
                         ],
                       ],
                     ),
-                  ),
-                ),
+                  );
+
+                  if (headerBlur > 0) {
+                    return ClipRRect(
+                      borderRadius: const BorderRadius.vertical(top: Radius.circular(14)),
+                      child: BackdropFilter(
+                        filter: ui.ImageFilter.blur(sigmaX: headerBlur, sigmaY: headerBlur),
+                        child: headerChild,
+                      ),
+                    );
+                  }
+                  return ClipRRect(
+                    borderRadius: const BorderRadius.vertical(top: Radius.circular(14)),
+                    child: headerChild,
+                  );
+                },
               ),
+            ),
+          ),
 
               // Corpo do PDF com as paginas renderizadas com largura completa
               child,

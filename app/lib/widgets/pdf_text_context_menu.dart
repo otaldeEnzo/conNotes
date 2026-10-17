@@ -43,18 +43,14 @@ class PdfTextContextMenu extends StatelessWidget {
             color: MoscaroTokens.glassTint,
             borderRadius: BorderRadius.circular(MoscaroTokens.radiusPill),
             border: Border.all(
-              color: themeAccent.withValues(alpha: 0.35),
+              color: MoscaroTokens.isLight ? MoscaroTokens.borderSubtle : MoscaroTokens.borderGlow,
               width: 1.0,
             ),
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withValues(alpha: 0.30),
+                color: Colors.black.withValues(alpha: MoscaroTokens.isLight ? 0.20 : 0.40),
                 blurRadius: 14.0,
                 offset: const Offset(0, 4),
-              ),
-              BoxShadow(
-                color: themeAccent.withValues(alpha: 0.15),
-                blurRadius: 8.0,
               ),
             ],
           ),
