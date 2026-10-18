@@ -13,13 +13,21 @@ class TileSubChunk {
   static const int maxChunkSize = 128;
   final List<InkStroke> strokes = [];
   ui.Picture? picture;
+  ui.Picture? _filteredPicture;
+  int _filteredHiddenHash = 0;
   bool isDirty = true;
+  InkStroke? _pendingAppendStroke;
 
   bool get isFull => strokes.length >= maxChunkSize;
   bool get isEmpty => strokes.isEmpty;
 
   void addStroke(InkStroke stroke) {
     strokes.add(stroke);
+    if (!isDirty && picture != null && stroke.toolType != InkToolType.highlighter) {
+      _pendingAppendStroke = stroke;
+    } else {
+      _pendingAppendStroke = null;
+    }
     isDirty = true;
   }
 
@@ -28,6 +36,10 @@ class TileSubChunk {
     strokes.removeWhere((s) => s.id == id);
     if (strokes.length != prevLen) {
       isDirty = true;
+      _pendingAppendStroke = null;
+      _filteredPicture?.dispose();
+      _filteredPicture = null;
+      _filteredHiddenHash = 0;
       return true;
     }
     return false;
@@ -38,6 +50,10 @@ class TileSubChunk {
     strokes.removeWhere((s) => ids.contains(s.id));
     if (strokes.length != prevLen) {
       isDirty = true;
+      _pendingAppendStroke = null;
+      _filteredPicture?.dispose();
+      _filteredPicture = null;
+      _filteredHiddenHash = 0;
       return true;
     }
     return false;
@@ -46,8 +62,28 @@ class TileSubChunk {
   void render(Paint reusablePaint, int tileX, int tileY) {
     if (!isDirty && picture != null) return;
 
+    // Otimização O(1) Append: se apenas 1 traço foi adicionado a um chunk já gravado, compõe sobre o Picture anterior
+    if (_pendingAppendStroke != null && picture != null) {
+      final stroke = _pendingAppendStroke!;
+      _pendingAppendStroke = null;
+      final recorder = ui.PictureRecorder();
+      final canvas = Canvas(recorder);
+      canvas.clipRect(const Rect.fromLTWH(0, 0, StrokePictureCache.tileSize, StrokePictureCache.tileSize));
+      canvas.drawPicture(picture!);
+      canvas.translate(-tileX * StrokePictureCache.tileSize, -tileY * StrokePictureCache.tileSize);
+      StrokePictureCache.drawSingleStroke(canvas, stroke, reusablePaint);
+      picture?.dispose();
+      picture = recorder.endRecording();
+      isDirty = false;
+      return;
+    }
+
+    _pendingAppendStroke = null;
     picture?.dispose();
     picture = null;
+    _filteredPicture?.dispose();
+    _filteredPicture = null;
+    _filteredHiddenHash = 0;
 
     if (strokes.isEmpty) {
       isDirty = false;
@@ -56,6 +92,7 @@ class TileSubChunk {
 
     final recorder = ui.PictureRecorder();
     final canvas = Canvas(recorder);
+    canvas.clipRect(const Rect.fromLTWH(0, 0, StrokePictureCache.tileSize, StrokePictureCache.tileSize));
     canvas.translate(-tileX * StrokePictureCache.tileSize, -tileY * StrokePictureCache.tileSize);
 
     // 1. Marca-textos primeiro (para ficarem "atrás" de traços normais)
@@ -81,16 +118,46 @@ class TileSubChunk {
   void draw(Canvas canvas, {Set<String>? hiddenIds, Paint? reusablePaint, int tileX = 0, int tileY = 0}) {
     if (strokes.isEmpty) return;
 
-    // Se algum traço deste chunk estiver oculto (ex: sendo movido ou apagado), desenha dinamicamente
+    canvas.save();
+    canvas.clipRect(const Rect.fromLTWH(0, 0, StrokePictureCache.tileSize, StrokePictureCache.tileSize));
+
+    // Se algum traço deste chunk estiver oculto (ex: sendo movido ou apagado), usa cache secundário filtrado
     if (hiddenIds != null && strokes.any((s) => hiddenIds.contains(s.id))) {
-      final paint = reusablePaint ?? Paint();
-      canvas.save();
-      canvas.translate(-tileX * StrokePictureCache.tileSize, -tileY * StrokePictureCache.tileSize);
+      int hiddenHash = 0;
       for (var i = 0; i < strokes.length; i++) {
-        final s = strokes[i];
-        if (!hiddenIds.contains(s.id)) {
-          StrokePictureCache.drawSingleStroke(canvas, s, paint);
+        if (hiddenIds.contains(strokes[i].id)) {
+          hiddenHash = 31 * hiddenHash + strokes[i].id.hashCode;
         }
+      }
+
+      if (_filteredPicture == null || _filteredHiddenHash != hiddenHash) {
+        _filteredPicture?.dispose();
+        final recorder = ui.PictureRecorder();
+        final recCanvas = Canvas(recorder);
+        recCanvas.clipRect(const Rect.fromLTWH(0, 0, StrokePictureCache.tileSize, StrokePictureCache.tileSize));
+        recCanvas.translate(-tileX * StrokePictureCache.tileSize, -tileY * StrokePictureCache.tileSize);
+
+        final paint = reusablePaint ?? Paint();
+        // 1. Marca-textos primeiro (preserva 2 passadas)
+        for (var i = 0; i < strokes.length; i++) {
+          final s = strokes[i];
+          if (s.toolType == InkToolType.highlighter && !hiddenIds.contains(s.id)) {
+            StrokePictureCache.drawSingleStroke(recCanvas, s, paint);
+          }
+        }
+        // 2. Traços normais por cima
+        for (var i = 0; i < strokes.length; i++) {
+          final s = strokes[i];
+          if (s.toolType != InkToolType.highlighter && !hiddenIds.contains(s.id)) {
+            StrokePictureCache.drawSingleStroke(recCanvas, s, paint);
+          }
+        }
+        _filteredPicture = recorder.endRecording();
+        _filteredHiddenHash = hiddenHash;
+      }
+
+      if (_filteredPicture != null) {
+        canvas.drawPicture(_filteredPicture!);
       }
       canvas.restore();
       return;
@@ -99,17 +166,24 @@ class TileSubChunk {
     if (picture != null) {
       canvas.drawPicture(picture!);
     }
+    canvas.restore();
   }
 
   void invalidatePicture() {
     picture?.dispose();
     picture = null;
+    _filteredPicture?.dispose();
+    _filteredPicture = null;
+    _filteredHiddenHash = 0;
     isDirty = true;
   }
 
   void dispose() {
     picture?.dispose();
     picture = null;
+    _filteredPicture?.dispose();
+    _filteredPicture = null;
+    _filteredHiddenHash = 0;
     strokes.clear();
   }
 }
@@ -127,6 +201,7 @@ class CanvasTile {
   ui.Image? image;
   bool isDirty = true;
   bool _needsTextureBake = false;
+  bool _ownsCompositePicture = false;
   int lastUsedFrame = 0;
 
   CanvasTile(this.tileX, this.tileY);
@@ -223,15 +298,26 @@ class CanvasTile {
     }
 
     if (anyChunkChanged || picture == null) {
-      picture?.dispose();
-      final recorder = ui.PictureRecorder();
-      final canvas = Canvas(recorder);
-      for (var i = 0; i < _chunks.length; i++) {
-        if (_chunks[i].picture != null) {
-          canvas.drawPicture(_chunks[i].picture!);
+      if (_chunks.length == 1) {
+        if (_ownsCompositePicture) {
+          picture?.dispose();
         }
+        picture = _chunks[0].picture;
+        _ownsCompositePicture = false;
+      } else {
+        if (_ownsCompositePicture) {
+          picture?.dispose();
+        }
+        final recorder = ui.PictureRecorder();
+        final canvas = Canvas(recorder);
+        for (var i = 0; i < _chunks.length; i++) {
+          if (_chunks[i].picture != null) {
+            canvas.drawPicture(_chunks[i].picture!);
+          }
+        }
+        picture = recorder.endRecording();
+        _ownsCompositePicture = true;
       }
-      picture = recorder.endRecording();
       image?.dispose();
       image = null;
     }
@@ -255,6 +341,14 @@ class CanvasTile {
       return;
     }
 
+    if (_chunks.length == 1) {
+      final p = _chunks[0].picture;
+      if (p != null) {
+        canvas.drawPicture(p);
+      }
+      return;
+    }
+
     if (picture != null) {
       canvas.drawPicture(picture!);
     }
@@ -266,8 +360,11 @@ class CanvasTile {
   void invalidatePictures() {
     image?.dispose();
     image = null;
-    picture?.dispose();
+    if (_ownsCompositePicture) {
+      picture?.dispose();
+    }
     picture = null;
+    _ownsCompositePicture = false;
     isDirty = true;
     _needsTextureBake = true;
     for (var i = 0; i < _chunks.length; i++) {
@@ -278,8 +375,11 @@ class CanvasTile {
   void dispose() {
     image?.dispose();
     image = null;
-    picture?.dispose();
+    if (_ownsCompositePicture) {
+      picture?.dispose();
+    }
     picture = null;
+    _ownsCompositePicture = false;
     for (final chunk in _chunks) {
       chunk.dispose();
     }
@@ -385,6 +485,29 @@ class StrokePictureCache {
 
     if (bakesThisFrame > 0) {
       _evictLeastRecentlyUsedTextures();
+    }
+    if (_frame % 60 == 0) {
+      _evictOffscreenTilePictures();
+    }
+  }
+
+  void _evictOffscreenTilePictures() {
+    final activePictureTiles = <CanvasTile>[];
+    for (final column in _tiles.values) {
+      for (final tile in column.values) {
+        if (tile.picture != null) {
+          activePictureTiles.add(tile);
+        }
+      }
+    }
+    const maxActivePictureTiles = 64;
+    if (activePictureTiles.length <= maxActivePictureTiles) return;
+
+    activePictureTiles.sort((a, b) => a.lastUsedFrame.compareTo(b.lastUsedFrame));
+    for (final tile in activePictureTiles.take(activePictureTiles.length - maxActivePictureTiles)) {
+      if (_frame - tile.lastUsedFrame > 60) {
+        tile.invalidatePictures();
+      }
     }
   }
 
@@ -602,10 +725,14 @@ class StrokePictureCache {
 
 /// Gerador de contorno orgânico e caligráfico contínuo e suave (Continuous Ribbon Spline).
 class FreehandOutlineRenderer {
+  static List<Offset> _staticLeftPoints = [];
+  static List<Offset> _staticRightPoints = [];
+
   static Path generateOutlinePath(List<StrokePoint> points, {
     required double baseWidth,
     bool isTapered = true,
     bool isLive = false,
+    bool taperStart = true,
   }) {
     final path = Path();
     final len = points.length;
@@ -641,9 +768,14 @@ class FreehandOutlineRenderer {
       return path;
     }
 
-    // 1. Suaviza a coluna vertebral (spine) localmente para calcular tangentes e normais livres de jitter
-    final leftPoints = List<Offset>.filled(len, Offset.zero);
-    final rightPoints = List<Offset>.filled(len, Offset.zero);
+    // 1. Suaviza a coluna vertebral (spine) localmente usando buffers estáticos reutilizáveis (zero alocações na heap a 240Hz)
+    if (_staticLeftPoints.length < len) {
+      final newCap = math.max(len * 2, 256);
+      _staticLeftPoints = List<Offset>.filled(newCap, Offset.zero);
+      _staticRightPoints = List<Offset>.filled(newCap, Offset.zero);
+    }
+    final leftPoints = _staticLeftPoints;
+    final rightPoints = _staticRightPoints;
     Offset prevNormal = const Offset(0, 1);
     double prevRadius = baseWidth * 0.5;
 
@@ -691,7 +823,7 @@ class FreehandOutlineRenderer {
       // Conicidade suave nas pontas inicial e final (tapering natural)
       double taper = 1.0;
       const int taperCount = 5;
-      if (i < taperCount) {
+      if (taperStart && i < taperCount) {
         taper = (i + 1) / (taperCount + 1);
       } else if (!isLive && i >= len - taperCount) {
         taper = (len - i) / (taperCount + 1);
@@ -717,12 +849,12 @@ class FreehandOutlineRenderer {
       final mid = Offset((p0.dx + p1.dx) * 0.5, (p0.dy + p1.dy) * 0.5);
       path.quadraticBezierTo(p0.dx, p0.dy, mid.dx, mid.dy);
     }
-    path.lineTo(leftPoints.last.dx, leftPoints.last.dy);
+    path.lineTo(leftPoints[len - 1].dx, leftPoints[len - 1].dy);
 
     // Tampa da extremidade final (arredondada)
-    final lastRadius = ((leftPoints.last - rightPoints.last).distance * 0.5).clamp(0.5, baseWidth * 2.0);
+    final lastRadius = ((leftPoints[len - 1] - rightPoints[len - 1]).distance * 0.5).clamp(0.5, baseWidth * 2.0);
     path.arcToPoint(
-      rightPoints.last,
+      rightPoints[len - 1],
       radius: Radius.circular(lastRadius),
       clockwise: true,
     );
@@ -829,21 +961,8 @@ class TransientStrokesPictureCache {
     final canvas = Canvas(recorder);
     final reusablePaint = Paint();
 
-    for (final stroke in strokes) {
-      canvas.save();
-      if (stroke.transform != Offset.zero) {
-        canvas.translate(stroke.transform.dx, stroke.transform.dy);
-      }
-      final color = StrokePictureCache._getStrokeColor(stroke);
-      stroke.cachedPath ??= StrokePictureCache.buildSmoothCatmullRomPath(stroke.points);
-      reusablePaint
-        ..color = color
-        ..strokeWidth = stroke.strokeWidth
-        ..strokeCap = StrokeCap.round
-        ..strokeJoin = StrokeJoin.round
-        ..style = PaintingStyle.stroke;
-      canvas.drawPath(stroke.cachedPath!, reusablePaint);
-      canvas.restore();
+    for (var i = 0; i < strokes.length; i++) {
+      StrokePictureCache.drawSingleStroke(canvas, strokes[i], reusablePaint);
     }
 
     _picture = recorder.endRecording();
@@ -970,13 +1089,7 @@ class ActiveStrokePainter extends CustomPainter {
           ..color = _getStrokeColor(stroke)
           ..style = PaintingStyle.fill;
 
-        stroke.cachedPath ??= FreehandOutlineRenderer.generateOutlinePath(
-          stroke.points,
-          baseWidth: stroke.strokeWidth,
-          isTapered: stroke.toolType == InkToolType.fountain,
-          isLive: true,
-        );
-        canvas.drawPath(stroke.cachedPath!, _reusablePaint);
+        _paintChunkedPressureOutline(canvas, stroke);
         return;
       }
 
@@ -989,8 +1102,7 @@ class ActiveStrokePainter extends CustomPainter {
           ..strokeJoin = StrokeJoin.miter
           ..style = PaintingStyle.stroke;
 
-        stroke.cachedPath ??= StrokePictureCache.buildSmoothCatmullRomPath(stroke.points);
-        canvas.drawPath(stroke.cachedPath!, _reusablePaint);
+        _paintIncrementalSpine(canvas, stroke);
         return;
       }
 
@@ -1002,13 +1114,107 @@ class ActiveStrokePainter extends CustomPainter {
         ..strokeJoin = StrokeJoin.round
         ..style = PaintingStyle.stroke;
 
-      stroke.cachedPath ??= StrokePictureCache.buildSmoothCatmullRomPath(stroke.points);
-      canvas.drawPath(stroke.cachedPath!, _reusablePaint);
+      _paintIncrementalSpine(canvas, stroke);
     } finally {
       if (hasTransform) {
         canvas.restore();
       }
       canvas.restore();
+    }
+  }
+
+  static const int _liveChunkSize = 48;
+  static const int _liveChunkOverlap = 6;
+  static const int _liveTipWindow = 10;
+
+  void _paintChunkedPressureOutline(Canvas canvas, InkStroke stroke) {
+    final pts = stroke.points;
+    final len = pts.length;
+    final isTapered = stroke.toolType == InkToolType.fountain;
+    final isOpaque = stroke.toolType == InkToolType.technical || stroke.toolType == InkToolType.fountain;
+
+    if (!isOpaque || len < _liveChunkSize + _liveTipWindow) {
+      if (stroke.liveFrozenUpTo != 0) stroke.disposeLiveCache();
+      stroke.cachedPath ??= FreehandOutlineRenderer.generateOutlinePath(
+        pts,
+        baseWidth: stroke.strokeWidth,
+        isTapered: isTapered,
+        isLive: true,
+      );
+      canvas.drawPath(stroke.cachedPath!, _reusablePaint);
+      return;
+    }
+
+    if (stroke.liveFrozenUpTo > len) stroke.disposeLiveCache();
+
+    // Congela blocos finalizados (fora da janela de suavização da ponta) uma única vez
+    while (len - stroke.liveFrozenUpTo > _liveChunkSize + _liveTipWindow) {
+      final start = math.max(0, stroke.liveFrozenUpTo - _liveChunkOverlap);
+      final end = stroke.liveFrozenUpTo + _liveChunkSize + 1;
+      stroke.liveFrozenOutlines.add(FreehandOutlineRenderer.generateOutlinePath(
+        pts.sublist(start, end),
+        baseWidth: stroke.strokeWidth,
+        isTapered: isTapered,
+        isLive: true,
+        taperStart: start == 0,
+      ));
+      stroke.liveFrozenUpTo += _liveChunkSize;
+    }
+
+    final frozen = stroke.liveFrozenOutlines;
+    for (int i = 0; i < frozen.length; i++) {
+      canvas.drawPath(frozen[i], _reusablePaint);
+    }
+
+    final tailStart = math.max(0, stroke.liveFrozenUpTo - _liveChunkOverlap);
+    canvas.drawPath(
+      FreehandOutlineRenderer.generateOutlinePath(
+        pts.sublist(tailStart),
+        baseWidth: stroke.strokeWidth,
+        isTapered: isTapered,
+        isLive: true,
+        taperStart: tailStart == 0,
+      ),
+      _reusablePaint,
+    );
+  }
+
+  /// Spine por pontos médios construída de forma append-only: os segmentos anteriores ao
+  /// penúltimo ponto nunca mudam, então cada amostra nova custa 1 quadraticBezierTo.
+  void _paintIncrementalSpine(Canvas canvas, InkStroke stroke) {
+    final pts = stroke.points;
+    final len = pts.length;
+    if (len < 3) {
+      canvas.drawPath(StrokePictureCache.buildSmoothCatmullRomPath(pts), _reusablePaint);
+      return;
+    }
+
+    var spine = stroke.incrementalSpinePath;
+    if (spine == null || stroke.incrementalSpineCount < 2 || stroke.incrementalSpineCount > len) {
+      final p0 = pts[0].point;
+      final p1 = pts[1].point;
+      spine = Path()
+        ..moveTo(p0.dx, p0.dy)
+        ..lineTo((p0.dx + p1.dx) * 0.5, (p0.dy + p1.dy) * 0.5);
+      stroke.incrementalSpinePath = spine;
+      stroke.incrementalSpineCount = 2;
+    }
+
+    // Adiciona apenas os segmentos novos: quad de controle p[i-1] até mid(p[i-1], p[i])
+    for (int i = stroke.incrementalSpineCount; i < len; i++) {
+      final curr = pts[i - 1].point;
+      final next = pts[i].point;
+      spine.quadraticBezierTo(curr.dx, curr.dy, (curr.dx + next.dx) * 0.5, (curr.dy + next.dy) * 0.5);
+    }
+    stroke.incrementalSpineCount = len;
+
+    canvas.drawPath(spine, _reusablePaint);
+
+    // Cauda até a ponta da caneta (apenas tinta opaca, para não escurecer junções translúcidas)
+    if (stroke.toolType == InkToolType.technical) {
+      final a = pts[len - 2].point;
+      final b = pts[len - 1].point;
+      canvas.drawLine(Offset((a.dx + b.dx) * 0.5, (a.dy + b.dy) * 0.5), b, _reusablePaint);
     }
   }
 

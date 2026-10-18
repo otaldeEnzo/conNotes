@@ -32,22 +32,32 @@ class InkInputHandler {
     return (fn(vKey) & 0x8000) != 0;
   }
 
+  static int _lastWin32CheckTimeMs = 0;
+  static bool _cachedShiftState = false;
+  static bool _cachedCtrlState = false;
+
   /// Verifica se Shift está pressionado (compatível com teclado físico e ExpressKeys/Stylus em mesas digitalizadoras)
   static bool isShiftModifierPressed() {
     if (HardwareKeyboard.instance.isShiftPressed) return true;
-    // VK_SHIFT = 0x10, VK_LSHIFT = 0xA0, VK_RSHIFT = 0xA1
-    return _isWin32VirtualKeyPressed(0x10) ||
-        _isWin32VirtualKeyPressed(0xA0) ||
-        _isWin32VirtualKeyPressed(0xA1);
+    final now = DateTime.now().millisecondsSinceEpoch;
+    if (now - _lastWin32CheckTimeMs > 8) {
+      _lastWin32CheckTimeMs = now;
+      _cachedShiftState = _isWin32VirtualKeyPressed(0x10);
+      _cachedCtrlState = _isWin32VirtualKeyPressed(0x11);
+    }
+    return _cachedShiftState;
   }
 
   /// Verifica se Ctrl está pressionado (compatível com teclado físico e ExpressKeys/Stylus em mesas digitalizadoras)
   static bool isCtrlModifierPressed() {
     if (HardwareKeyboard.instance.isControlPressed) return true;
-    // VK_CONTROL = 0x11, VK_LCONTROL = 0xA2, VK_RCONTROL = 0xA3
-    return _isWin32VirtualKeyPressed(0x11) ||
-        _isWin32VirtualKeyPressed(0xA2) ||
-        _isWin32VirtualKeyPressed(0xA3);
+    final now = DateTime.now().millisecondsSinceEpoch;
+    if (now - _lastWin32CheckTimeMs > 8) {
+      _lastWin32CheckTimeMs = now;
+      _cachedShiftState = _isWin32VirtualKeyPressed(0x10);
+      _cachedCtrlState = _isWin32VirtualKeyPressed(0x11);
+    }
+    return _cachedCtrlState;
   }
 
   final ValueNotifier<int> activeStrokeUpdateNotifier;
@@ -80,11 +90,13 @@ class InkInputHandler {
     activeModifierShapeType = null;
     _holdAnchorPoint = null;
     drawAndHoldTimer?.cancel();
+    drawAndHoldTimer = null;
     activeStrokeUpdateNotifier.value++;
   }
 
   Offset? _smoothedCursorPos;
   double _smoothedPressure = 0.6;
+  int _lastMoveTimestampMs = 0;
 
   void startStroke({
     required Offset canvasPoint,
@@ -114,6 +126,7 @@ class InkInputHandler {
     smartShapeStartPoint = effectiveStartPoint;
     _smoothedCursorPos = effectiveStartPoint;
     _smoothedPressure = pressure;
+    _lastMoveTimestampMs = DateTime.now().millisecondsSinceEpoch;
 
     isDrawing = true;
     final isShift = isShiftModifierPressed();
@@ -127,11 +140,13 @@ class InkInputHandler {
         effectiveStartPoint,
         effectiveStartPoint + const Offset(1, 1),
       );
-      final initialPoints = SmartShapeEngine.samplePathPoints(initialPath, pressure: pressure);
 
       activeStroke = InkStroke(
         id: DateTime.now().millisecondsSinceEpoch.toString(),
-        points: initialPoints,
+        points: [
+          StrokePoint(point: effectiveStartPoint, pressure: pressure),
+          StrokePoint(point: effectiveStartPoint + const Offset(1, 1), pressure: pressure),
+        ],
         color: preset.color,
         strokeWidth: preset.strokeWidth,
         toolType: preset.toolType,
@@ -155,60 +170,77 @@ class InkInputHandler {
 
     _holdAnchorPoint = null;
     drawAndHoldTimer?.cancel();
+    drawAndHoldTimer = null;
   }
 
-  void _scheduleDrawAndHold(int durationMs, PenSlotPreset preset, double pressure) {
-    drawAndHoldTimer?.cancel();
-    drawAndHoldTimer = Timer(Duration(milliseconds: durationMs), () {
-      if (isDrawing && activeStroke != null && activeStroke!.points.length >= 14 && !isSmartShapeSnapped) {
-        final recognized = SmartShapeEngine.recognizeDrawnShape(activeStroke!.points);
-        if (recognized != null) {
-          final originalPts = List<StrokePoint>.from(activeStroke!.points);
-          isSmartShapeSnapped = true;
-          snappedShapeType = recognized;
-          smartShapeOriginalPoints = originalPts;
-          smartShapeStartPoint = originalPts.first.point;
-          smartShapeSnapCursorPos = originalPts.last.point;
-
-          if (recognized == ShapeType.arrow || recognized == ShapeType.doubleArrow) {
-            smartShapeInitialEndPoint = SmartShapeEngine.findArrowTipPoint(originalPts);
-          } else {
-            smartShapeInitialEndPoint = originalPts.last.point;
-          }
-
-          double minX = double.infinity, minY = double.infinity;
-          double maxX = double.negativeInfinity, maxY = double.negativeInfinity;
-          for (final p in originalPts) {
-            if (p.point.dx < minX) minX = p.point.dx;
-            if (p.point.dy < minY) minY = p.point.dy;
-            if (p.point.dx > maxX) maxX = p.point.dx;
-            if (p.point.dy > maxY) maxY = p.point.dy;
-          }
-          final drawnBounds = Rect.fromLTRB(minX, minY, maxX, maxY);
-          smartShapeInitialBounds = drawnBounds;
-          smartShapeCenter = drawnBounds.center;
-
-          final shapePath = SmartShapeEngine.generateRecognizedPath(
-            recognized,
-            originalPts,
-            drawnBounds,
-          );
-          final shapePoints = SmartShapeEngine.samplePathPoints(shapePath, pressure: pressure);
-
-          activeStroke = InkStroke(
-            id: activeStroke!.id,
-            points: shapePoints,
-            color: activeStroke!.color,
-            strokeWidth: activeStroke!.strokeWidth,
-            toolType: preset.toolType,
-            enablePressure: preset.enablePressure,
-            isShape: true,
-            cachedPath: shapePath,
-          );
-          activeStrokeUpdateNotifier.value++;
-        }
+  void _ensureDrawAndHoldTimer(int durationMs, PenSlotPreset preset) {
+    if (drawAndHoldTimer != null) return;
+    drawAndHoldTimer = Timer.periodic(const Duration(milliseconds: 100), (timer) {
+      if (!isDrawing || activeStroke == null) {
+        timer.cancel();
+        drawAndHoldTimer = null;
+        return;
+      }
+      final now = DateTime.now().millisecondsSinceEpoch;
+      if (now - _lastMoveTimestampMs >= durationMs) {
+        timer.cancel();
+        drawAndHoldTimer = null;
+        _triggerDrawAndHoldSnap(preset);
       }
     });
+  }
+
+  void _triggerDrawAndHoldSnap(PenSlotPreset preset) {
+    if (isDrawing && activeStroke != null && activeStroke!.points.length >= 14 && !isSmartShapeSnapped) {
+      final recognized = SmartShapeEngine.recognizeDrawnShape(activeStroke!.points);
+      if (recognized != null) {
+        final originalPts = List<StrokePoint>.from(activeStroke!.points);
+        isSmartShapeSnapped = true;
+        snappedShapeType = recognized;
+        smartShapeOriginalPoints = originalPts;
+        smartShapeStartPoint = originalPts.first.point;
+        smartShapeSnapCursorPos = originalPts.last.point;
+
+        if (recognized == ShapeType.arrow || recognized == ShapeType.doubleArrow) {
+          smartShapeInitialEndPoint = SmartShapeEngine.findArrowTipPoint(originalPts);
+        } else {
+          smartShapeInitialEndPoint = originalPts.last.point;
+        }
+
+        double minX = double.infinity, minY = double.infinity;
+        double maxX = double.negativeInfinity, maxY = double.negativeInfinity;
+        for (final p in originalPts) {
+          if (p.point.dx < minX) minX = p.point.dx;
+          if (p.point.dy < minY) minY = p.point.dy;
+          if (p.point.dx > maxX) maxX = p.point.dx;
+          if (p.point.dy > maxY) maxY = p.point.dy;
+        }
+        final drawnBounds = Rect.fromLTRB(minX, minY, maxX, maxY);
+        smartShapeInitialBounds = drawnBounds;
+        smartShapeCenter = drawnBounds.center;
+
+        final shapePath = SmartShapeEngine.generateRecognizedPath(
+          recognized,
+          originalPts,
+          drawnBounds,
+        );
+
+        activeStroke = InkStroke(
+          id: activeStroke!.id,
+          points: [
+            StrokePoint(point: smartShapeStartPoint!, pressure: _smoothedPressure),
+            StrokePoint(point: smartShapeSnapCursorPos!, pressure: _smoothedPressure),
+          ],
+          color: activeStroke!.color,
+          strokeWidth: activeStroke!.strokeWidth,
+          toolType: preset.toolType,
+          enablePressure: preset.enablePressure,
+          isShape: true,
+          cachedPath: shapePath,
+        );
+        activeStrokeUpdateNotifier.value++;
+      }
+    }
   }
 
   void appendPoint({
@@ -227,6 +259,7 @@ class InkInputHandler {
 
     if (isShift || isCtrl || activeModifierShapeType != null) {
       drawAndHoldTimer?.cancel();
+      drawAndHoldTimer = null;
       if (isCtrl) {
         activeModifierShapeType = ShapeType.arrow;
       } else if (isShift) {
@@ -235,11 +268,13 @@ class InkInputHandler {
       final shapeType = activeModifierShapeType!;
       final startPoint = smartShapeStartPoint ?? activeStroke!.points.first.point;
       final shapePath = SmartShapeEngine.generateShapePath(shapeType, startPoint, canvasPoint);
-      final shapePoints = SmartShapeEngine.samplePathPoints(shapePath, pressure: pressure);
 
       activeStroke = InkStroke(
         id: activeStroke!.id,
-        points: shapePoints,
+        points: [
+          StrokePoint(point: startPoint, pressure: pressure),
+          StrokePoint(point: canvasPoint, pressure: pressure),
+        ],
         color: activeStroke!.color,
         strokeWidth: activeStroke!.strokeWidth,
         toolType: preset.toolType,
@@ -285,11 +320,12 @@ class InkInputHandler {
         );
       }
 
-      final shapePoints = SmartShapeEngine.samplePathPoints(shapePath, pressure: pressure);
-
       activeStroke = InkStroke(
         id: activeStroke!.id,
-        points: shapePoints,
+        points: [
+          StrokePoint(point: smartShapeStartPoint!, pressure: pressure),
+          StrokePoint(point: canvasPoint, pressure: pressure),
+        ],
         color: activeStroke!.color,
         strokeWidth: activeStroke!.strokeWidth,
         toolType: preset.toolType,
@@ -346,20 +382,23 @@ class InkInputHandler {
       activeStrokeUpdateNotifier.value++;
 
       if (pts.length >= 12) {
+        final now = DateTime.now().millisecondsSinceEpoch;
         if (_holdAnchorPoint == null) {
           _holdAnchorPoint = effectivePoint;
-          _scheduleDrawAndHold(drawAndHoldDurationMs, preset, _smoothedPressure);
+          _lastMoveTimestampMs = now;
+          _ensureDrawAndHoldTimer(drawAndHoldDurationMs, preset);
         } else {
           final movedDist = (effectivePoint - _holdAnchorPoint!).distance;
           if (movedDist > 5.0) {
             _holdAnchorPoint = effectivePoint;
-            drawAndHoldTimer?.cancel();
-            _scheduleDrawAndHold(drawAndHoldDurationMs, preset, _smoothedPressure);
+            _lastMoveTimestampMs = now;
+            _ensureDrawAndHoldTimer(drawAndHoldDurationMs, preset);
           }
         }
       } else {
         _holdAnchorPoint = null;
         drawAndHoldTimer?.cancel();
+        drawAndHoldTimer = null;
       }
     }
   }
@@ -379,11 +418,13 @@ class InkInputHandler {
       canvasPoint,
       canvasPoint + const Offset(1, 1),
     );
-    final initialPoints = SmartShapeEngine.samplePathPoints(initialPath, pressure: pressure);
 
     activeStroke = InkStroke(
       id: DateTime.now().millisecondsSinceEpoch.toString(),
-      points: initialPoints,
+      points: [
+        StrokePoint(point: canvasPoint, pressure: pressure),
+        StrokePoint(point: canvasPoint + const Offset(1, 1), pressure: pressure),
+      ],
       color: preset.color,
       strokeWidth: preset.strokeWidth,
       toolType: preset.toolType,
@@ -408,11 +449,13 @@ class InkInputHandler {
       shapeDragStartPoint!,
       canvasPoint,
     );
-    final shapePoints = SmartShapeEngine.samplePathPoints(shapePath, pressure: pressure);
 
     activeStroke = InkStroke(
       id: activeStroke!.id,
-      points: shapePoints,
+      points: [
+        StrokePoint(point: shapeDragStartPoint!, pressure: pressure),
+        StrokePoint(point: canvasPoint, pressure: pressure),
+      ],
       color: preset.color,
       strokeWidth: preset.strokeWidth,
       toolType: preset.toolType,
@@ -425,18 +468,25 @@ class InkInputHandler {
 
   InkStroke? finishStroke() {
     drawAndHoldTimer?.cancel();
+    drawAndHoldTimer = null;
     _holdAnchorPoint = null;
     shapeDragStartPoint = null;
     if (!isDrawing || activeStroke == null) return null;
 
     final finished = activeStroke!;
+    finished.disposeLiveCache();
     isDrawing = false;
     activeStroke = null;
     isSmartShapeSnapped = false;
     snappedShapeType = null;
 
-    // Garante que o caminho cachedPath definitivo seja construído com 100% dos pontos finais
-    if (!finished.isShape && finished.points.isNotEmpty) {
+    // Se for uma forma geométrica ou Smart Shape, amostra os pontos definitivos do Path agora
+    if (finished.isShape && finished.cachedPath != null) {
+      final lastPressure = finished.points.isNotEmpty ? finished.points.last.pressure : 0.6;
+      finished.points.clear();
+      finished.points.addAll(SmartShapeEngine.samplePathPoints(finished.cachedPath!, pressure: lastPressure));
+    } else if (!finished.isShape && finished.points.isNotEmpty) {
+      // Garante que o caminho cachedPath definitivo seja construído com 100% dos pontos finais
       if ((finished.toolType == InkToolType.fountain || finished.enablePressure)) {
         finished.cachedPath = FreehandOutlineRenderer.generateOutlinePath(
           finished.points,

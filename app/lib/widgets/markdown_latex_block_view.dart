@@ -97,7 +97,9 @@ class MarkdownLatexBlockViewState extends State<MarkdownLatexBlockView> {
   String? _lastFontFamily;
   double? _lastFontSize;
   List<ParsedContentBlock>? _cachedParsedBlocks;
-  final Map<int, Widget> _cachedBlockWidgets = {};
+  final Map<String, Widget> _cachedBlockWidgetsByKey = {};
+
+  String _blockCacheKey(ParsedContentBlock block) => '${block.type.name}:${block.rawText}';
 
   bool _isCacheValid(bool isLight, Color textPrimary, Color themeAccent, String fontFamily, double fontSize) {
     return _lastParsedContent == widget.card.content &&
@@ -110,17 +112,30 @@ class MarkdownLatexBlockViewState extends State<MarkdownLatexBlockView> {
   }
 
   void _updateCache(bool isLight, Color textPrimary, Color themeAccent, String fontFamily, double fontSize) {
+    final themeChanged = _lastIsLight != isLight ||
+        _lastTextPrimary != textPrimary ||
+        _lastThemeAccent != themeAccent ||
+        _lastFontFamily != fontFamily ||
+        _lastFontSize != fontSize;
+
     _lastParsedContent = widget.card.content;
     _lastIsLight = isLight;
     _lastTextPrimary = textPrimary;
     _lastThemeAccent = themeAccent;
     _lastFontFamily = fontFamily;
     _lastFontSize = fontSize;
+
+    if (themeChanged) {
+      _cachedBlockWidgetsByKey.clear();
+    }
     
     _cachedParsedBlocks = _parseContentIntoBlocks(widget.card.content);
-    _cachedBlockWidgets.clear();
     for (final block in _cachedParsedBlocks!) {
-      _cachedBlockWidgets[block.index] = _buildBlockContent(block, isLight, themeAccent, textPrimary, fontFamily, fontSize);
+      final key = _blockCacheKey(block);
+      _cachedBlockWidgetsByKey.putIfAbsent(
+        key,
+        () => _buildBlockContent(block, isLight, themeAccent, textPrimary, fontFamily, fontSize),
+      );
     }
   }
 
@@ -284,15 +299,28 @@ class MarkdownLatexBlockViewState extends State<MarkdownLatexBlockView> {
     return StemCalloutType.tip;
   }
 
+  String? _lastNotifiedEditingText;
+  int? _lastNotifiedEditingBlockIndex;
+
   void _notifyRequiredEditingHeight() {
     if (_editingBlockIndex != null) {
+      final currentText = _blockController.text;
+      if (_lastNotifiedEditingBlockIndex == _editingBlockIndex && _lastNotifiedEditingText == currentText) {
+        return;
+      }
+      _lastNotifiedEditingBlockIndex = _editingBlockIndex;
+      _lastNotifiedEditingText = currentText;
       final req = widget.card.calculateEditingMinHeight(
         editingBlockIndex: _editingBlockIndex!,
-        activeEditingText: _blockController.text,
+        activeEditingText: currentText,
       );
       widget.onRequiredEditingHeightChanged?.call(req);
     } else {
-      widget.onRequiredEditingHeightChanged?.call(0.0);
+      if (_lastNotifiedEditingBlockIndex != null || _lastNotifiedEditingText != null) {
+        _lastNotifiedEditingBlockIndex = null;
+        _lastNotifiedEditingText = null;
+        widget.onRequiredEditingHeightChanged?.call(0.0);
+      }
     }
   }
 
@@ -352,7 +380,6 @@ class MarkdownLatexBlockViewState extends State<MarkdownLatexBlockView> {
     widget.onContentChanged(updatedContent);
     setState(() {
       _lastParsedContent = null;
-      _cachedBlockWidgets.clear();
     });
     _startEditingBlock(ParsedContentBlock(
       index: newIndex,
@@ -388,7 +415,6 @@ class MarkdownLatexBlockViewState extends State<MarkdownLatexBlockView> {
       _editingBlockIndex = null;
       _showSlashMenu = false;
       _lastParsedContent = null;
-      _cachedBlockWidgets.clear();
     });
     widget.onEditingModeChanged?.call(false);
     widget.onRequiredEditingHeightChanged?.call(0.0);
@@ -638,7 +664,6 @@ class MarkdownLatexBlockViewState extends State<MarkdownLatexBlockView> {
       }
 
       _lastParsedContent = null;
-      _cachedBlockWidgets.clear();
       _syncBlockContent();
       _lastSelection = _blockController.selection;
       _blockFocusNode.requestFocus();
@@ -1312,7 +1337,7 @@ class MarkdownLatexBlockViewState extends State<MarkdownLatexBlockView> {
                   width: 1.0,
                 ),
               ),
-              child: _cachedBlockWidgets[block.index] ?? _buildBlockContent(block, isLight, themeAccent, textPrimary, fontFamily, fontSize),
+              child: _cachedBlockWidgetsByKey[_blockCacheKey(block)] ?? _buildBlockContent(block, isLight, themeAccent, textPrimary, fontFamily, fontSize),
             ),
 
             // Controles de Ação de Bloco no Hover no Padrão Moscaro Glass v2 no Canto Superior Direito

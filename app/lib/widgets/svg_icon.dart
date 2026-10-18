@@ -469,29 +469,44 @@ class SvgIcon extends StatelessWidget {
     this.color = Colors.white,
   });
 
+  static final Map<String, SvgLoader> _loaderCache = {};
+
   @override
   Widget build(BuildContext context) {
     final key = iconKey;
     final normalized = key.replaceAll('-', '_');
     final inlineSvg = _builtinSvgStrings[key] ?? _builtinSvgStrings[normalized];
     if (inlineSvg != null) {
-      return SvgPicture.string(
-        inlineSvg,
+      final loader = _loaderCache.putIfAbsent(
+        'str:$key',
+        () => SvgStringLoader(inlineSvg),
+      );
+      return SvgPicture(
+        loader,
         width: size,
         height: size,
         colorFilter: ColorFilter.mode(color, BlendMode.srcIn),
       );
     }
 
-    return SvgPicture.asset(
-      'assets/icons/$key.svg',
+    final assetLoader = _loaderCache.putIfAbsent(
+      'asset:$key',
+      () => SvgAssetLoader('assets/icons/$key.svg'),
+    );
+
+    return SvgPicture(
+      assetLoader,
       width: size,
       height: size,
       colorFilter: ColorFilter.mode(color, BlendMode.srcIn),
       errorBuilder: (context, error, stackTrace) {
         final fallbackSvg = _builtinSvgStrings['file'] ?? '<svg viewBox="0 0 24 24"></svg>';
-        return SvgPicture.string(
-          fallbackSvg,
+        final fallbackLoader = _loaderCache.putIfAbsent(
+          'str:file_fallback',
+          () => SvgStringLoader(fallbackSvg),
+        );
+        return SvgPicture(
+          fallbackLoader,
           width: size,
           height: size,
           colorFilter: ColorFilter.mode(color, BlendMode.srcIn),

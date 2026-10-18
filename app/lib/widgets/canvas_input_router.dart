@@ -742,17 +742,26 @@ class _CanvasInputRouterState extends State<CanvasInputRouter> {
             if (!isInFloatingPillZone && ctx.selectedCardId != null && note != null) {
               for (final card in note.cards) {
                 if (card.id == ctx.selectedCardId) {
-                  // A pílula flutuante e seus popovers superiores (LaTeX, Mermaid, Callouts, Paletas)
-                  // ficam posicionados acima do card numa faixa ampla para cobrir rotações e popovers
                   final cx = card.x + card.width / 2.0;
-                  final pillRect = Rect.fromLTRB(
-                    cx - math.max(card.width / 2.0 + 550.0, 650.0),
-                    card.y - 850.0,
-                    cx + math.max(card.width / 2.0 + 550.0, 650.0),
-                    card.y + 60.0,
-                  );
-                  if (pillRect.contains(canvasPoint) || pillRect.contains(rawCanvasPoint)) {
-                    isInFloatingPillZone = true;
+                  if (CardFormatFloatingPill.hasActivePopover) {
+                    final pillRect = Rect.fromLTRB(
+                      cx - math.max(card.width / 2.0 + 550.0, 650.0),
+                      card.y - 850.0,
+                      cx + math.max(card.width / 2.0 + 550.0, 650.0),
+                      card.y + 60.0,
+                    );
+                    if (pillRect.contains(canvasPoint) || pillRect.contains(rawCanvasPoint)) {
+                      isInFloatingPillZone = true;
+                    }
+                  } else {
+                    final pillPhysicalRect = Rect.fromCenter(
+                      center: Offset(cx, card.y - 25.0),
+                      width: math.max(card.width, 420.0),
+                      height: 54.0,
+                    );
+                    if (pillPhysicalRect.contains(canvasPoint) || pillPhysicalRect.contains(rawCanvasPoint)) {
+                      isInFloatingPillZone = true;
+                    }
                   }
                   break;
                 }
@@ -874,7 +883,9 @@ class _CanvasInputRouterState extends State<CanvasInputRouter> {
           }
 
           _lastPointerLocalPosition = event.localPosition;
-          ctx.updateMousePos(event.localPosition);
+          if (!_inkHandler.isDrawing) {
+            ctx.updateMousePos(event.localPosition);
+          }
 
           if (_lastMediaClickPos != null && (event.localPosition - _lastMediaClickPos!).distance > 6.0) {
             _lastMediaClickTime = 0;

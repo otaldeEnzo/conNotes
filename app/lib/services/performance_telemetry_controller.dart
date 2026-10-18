@@ -75,6 +75,7 @@ class PerformanceTelemetryController extends ChangeNotifier {
   String currentContextAction = 'Idle / Repouso';
 
   DateTime _lastMetricsUpdate = DateTime.now();
+  DateTime _lastRssCheck = DateTime.fromMillisecondsSinceEpoch(0);
   final List<double> _rollingTotalTimes = [];
 
   void setContextAction(String action) {
@@ -90,6 +91,7 @@ class PerformanceTelemetryController extends ChangeNotifier {
 
     try {
       currentMemoryRssMb = ProcessInfo.currentRss ~/ (1024 * 1024);
+      _lastRssCheck = DateTime.now();
     } catch (_) {}
   }
 
@@ -137,10 +139,13 @@ class PerformanceTelemetryController extends ChangeNotifier {
         }
 
         int mem = currentMemoryRssMb;
-        try {
-          mem = ProcessInfo.currentRss ~/ (1024 * 1024);
-          currentMemoryRssMb = mem;
-        } catch (_) {}
+        if (now.difference(_lastRssCheck).inSeconds >= 2) {
+          try {
+            mem = ProcessInfo.currentRss ~/ (1024 * 1024);
+            currentMemoryRssMb = mem;
+            _lastRssCheck = now;
+          } catch (_) {}
+        }
 
         final jank = JankIncident(
           timestamp: now,
@@ -162,6 +167,11 @@ class PerformanceTelemetryController extends ChangeNotifier {
     // Atualização de métricas agregadas a cada ~120ms (para não onerar a UI)
     final elapsedMs = now.difference(_lastMetricsUpdate).inMilliseconds;
     if (elapsedMs >= 120 && _rollingTotalTimes.isNotEmpty) {
+      if (!hasListeners) {
+        _lastMetricsUpdate = now;
+        return;
+      }
+
       final lastSample = _samples.last;
       currentBuildMs = lastSample.buildMs;
       currentRasterMs = lastSample.rasterMs;

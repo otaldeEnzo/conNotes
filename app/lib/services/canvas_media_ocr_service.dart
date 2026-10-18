@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math' as math;
@@ -138,6 +139,12 @@ class CanvasMediaOcrService {
     return (text.substring(start + 1), text.length);
   }
 
+  static final RegExp _latexStripCommandsRegex = RegExp(r'\\(?:left|right|quad|qquad|text|mathrm|mathbf|mathcal|displaystyle|textstyle)\b');
+  static final RegExp _latexStripPunctuationRegex = RegExp(r'\\(?:,|;|!|\s)');
+  static final RegExp _latexLargeOpRegex = RegExp(r'\\(?:iint|iiint|oint|int|sum|prod|coprod|bigcap|bigcup|lim)');
+  static final RegExp _latexFracRegex = RegExp(r'\\(?:c)?frac');
+  static final RegExp _latexCommandRegex = RegExp(r'\\([a-zA-Z]+)');
+
   /// Estima com fidelidade geométrica a largura visual (em pixels) de uma expressão KaTeX
   static double estimateLatexVisualWidth(String latex) {
     var s = latex.trim();
@@ -147,15 +154,15 @@ class CanvasMediaOcrService {
       s = s.substring(1, s.length - 1).trim();
     }
 
-    s = s.replaceAll(RegExp(r'\\(?:left|right|quad|qquad|text|mathrm|mathbf|mathcal|displaystyle|textstyle)\b'), '');
-    s = s.replaceAll(RegExp(r'\\(?:,|;|!|\s)'), '');
+    s = s.replaceAll(_latexStripCommandsRegex, '');
+    s = s.replaceAll(_latexStripPunctuationRegex, '');
 
     int i = 0;
     double totalW = 0.0;
 
     while (i < s.length) {
       // 1. Operadores grandes (\int, \sum, \prod, etc.)
-      final opMatch = RegExp(r'^\\(?:iint|iiint|oint|int|sum|prod|coprod|bigcap|bigcup|lim)').firstMatch(s.substring(i));
+      final opMatch = _latexLargeOpRegex.matchAsPrefix(s, i);
       if (opMatch != null) {
         final opText = opMatch.group(0)!;
         i += opText.length;
@@ -182,7 +189,7 @@ class CanvasMediaOcrService {
       }
 
       // 2. Frações (\frac{num}{den} ou \cfrac)
-      final fracMatch = RegExp(r'^\\(?:c)?frac').firstMatch(s.substring(i));
+      final fracMatch = _latexFracRegex.matchAsPrefix(s, i);
       if (fracMatch != null) {
         i += fracMatch.group(0)!.length;
         final (numStr, nextIdx1) = _extractBalancedBraces(s, i);
@@ -197,7 +204,7 @@ class CanvasMediaOcrService {
       }
 
       // 3. Raízes (\sqrt[n]{radicand})
-      if (s.substring(i).startsWith(r'\sqrt')) {
+      if (s.startsWith(r'\sqrt', i)) {
         i += 5;
         if (i < s.length && s[i] == '[') {
           final closeBracket = s.indexOf(']', i);
@@ -227,7 +234,7 @@ class CanvasMediaOcrService {
       }
 
       // 5. Comandos de símbolos e funções
-      final cmdMatch = RegExp(r'^\\([a-zA-Z]+)').firstMatch(s.substring(i));
+      final cmdMatch = _latexCommandRegex.matchAsPrefix(s, i);
       if (cmdMatch != null) {
         final cmd = cmdMatch.group(1)!;
         i += cmdMatch.group(0)!.length;
@@ -534,6 +541,16 @@ class CanvasMediaOcrService {
 
       debugPrint('[CanvasMediaOcrService] Iniciando OCR com modelo economico: ${ocrModel.id} (${ocrModel.provider})');
 
+      Timer? throttleTimer;
+      bool hasPendingUpdate = false;
+
+      void notifyUpdate() {
+        if (hasPendingUpdate) {
+          hasPendingUpdate = false;
+          _updateCardStream(note, latexCardId, buffer.toString(), onCardUpdated);
+        }
+      }
+
       AiServiceBridge.instance.streamPrompt(
         userPrompt: userOcrPrompt,
         model: ocrModel,
@@ -543,13 +560,20 @@ class CanvasMediaOcrService {
       ).listen(
         (chunk) {
           buffer.write(chunk);
-          _updateCardStream(note, latexCardId, buffer.toString(), onCardUpdated);
+          hasPendingUpdate = true;
+          if (throttleTimer == null || !throttleTimer!.isActive) {
+            throttleTimer = Timer(const Duration(milliseconds: 40), () {
+              notifyUpdate();
+            });
+          }
         },
         onDone: () {
+          throttleTimer?.cancel();
           final finalSanitized = sanitizeLatexOcrOutput(buffer.toString());
           _finishCardWithLatex(note, latexCardId, finalSanitized, onCardUpdated);
         },
         onError: (err) {
+          throttleTimer?.cancel();
           _finishCardWithError(note, latexCardId, err.toString(), onCardUpdated);
         },
       );

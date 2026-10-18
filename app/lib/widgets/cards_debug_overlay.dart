@@ -406,7 +406,7 @@ class _CardsDebugPainter extends CustomPainter {
       final card = cards[i];
       final isSelected = card.id == selectedCardId;
       final isCardHovered = card.id == activeCardId;
-      final double minH = card.calculateMinHeight();
+      final double minH = card.cachedMinHeight;
       final double cardH = card.isCollapsed ? 36.0 : math.max(card.height, minH);
 
       final cardRect = Rect.fromLTWH(card.x, card.y, card.width, cardH);

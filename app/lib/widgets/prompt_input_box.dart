@@ -507,51 +507,54 @@ class PromptInputBoxState extends State<PromptInputBox> with SingleTickerProvide
               Expanded(
                 child: AnimatedBuilder(
                   animation: _auroraController,
-                  builder: (context, child) {
-                    return CustomPaint(
-                      painter: AuroraBorderPainter(
-                        animationValue: _auroraController.value,
-                        borderRadius: MoscaroTokens.radiusInput,
-                        borderWidth: MoscaroTokens.borderWidthAurora,
+                  child: Row(
+                    children: [
+                      // Botão de Anexo de Imagem (SVG Icon) - À ESQUERDA
+                      IconButton(
+                        tooltip: 'Anexar Imagem',
+                        icon: SvgIcon(assetName: 'image', color: accent, size: 16),
+                        hoverColor: accent.withValues(alpha: 0.15),
+                        onPressed: _pickImage,
                       ),
-                      child: Row(
-                        children: [
-                          // Botão de Anexo de Imagem (SVG Icon) - À ESQUERDA
-                          IconButton(
-                            tooltip: 'Anexar Imagem',
-                            icon: SvgIcon(assetName: 'image', color: accent, size: 16),
-                            hoverColor: accent.withValues(alpha: 0.15),
-                            onPressed: _pickImage,
-                          ),
-                          Expanded(
-                            child: TextField(
-                              controller: _textController,
-                              focusNode: _focusNode,
-                              style: TextStyle(color: textPrimary, fontSize: 13),
-                              decoration: InputDecoration(
-                                hintText: 'Pergunte à IA (use @ para citar notas)...',
-                                hintStyle: TextStyle(
-                                  color: textSecondary.withValues(alpha: 0.65),
-                                  fontSize: 12,
-                                ),
-                                border: InputBorder.none,
-                                contentPadding: const EdgeInsets.symmetric(horizontal: 4, vertical: 10),
-                              ),
-                              onSubmitted: (_) => _handleSend(),
+                      Expanded(
+                        child: TextField(
+                          controller: _textController,
+                          focusNode: _focusNode,
+                          style: TextStyle(color: textPrimary, fontSize: 13),
+                          decoration: InputDecoration(
+                            hintText: 'Pergunte à IA (use @ para citar notas)...',
+                            hintStyle: TextStyle(
+                              color: textSecondary.withValues(alpha: 0.65),
+                              fontSize: 12,
                             ),
+                            border: InputBorder.none,
+                            contentPadding: const EdgeInsets.symmetric(horizontal: 4, vertical: 10),
                           ),
-                          // Botão de Enviar (SVG Icon) - DENTRO À DIREITA
-                          IconButton(
-                            tooltip: 'Enviar (Enter)',
-                            icon: SvgIcon(assetName: 'send', color: accent, size: 16),
-                            hoverColor: accent.withValues(alpha: 0.15),
-                            onPressed: _handleSend,
-                          ),
-                        ],
-                      ).moscaroV2(
-                        borderRadius: MoscaroTokens.radiusInput,
-                        borderWidth: 0,
-                        padding: EdgeInsets.zero,
+                          onSubmitted: (_) => _handleSend(),
+                        ),
+                      ),
+                      // Botão de Enviar (SVG Icon) - DENTRO À DIREITA
+                      IconButton(
+                        tooltip: 'Enviar (Enter)',
+                        icon: SvgIcon(assetName: 'send', color: accent, size: 16),
+                        hoverColor: accent.withValues(alpha: 0.15),
+                        onPressed: _handleSend,
+                      ),
+                    ],
+                  ).moscaroV2(
+                    borderRadius: MoscaroTokens.radiusInput,
+                    borderWidth: 0,
+                    padding: EdgeInsets.zero,
+                  ),
+                  builder: (context, child) {
+                    return RepaintBoundary(
+                      child: CustomPaint(
+                        painter: AuroraBorderPainter(
+                          animationValue: _auroraController.value,
+                          borderRadius: MoscaroTokens.radiusInput,
+                          borderWidth: MoscaroTokens.borderWidthAurora,
+                        ),
+                        child: child,
                       ),
                     );
                   },

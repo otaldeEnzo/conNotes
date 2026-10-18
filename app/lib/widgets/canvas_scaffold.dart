@@ -128,7 +128,9 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
   bool get _isAIOpen => _isAIOpenNotifier.value;
   set _isAIOpen(bool val) => _isAIOpenNotifier.value = val;
   final List<AiMessage> _aiMessages = [];
+  final ValueNotifier<int> _aiChatRevisionNotifier = ValueNotifier<int>(0);
   bool _isAiStreaming = false;
+  StreamSubscription<String>? _aiStreamSubscription;
   AiModelDefinition _activeAiModel = AiModelDefinition.allModels.first;
   AiScopeType _activeAiScope = AiScopeType.activeNote;
   bool _isDebugCardsOverlayVisible = false;
@@ -243,9 +245,17 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
   void updateSelectionState(SelectionState state) {
     _selectionState = state;
     if (!state.isSelectingArea && state.selectedCardIds.length == 1 && state.selectedStrokeIds.isEmpty) {
-      _selectedCardId = state.selectedCardIds.first;
-    } else if (state.isEmpty && _activeTool == 'select') {
-      _selectedCardId = null;
+      if (_selectedCardId != state.selectedCardIds.first) {
+        setState(() {
+          _selectedCardId = state.selectedCardIds.first;
+        });
+      }
+    } else if (state.isEmpty) {
+      if (_selectedCardId != null) {
+        setState(() {
+          _selectedCardId = null;
+        });
+      }
     }
     _selectionUpdateNotifier.value++;
   }
@@ -287,22 +297,31 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
   @override
   void incrementCommittedStrokes() {
     _committedStrokesNotifier.value++;
+    if (_selectionState.selectedCardIds.isNotEmpty) {
+      setState(() {});
+    }
   }
   @override
   void selectCard(String? id) {
     if (_selectedCardId != id) {
       setState(() {
         _selectedCardId = id;
+        if (id == null && _selectionState.selectedCardIds.isNotEmpty) {
+          _selectionState = SelectionState.empty();
+        }
       });
+      _selectedCardIdNotifier.value = id;
+      _canvasUpdateNotifier.value++;
     }
   }
   @override
   void hideUIElementsOnInteraction() {
-    if (_isCardsSubBarVisible || _isGridMenuOpen || _isSettingsOpen) {
-      _isCardsSubBarVisible = false;
-        _isGridMenuOpen = false;
-        _isSettingsOpen = false;
+    if (!_isCardsSubBarVisible && !_isGridMenuOpen && !_isSettingsOpen) {
+      return;
     }
+    _isCardsSubBarVisible = false;
+    _isGridMenuOpen = false;
+    _isSettingsOpen = false;
   }
   // -----------------------------------------
 
@@ -588,6 +607,9 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
   }
 
   void _switchToNote(NoteDocument targetNote) {
+    _aiStreamSubscription?.cancel();
+    _aiStreamSubscription = null;
+    _isAiStreaming = false;
     if (_currentNote != null) {
       _currentNote!.aiChatHistory
         ..clear()
@@ -804,6 +826,7 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
 
   @override
   void dispose() {
+    _aiStreamSubscription?.cancel();
     MoscaroThemeController.instance.removeListener(_handleThemeChanged);
     SettingsService.instance.settingsNotifier.removeListener(_handleThemeChanged);
     _laserEngine.dispose();
@@ -831,6 +854,7 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
       if (event.logicalKey == LogicalKeyboardKey.f2) {
         setState(() {
           _isDebugCardsOverlayVisible = !_isDebugCardsOverlayVisible;
+          CardsTelemetryController.instance.isOverlayActive = _isDebugCardsOverlayVisible;
         });
         return true;
       }
@@ -1687,6 +1711,7 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
                         bool cardAttachmentChanged = false;
                         // Se >= 50% dos pontos do traço estiverem dentro da área de imagem da mídia ou do PDF
                         if (newStroke.points.isNotEmpty && n.cards.isNotEmpty) {
+                          final strokeBounds = newStroke.boundingBox ?? SelectionGeometry.computeStrokeBounds(newStroke);
                           for (final card in n.cards) {
                             if (card.cardType == CardType.media) {
                               final imgRect = Rect.fromLTWH(
@@ -1695,6 +1720,7 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
                                 card.width,
                                 math.max(1.0, card.height - 28.0),
                               );
+                              if (!imgRect.overlaps(strokeBounds)) continue;
                               int pointsInside = 0;
                               for (final p in newStroke.points) {
                                 if (imgRect.contains(p.point)) {
@@ -1720,6 +1746,7 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
                                 card.width,
                                 card.height,
                               );
+                              if (!pdfRect.overlaps(strokeBounds)) continue;
                               int pointsInside = 0;
                               for (final p in newStroke.points) {
                                 if (pdfRect.contains(p.point)) {
@@ -1968,6 +1995,7 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
                               note: n,
                             );
                             setState(() {});
+                            _canvasUpdateNotifier.value++;
                             WorkspaceStorageService.instance.scheduleAutoSave(n);
                           }
                         }
@@ -2496,7 +2524,7 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
                 ),
 
                 // Overlay de Diagnóstico Visual dos Cards (Pressione F2 para ocultar/exibir)
-                if (_currentNote != null)
+                if (_currentNote != null && _isDebugCardsOverlayVisible)
                   Positioned.fill(
                     child: ListenableBuilder(
                       listenable: Listenable.merge([_panNotifier, _zoomNotifier, _mousePosNotifier]),
@@ -2659,48 +2687,51 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
                 },
               ),
 
-              // 7. Painel Lateral Direito da IA
-              AiSidebar(
-                key: _aiSidebarKey,
-                isOpen: _isAIOpen,
-                onClose: () {
-                  _isAIOpen = false;
-                },
-                messages: _aiMessages,
-                isStreaming: _isAiStreaming,
-                activeModel: _activeAiModel,
-                activeScope: _activeAiScope,
-                availableNoteTitles: _notes.map((n) => n.title).toList(),
-                onSelectModel: (m) {
-                  setState(() {
+              // 7. Painel Lateral Direito da IA (Isolado de rebuilds da raiz e ferramentas)
+              ListenableBuilder(
+                listenable: Listenable.merge([_isAIOpenNotifier, _aiChatRevisionNotifier]),
+                builder: (context, _) => AiSidebar(
+                  key: _aiSidebarKey,
+                  isOpen: _isAIOpen,
+                  onClose: () {
+                    _isAIOpen = false;
+                  },
+                  messages: _aiMessages,
+                  isStreaming: _isAiStreaming,
+                  activeModel: _activeAiModel,
+                  activeScope: _activeAiScope,
+                  availableNoteTitles: _notes.map((n) => n.title).toList(),
+                  onSelectModel: (m) {
                     _activeAiModel = m;
-                  });
-                },
-                onSelectScope: (s) {
-                  setState(() {
+                    _aiChatRevisionNotifier.value++;
+                  },
+                  onSelectScope: (s) {
                     _activeAiScope = s;
-                  });
-                },
-                onSubmitPrompt: _handleSubmitAiPrompt,
-                onClearChat: () {
-                  setState(() {
+                    _aiChatRevisionNotifier.value++;
+                  },
+                  onSubmitPrompt: _handleSubmitAiPrompt,
+                  onClearChat: () {
+                    _aiStreamSubscription?.cancel();
+                    _aiStreamSubscription = null;
+                    _isAiStreaming = false;
                     _aiMessages.clear();
                     _currentNote?.aiChatHistory.clear();
-                  });
-                  if (_currentNote != null) {
-                    WorkspaceStorageService.instance.scheduleAutoSave(_currentNote!);
-                  }
-                },
-                onInsertIntoCanvas: (msg) {
-                  _handleInsertAiMessageIntoCanvas(msg);
-                },
-                onOpenSettings: () {
-                  setState(() {
-                    _isSettingsOpen = true;
-                    _activeSettingsCategory = SettingsCategory.ai;
-                  });
-                },
-                onSelectCanvasArea: _startAreaCaptureForAi,
+                    _aiChatRevisionNotifier.value++;
+                    if (_currentNote != null) {
+                      WorkspaceStorageService.instance.scheduleAutoSave(_currentNote!);
+                    }
+                  },
+                  onInsertIntoCanvas: (msg) {
+                    _handleInsertAiMessageIntoCanvas(msg);
+                  },
+                  onOpenSettings: () {
+                    setState(() {
+                      _isSettingsOpen = true;
+                      _activeSettingsCategory = SettingsCategory.ai;
+                    });
+                  },
+                  onSelectCanvasArea: _startAreaCaptureForAi,
+                ),
               ),
 
               // Overlay de Seleção de Área do Canvas para IA
@@ -2740,6 +2771,7 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
                   onToggleDebugCards: () {
                     setState(() {
                       _isDebugCardsOverlayVisible = !_isDebugCardsOverlayVisible;
+                      CardsTelemetryController.instance.isOverlayActive = _isDebugCardsOverlayVisible;
                     });
                   },
                   onOpenDevHub: () {
@@ -2791,28 +2823,10 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
     canvas.scale(scale, scale);
     canvas.translate(-paddedBounds.left, -paddedBounds.top);
 
+    final reusablePaint = Paint();
     for (final stroke in selectedStrokes) {
       if (stroke.points.isEmpty) continue;
-      final strokeColor = (stroke.color.computeLuminance() > 0.5)
-          ? const Color(0xFF111111)
-          : stroke.color;
-      final strokePaint = Paint()
-        ..color = strokeColor
-        ..strokeWidth = math.max(3.2, stroke.strokeWidth * 1.3)
-        ..strokeCap = StrokeCap.round
-        ..strokeJoin = StrokeJoin.round
-        ..style = PaintingStyle.stroke;
-
-      if (stroke.points.length == 1) {
-        canvas.drawCircle(stroke.points.first.point, stroke.strokeWidth / 2, strokePaint..style = PaintingStyle.fill);
-      } else {
-        final path = Path();
-        path.moveTo(stroke.points.first.point.dx, stroke.points.first.point.dy);
-        for (int i = 1; i < stroke.points.length; i++) {
-          path.lineTo(stroke.points[i].point.dx, stroke.points[i].point.dy);
-        }
-        canvas.drawPath(path, strokePaint);
-      }
+      StrokePictureCache.drawSingleStroke(canvas, stroke, reusablePaint);
     }
 
     final picture = recorder.endRecording();
@@ -2861,28 +2875,10 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
     canvas.scale(scale, scale);
     canvas.translate(-paddedBounds.left, -paddedBounds.top);
 
+    final reusablePaint = Paint();
     for (final stroke in note.strokes) {
       if (stroke.points.isEmpty) continue;
-      final strokeColor = (stroke.color.computeLuminance() > 0.5)
-          ? const Color(0xFF111111)
-          : stroke.color;
-      final strokePaint = Paint()
-        ..color = strokeColor
-        ..strokeWidth = math.max(3.0, stroke.strokeWidth * 1.25)
-        ..strokeCap = StrokeCap.round
-        ..strokeJoin = StrokeJoin.round
-        ..style = PaintingStyle.stroke;
-
-      if (stroke.points.length == 1) {
-        canvas.drawCircle(stroke.points.first.point, stroke.strokeWidth / 2, strokePaint..style = PaintingStyle.fill);
-      } else {
-        final path = Path();
-        path.moveTo(stroke.points.first.point.dx, stroke.points.first.point.dy);
-        for (int i = 1; i < stroke.points.length; i++) {
-          path.lineTo(stroke.points[i].point.dx, stroke.points[i].point.dy);
-        }
-        canvas.drawPath(path, strokePaint);
-      }
+      StrokePictureCache.drawSingleStroke(canvas, stroke, reusablePaint);
     }
 
     final picture = recorder.endRecording();
@@ -2916,11 +2912,10 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
       modelName: _activeAiModel.displayName,
     );
 
-    setState(() {
-      _aiMessages.add(userMsg);
-      _aiMessages.add(assistantMsg);
-      _isAiStreaming = true;
-    });
+    _aiMessages.add(userMsg);
+    _aiMessages.add(assistantMsg);
+    _isAiStreaming = true;
+    _aiChatRevisionNotifier.value++;
 
     // Constrói o contexto com base nos elementos selecionados, notas mencionadas (@) e grau de consciência ativo
     String scopeContext = '';
@@ -3034,7 +3029,8 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
     final buffer = StringBuffer();
     int lastUiUpdate = 0;
 
-    AiServiceBridge.instance.streamPrompt(
+    _aiStreamSubscription?.cancel();
+    _aiStreamSubscription = AiServiceBridge.instance.streamPrompt(
       userPrompt: promptText,
       model: _activeAiModel,
       scopeContext: scopeContext,
@@ -3046,28 +3042,27 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
         final now = DateTime.now().millisecondsSinceEpoch;
         if (now - lastUiUpdate > 80) {
           lastUiUpdate = now;
-          setState(() {
-            final index = _aiMessages.indexWhere((m) => m.id == assistantMsgId);
-            if (index != -1) {
-              _aiMessages[index] = _aiMessages[index].copyWith(
-                content: buffer.toString(),
-                isStreaming: true,
-              );
-            }
-          });
-        }
-      },
-      onError: (err) {
-        setState(() {
           final index = _aiMessages.indexWhere((m) => m.id == assistantMsgId);
           if (index != -1) {
             _aiMessages[index] = _aiMessages[index].copyWith(
-              errorMessage: err.toString(),
-              isStreaming: false,
+              content: buffer.toString(),
+              isStreaming: true,
             );
           }
-          _isAiStreaming = false;
-        });
+          _aiChatRevisionNotifier.value++;
+        }
+      },
+      onError: (err) {
+        _aiStreamSubscription = null;
+        final index = _aiMessages.indexWhere((m) => m.id == assistantMsgId);
+        if (index != -1) {
+          _aiMessages[index] = _aiMessages[index].copyWith(
+            errorMessage: err.toString(),
+            isStreaming: false,
+          );
+        }
+        _isAiStreaming = false;
+        _aiChatRevisionNotifier.value++;
         if (_currentNote != null) {
           _currentNote!.aiChatHistory
             ..clear()
@@ -3076,16 +3071,16 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
         }
       },
       onDone: () {
-        setState(() {
-          final index = _aiMessages.indexWhere((m) => m.id == assistantMsgId);
-          if (index != -1) {
-            _aiMessages[index] = _aiMessages[index].copyWith(
-              content: buffer.toString(),
-              isStreaming: false,
-            );
-          }
-          _isAiStreaming = false;
-        });
+        _aiStreamSubscription = null;
+        final index = _aiMessages.indexWhere((m) => m.id == assistantMsgId);
+        if (index != -1) {
+          _aiMessages[index] = _aiMessages[index].copyWith(
+            content: buffer.toString(),
+            isStreaming: false,
+          );
+        }
+        _isAiStreaming = false;
+        _aiChatRevisionNotifier.value++;
         if (_currentNote != null) {
           _currentNote!.aiChatHistory
             ..clear()
@@ -3391,37 +3386,35 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
     final prevPoint = _lastEraseCanvasPoint;
     _lastEraseCanvasPoint = canvasPoint;
 
+    final samplePoints = <Offset>[canvasPoint];
+    Rect sweptBox = Rect.fromCircle(center: canvasPoint, radius: eraserRadius);
+
     if (prevPoint != null) {
       final delta = canvasPoint - prevPoint;
       final dist = delta.distance;
       final stepDist = math.max(2.0, eraserRadius * 0.55);
       if (dist > stepDist) {
+        samplePoints.clear();
         final steps = (dist / stepDist).ceil().clamp(1, 24);
         for (int i = 1; i <= steps; i++) {
           final t = i / steps;
-          _eraseStrokesAtSinglePoint(
-            note,
-            Offset(prevPoint.dx + delta.dx * t, prevPoint.dy + delta.dy * t),
-            eraserRadius,
-            mode: mode,
-          );
+          samplePoints.add(Offset(prevPoint.dx + delta.dx * t, prevPoint.dy + delta.dy * t));
         }
-        return;
+        sweptBox = Rect.fromPoints(prevPoint, canvasPoint).inflate(eraserRadius);
       }
     }
 
-    _eraseStrokesAtSinglePoint(note, canvasPoint, eraserRadius, mode: mode);
+    _eraseStrokesInBatch(note, samplePoints, sweptBox, eraserRadius, mode: mode);
   }
 
-  void _eraseStrokesAtSinglePoint(
+  void _eraseStrokesInBatch(
     NoteDocument note,
-    Offset canvasPoint,
+    List<Offset> samplePoints,
+    Rect sweptBox,
     double eraserRadius, {
     EraserMode? mode,
   }) {
-    final eraserRadiusSq = eraserRadius * eraserRadius;
-
-    final candidateIds = note.spatialIndex.queryPoint(canvasPoint, eraserRadius);
+    final candidateIds = note.spatialIndex.queryRect(sweptBox);
     if (candidateIds.isEmpty) return;
 
     final candidateStrokes = <InkStroke>[];
@@ -3435,12 +3428,21 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
 
     if (candidateStrokes.isEmpty) return;
 
+    final eraserRadiusSq = eraserRadius * eraserRadius;
     final effectiveMode = mode ?? _eraserConfig.mode;
+
     if (effectiveMode == EraserMode.stroke) {
-      // 1. Borracha de Traço Inteiro (Batch Undo + Zero setState desnecessário)
+      // 1. Borracha de Traço Inteiro em Lote
       final toRemove = <InkStroke>[];
       for (final stroke in candidateStrokes) {
-        if (SelectionGeometry.isPointNearStroke(canvasPoint, stroke, eraserRadius)) {
+        bool hit = false;
+        for (final pt in samplePoints) {
+          if (SelectionGeometry.isPointNearStroke(pt, stroke, eraserRadius)) {
+            hit = true;
+            break;
+          }
+        }
+        if (hit) {
           toRemove.add(stroke);
         }
       }
@@ -3465,25 +3467,36 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
         _strokesVersion++;
         _committedStrokesNotifier.value++;
         if (anyCardUpdated) {
-          setState(() {});
+          _canvasUpdateNotifier.value++;
         }
       }
     } else {
-      // 2. Borracha de Precisão / Segmentação
+      // 2. Borracha de Precisão / Segmentação em Lote
       final removedOld = <InkStroke>[];
       final addedNew = <InkStroke>[];
 
       for (final stroke in candidateStrokes) {
-        if (!SelectionGeometry.isPointNearStroke(canvasPoint, stroke, eraserRadius)) {
-          continue;
+        bool nearAny = false;
+        for (final pt in samplePoints) {
+          if (SelectionGeometry.isPointNearStroke(pt, stroke, eraserRadius)) {
+            nearAny = true;
+            break;
+          }
         }
+        if (!nearAny) continue;
 
         final segments = <List<StrokePoint>>[];
         var currentSegment = <StrokePoint>[];
 
         for (final p in stroke.points) {
-          final distSq = (p.point - canvasPoint).distanceSquared;
-          if (distSq >= eraserRadiusSq) {
+          bool pointCut = false;
+          for (final pt in samplePoints) {
+            if ((p.point - pt).distanceSquared < eraserRadiusSq) {
+              pointCut = true;
+              break;
+            }
+          }
+          if (!pointCut) {
             currentSegment.add(p);
           } else {
             if (currentSegment.isNotEmpty) {
@@ -3496,7 +3509,6 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
           segments.add(currentSegment);
         }
 
-        // Se nenhum ponto foi cortado, ignora
         if (segments.length == 1 && segments[0].length == stroke.points.length) {
           continue;
         }
@@ -3526,6 +3538,9 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
           note.addAllStrokes(addedNew);
         }
         final removedIds = removedOld.map((s) => s.id).toSet();
+        for (final s in removedOld) {
+          _pendingErasures[s.id] = s;
+        }
         bool anyCardUpdated = false;
         for (int cIdx = 0; cIdx < note.cards.length; cIdx++) {
           final c = note.cards[cIdx];
@@ -3541,9 +3556,8 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
         _strokesVersion++;
         _committedStrokesNotifier.value++;
         if (anyCardUpdated) {
-          setState(() {});
+          _canvasUpdateNotifier.value++;
         }
-        WorkspaceStorageService.instance.scheduleAutoSave(note);
       }
     }
   }

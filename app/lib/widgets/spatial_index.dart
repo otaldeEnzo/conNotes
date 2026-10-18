@@ -15,6 +15,7 @@ class SpatialIndex {
 
   /// Insere um traço no índice com base em sua bounding box.
   void insert(String strokeId, Rect bounds) {
+    if (!bounds.isFinite) return;
     final startX = (bounds.left / cellSize).floor();
     final startY = (bounds.top / cellSize).floor();
     final endX = (bounds.right / cellSize).floor();
@@ -29,14 +30,26 @@ class SpatialIndex {
 
   /// Remove um traço do índice usando sua antiga bounding box para localizar as células.
   void remove(String strokeId, Rect bounds) {
+    if (!bounds.isFinite) return;
     final startX = (bounds.left / cellSize).floor();
     final startY = (bounds.top / cellSize).floor();
     final endX = (bounds.right / cellSize).floor();
     final endY = (bounds.bottom / cellSize).floor();
 
     for (int x = startX; x <= endX; x++) {
+      final col = _grid[x];
+      if (col == null) continue;
       for (int y = startY; y <= endY; y++) {
-        _grid[x]?[y]?.remove(strokeId);
+        final cell = col[y];
+        if (cell != null) {
+          cell.remove(strokeId);
+          if (cell.isEmpty) {
+            col.remove(y);
+          }
+        }
+      }
+      if (col.isEmpty) {
+        _grid.remove(x);
       }
     }
   }
@@ -49,6 +62,7 @@ class SpatialIndex {
 
   /// Retorna os IDs dos traços cujas bounding boxes podem sobrepor o viewport.
   Set<String> queryRect(Rect viewport) {
+    if (!viewport.isFinite) return const <String>{};
     final result = <String>{};
     
     final startX = (viewport.left / cellSize).floor();
@@ -57,9 +71,11 @@ class SpatialIndex {
     final endY = (viewport.bottom / cellSize).floor();
 
     for (int x = startX; x <= endX; x++) {
+      final col = _grid[x];
+      if (col == null) continue;
       for (int y = startY; y <= endY; y++) {
-        final cell = _grid[x]?[y];
-        if (cell != null) {
+        final cell = col[y];
+        if (cell != null && cell.isNotEmpty) {
           result.addAll(cell);
         }
       }
@@ -69,6 +85,7 @@ class SpatialIndex {
 
   /// Retorna os IDs dos traços num raio em volta de um ponto (ex: Eraser).
   Set<String> queryPoint(Offset point, double radius) {
+    if (!point.dx.isFinite || !point.dy.isFinite || !radius.isFinite) return const <String>{};
     final rect = Rect.fromCircle(center: point, radius: radius);
     return queryRect(rect);
   }

@@ -39,6 +39,7 @@ class LaserPointerEngine {
   }
 
   void updateHoverPosition(Offset? canvasPoint) {
+    if (_currentPosition == canvasPoint) return;
     _currentPosition = canvasPoint;
     repaintNotifier.value++;
   }
@@ -106,9 +107,15 @@ class LaserPointerEngine {
 /// Painter ultra-otimizado (Batched Path Chunks na GPU - Zero CPU/GPU Overhead)
 class LaserPointerPainter extends CustomPainter {
   final LaserPointerEngine engine;
-  final Offset panOffset;
-  final double zoomScale;
+  final ValueNotifier<Offset>? panNotifier;
+  final ValueNotifier<double>? zoomNotifier;
+  final Offset? panOffset;
+  final double? zoomScale;
   final Color laserColor;
+
+  // Pre-allocated Path buckets (Zero per-frame allocations)
+  final List<Path> _bucketPaths = List.generate(4, (_) => Path());
+  static const List<double> _bucketAlphas = [1.0, 0.65, 0.35, 0.12];
 
   // Pool de Paint reutilizáveis com StrokeJoin suave (Zero Alocações por frame)
   final Paint _outerGlowPaint = Paint()
@@ -135,56 +142,81 @@ class LaserPointerPainter extends CustomPainter {
 
   LaserPointerPainter({
     required this.engine,
-    required this.panOffset,
-    required this.zoomScale,
+    this.panNotifier,
+    this.zoomNotifier,
+    this.panOffset,
+    this.zoomScale,
     this.laserColor = const Color(0xFFFF0055), // Rosa/Vermelho Neon Incandescente
-  }) : super(repaint: engine.repaintNotifier);
+    Listenable? repaint,
+  }) : super(repaint: repaint ?? Listenable.merge([
+         engine.repaintNotifier,
+         if (panNotifier != null) panNotifier,
+         if (zoomNotifier != null) zoomNotifier,
+       ]));
 
   @override
   void paint(Canvas canvas, Size size) {
     final now = DateTime.now().millisecondsSinceEpoch;
     final trail = engine.trail;
 
+    final currentPan = panNotifier?.value ?? panOffset ?? Offset.zero;
+    final currentZoom = zoomNotifier?.value ?? zoomScale ?? 1.0;
+
     canvas.save();
-    canvas.translate(panOffset.dx, panOffset.dy);
-    canvas.scale(zoomScale);
+    canvas.translate(currentPan.dx, currentPan.dy);
+    canvas.scale(currentZoom);
 
     // 1. Agrupa os pontos do rastro em 4 baldes de tempo (Batched Paths)
     // Isso reduz de centenas de drawLine para apenas 4 chamadas GPU nativas contínuas!
     if (trail.length >= 2) {
-      final double invZoom = 1.0 / zoomScale;
+      final double invZoom = 1.0 / currentZoom;
       final double outerW = 12.0 * invZoom;
       final double midW = 6.0 * invZoom;
       final double neonW = 3.2 * invZoom;
       final double coreW = 1.5 * invZoom;
 
       const int numBuckets = 4;
-      final bucketPaths = List.generate(numBuckets, (_) => Path());
-      final bucketAlphas = [1.0, 0.65, 0.35, 0.12];
+      for (int b = 0; b < numBuckets; b++) {
+        _bucketPaths[b].reset();
+      }
 
-      final bucketStarted = List.filled(numBuckets, false);
+      int bucketStartedMask = 0;
+      int? lastBucketIndex;
 
       for (int i = 0; i < trail.length - 1; i++) {
         final p0 = trail[i];
         final p1 = trail[i + 1];
 
-        if (p1.isSegmentStart) continue;
+        if (p1.isSegmentStart) {
+          lastBucketIndex = null;
+          continue;
+        }
 
         final age = now - p1.timestampMs;
         int bucketIndex = (age / (LaserPointerEngine.maxLifetimeMs / numBuckets)).floor();
         bucketIndex = bucketIndex.clamp(0, numBuckets - 1);
 
-        final targetPath = bucketPaths[bucketIndex];
+        final targetPath = _bucketPaths[bucketIndex];
         final midX = (p0.point.dx + p1.point.dx) / 2.0;
         final midY = (p0.point.dy + p1.point.dy) / 2.0;
 
-        if (!bucketStarted[bucketIndex] || trail[i].isSegmentStart) {
+        final isStarted = (bucketStartedMask & (1 << bucketIndex)) != 0;
+
+        if (lastBucketIndex != null && lastBucketIndex != bucketIndex) {
+          // Conexao continua entre baldes adjacentes para eliminar lacunas visuais
+          _bucketPaths[lastBucketIndex].lineTo(p0.point.dx, p0.point.dy);
           targetPath.moveTo(p0.point.dx, p0.point.dy);
           targetPath.lineTo(midX, midY);
-          bucketStarted[bucketIndex] = true;
+          bucketStartedMask |= (1 << bucketIndex);
+        } else if (!isStarted || p0.isSegmentStart) {
+          targetPath.moveTo(p0.point.dx, p0.point.dy);
+          targetPath.lineTo(midX, midY);
+          bucketStartedMask |= (1 << bucketIndex);
         } else {
           targetPath.quadraticBezierTo(p0.point.dx, p0.point.dy, midX, midY);
         }
+
+        lastBucketIndex = bucketIndex;
 
         if (i == trail.length - 2) {
           targetPath.lineTo(p1.point.dx, p1.point.dy);
@@ -193,8 +225,8 @@ class LaserPointerPainter extends CustomPainter {
 
       // Desenha cada balde de tempo em lote na GPU
       for (int b = 0; b < numBuckets; b++) {
-        final path = bucketPaths[b];
-        final alpha = bucketAlphas[b];
+        final path = _bucketPaths[b];
+        final alpha = _bucketAlphas[b];
 
         // Camada 1: Glow Difuso
         _outerGlowPaint
@@ -225,7 +257,7 @@ class LaserPointerPainter extends CustomPainter {
     // 2. Renderiza a cabeça luminosa do laser
     final currentPos = engine.currentPosition;
     if (currentPos != null) {
-      final double baseRadius = (engine.isPointing ? 5.5 : 4.0) / zoomScale;
+      final double baseRadius = (engine.isPointing ? 5.5 : 4.0) / currentZoom;
 
       // Halo externo
       _headHaloOuterPaint.color = laserColor.withValues(alpha: engine.isPointing ? 0.18 : 0.10);
@@ -249,6 +281,11 @@ class LaserPointerPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant LaserPointerPainter oldDelegate) {
-    return true;
+    return oldDelegate.engine != engine ||
+        oldDelegate.panNotifier != panNotifier ||
+        oldDelegate.zoomNotifier != zoomNotifier ||
+        oldDelegate.panOffset != panOffset ||
+        oldDelegate.zoomScale != zoomScale ||
+        oldDelegate.laserColor != laserColor;
   }
 }

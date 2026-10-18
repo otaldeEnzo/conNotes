@@ -59,8 +59,8 @@ class AiSidebarState extends State<AiSidebar> {
   final GlobalKey _latestResponseKey = GlobalKey();
   bool _isModelMenuOpen = false;
   bool _isScopeMenuOpen = false;
-  bool _showScrollToBottom = false;
-  double? _customWidth;
+  final ValueNotifier<bool> _showScrollToBottomNotifier = ValueNotifier<bool>(false);
+  late final ValueNotifier<double> _widthNotifier;
   double? _customFontSize;
   bool _isResizing = false;
   double _dragStartGlobalX = 0.0;
@@ -95,7 +95,7 @@ class AiSidebarState extends State<AiSidebar> {
     super.initState();
     _scrollController.addListener(_checkScrollPosition);
     final settings = SettingsService.instance.settings;
-    _customWidth = settings.aiSidebarWidth;
+    _widthNotifier = ValueNotifier<double>(settings.aiSidebarWidth);
     _customFontSize = settings.aiSidebarFontSize;
     if (widget.isOpen) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -113,28 +113,28 @@ class AiSidebarState extends State<AiSidebar> {
   void dispose() {
     _scrollController.removeListener(_checkScrollPosition);
     _scrollController.dispose();
+    _showScrollToBottomNotifier.dispose();
+    _widthNotifier.dispose();
     super.dispose();
   }
 
   void _checkScrollPosition() {
     if (!_scrollController.hasClients || widget.messages.isEmpty) {
-      if (_showScrollToBottom) {
-        setState(() => _showScrollToBottom = false);
+      if (_showScrollToBottomNotifier.value) {
+        _showScrollToBottomNotifier.value = false;
       }
       return;
     }
     final position = _scrollController.position;
     if (position.maxScrollExtent <= 20) {
-      if (_showScrollToBottom) {
-        setState(() => _showScrollToBottom = false);
+      if (_showScrollToBottomNotifier.value) {
+        _showScrollToBottomNotifier.value = false;
       }
       return;
     }
     final isNotAtBottom = _scrollController.offset < position.maxScrollExtent - 60;
-    if (isNotAtBottom != _showScrollToBottom) {
-      setState(() {
-        _showScrollToBottom = isNotAtBottom;
-      });
+    if (isNotAtBottom != _showScrollToBottomNotifier.value) {
+      _showScrollToBottomNotifier.value = isNotAtBottom;
     }
   }
 
@@ -143,7 +143,9 @@ class AiSidebarState extends State<AiSidebar> {
     super.didUpdateWidget(oldWidget);
     final settings = SettingsService.instance.settings;
     if (!_isResizing) {
-      _customWidth = settings.aiSidebarWidth;
+      if (_widthNotifier.value != settings.aiSidebarWidth) {
+        _widthNotifier.value = settings.aiSidebarWidth;
+      }
     }
     _customFontSize = settings.aiSidebarFontSize;
     if (!widget.isOpen && oldWidget.isOpen) {
@@ -196,35 +198,36 @@ class AiSidebarState extends State<AiSidebar> {
 
   @override
   Widget build(BuildContext context) {
-    final settings = SettingsService.instance.settings;
-    final currentWidth = _customWidth ?? settings.aiSidebarWidth;
-
-    return AnimatedPositioned(
-      duration: _isResizing ? Duration.zero : const Duration(milliseconds: 260),
-      curve: Curves.easeInOutCubic,
-      right: widget.isOpen ? 24 : -(currentWidth + 60),
-      top: 48,
-      bottom: 24,
-      child: IgnorePointer(
-        ignoring: !widget.isOpen,
-        child: RepaintBoundary(
-          child: ListenableBuilder(
-            listenable: Listenable.merge([
-              MoscaroThemeController.instance,
-              SettingsService.instance,
-            ]),
-            builder: (context, _) {
-              return _buildSidebarContainer();
-            },
+    return ValueListenableBuilder<double>(
+      valueListenable: _widthNotifier,
+      builder: (context, currentWidth, _) {
+        return AnimatedPositioned(
+          duration: _isResizing ? Duration.zero : const Duration(milliseconds: 260),
+          curve: Curves.easeInOutCubic,
+          right: widget.isOpen ? 24 : -(currentWidth + 60),
+          top: 48,
+          bottom: 24,
+          child: IgnorePointer(
+            ignoring: !widget.isOpen,
+            child: RepaintBoundary(
+              child: ListenableBuilder(
+                listenable: Listenable.merge([
+                  MoscaroThemeController.instance,
+                  SettingsService.instance,
+                ]),
+                builder: (context, _) {
+                  return _buildSidebarContainer(currentWidth);
+                },
+              ),
+            ),
           ),
-        ),
-      ),
+        );
+      },
     );
   }
 
-  Widget _buildSidebarContainer() {
+  Widget _buildSidebarContainer(double currentWidth) {
     final settings = SettingsService.instance.settings;
-    final currentWidth = _customWidth ?? settings.aiSidebarWidth;
     final currentFontSize = _customFontSize ?? settings.aiSidebarFontSize;
     final availableModels = AiServiceBridge.instance.getAvailableModels(settings);
     final theme = MoscaroThemeController.instance.currentTheme;
@@ -296,7 +299,7 @@ class AiSidebarState extends State<AiSidebar> {
                               ),
                               onPressed: () {
                                 final targetWidth = isExpanded ? 480.0 : 700.0;
-                                setState(() => _customWidth = targetWidth);
+                                _widthNotifier.value = targetWidth;
                                 SettingsService.instance.updateSettings(settings.copyWith(aiSidebarWidth: targetWidth));
                               },
                             ),
@@ -368,19 +371,23 @@ class AiSidebarState extends State<AiSidebar> {
                               child: SelectionArea(
                                 child: ListView.builder(
                                   controller: _scrollController,
+                                  addAutomaticKeepAlives: false,
+                                  cacheExtent: 400.0,
                                   addRepaintBoundaries: true,
                                   padding: const EdgeInsets.only(top: 8, bottom: 24),
                                   itemCount: widget.messages.length,
                                   itemBuilder: (context, index) {
                                     final msg = widget.messages[index];
                                     final isLatest = index == widget.messages.length - 1;
-                                    return KeyedSubtree(
-                                      key: isLatest ? _latestResponseKey : ValueKey(msg.id),
-                                      child: AiMessageBubbleView(
-                                        message: msg,
-                                        fontSize: currentFontSize,
-                                        onInsertIntoCanvas: widget.onInsertIntoCanvas,
-                                        onFollowUpPrompt: (prompt) => widget.onSubmitPrompt(prompt, const []),
+                                    return RepaintBoundary(
+                                      child: KeyedSubtree(
+                                        key: isLatest ? _latestResponseKey : ValueKey(msg.id),
+                                        child: AiMessageBubbleView(
+                                          message: msg,
+                                          fontSize: currentFontSize,
+                                          onInsertIntoCanvas: widget.onInsertIntoCanvas,
+                                          onFollowUpPrompt: (prompt) => widget.onSubmitPrompt(prompt, const []),
+                                        ),
                                       ),
                                     );
                                   },
@@ -392,24 +399,29 @@ class AiSidebarState extends State<AiSidebar> {
                     // Botao Flutuante Moscaro v2 Scroll-to-Bottom
                     Positioned(
                       bottom: 8,
-                      child: IgnorePointer(
-                        ignoring: !_showScrollToBottom,
-                        child: AnimatedOpacity(
-                          opacity: _showScrollToBottom ? 1.0 : 0.0,
-                          duration: const Duration(milliseconds: 200),
-                          curve: Curves.easeInOut,
-                          child: AnimatedScale(
-                            scale: _showScrollToBottom ? 1.0 : 0.6,
-                            duration: const Duration(milliseconds: 220),
-                            curve: Curves.easeOutBack,
-                            child: SelectionContainer.disabled(
-                              child: _MoscaroScrollToBottomButton(
-                                accent: accent,
-                                onTap: _scrollToNewResponse,
+                      child: ValueListenableBuilder<bool>(
+                        valueListenable: _showScrollToBottomNotifier,
+                        builder: (context, showScroll, _) {
+                          return IgnorePointer(
+                            ignoring: !showScroll,
+                            child: AnimatedOpacity(
+                              opacity: showScroll ? 1.0 : 0.0,
+                              duration: const Duration(milliseconds: 200),
+                              curve: Curves.easeInOut,
+                              child: AnimatedScale(
+                                scale: showScroll ? 1.0 : 0.6,
+                                duration: const Duration(milliseconds: 220),
+                                curve: Curves.easeOutBack,
+                                child: SelectionContainer.disabled(
+                                  child: _MoscaroScrollToBottomButton(
+                                    accent: accent,
+                                    onTap: _scrollToNewResponse,
+                                  ),
+                                ),
                               ),
                             ),
-                          ),
-                        ),
+                          );
+                        },
                       ),
                     ),
                   ],
@@ -421,6 +433,7 @@ class AiSidebarState extends State<AiSidebar> {
               // 4. Caixa de Entrada de Prompt com Anexos e Menções @notas
               PromptInputBox(
                 key: promptInputKey,
+                isActive: widget.isOpen,
                 onSelectCanvasArea: widget.onSelectCanvasArea,
                 availableNoteTitles: widget.availableNoteTitles,
                 onSubmit: (prompt, attachedImages) {
@@ -512,20 +525,16 @@ class AiSidebarState extends State<AiSidebar> {
             if (now - _lastResizeTime < 16) return;
             final double deltaX = _dragStartGlobalX - details.globalPosition.dx;
             final double newW = (_dragStartWidth + deltaX).clamp(380.0, 840.0);
-            if ((newW - (_customWidth ?? _dragStartWidth)).abs() >= 1.5) {
+            if ((newW - _widthNotifier.value).abs() >= 1.5) {
               _lastResizeTime = now;
-              setState(() {
-                _customWidth = newW;
-              });
+              _widthNotifier.value = newW;
             }
           },
           onHorizontalDragEnd: (_) {
             setState(() => _isResizing = false);
-            if (_customWidth != null) {
-              SettingsService.instance.updateSettings(
-                SettingsService.instance.settings.copyWith(aiSidebarWidth: _customWidth),
-              );
-            }
+            SettingsService.instance.updateSettings(
+              SettingsService.instance.settings.copyWith(aiSidebarWidth: _widthNotifier.value),
+            );
           },
           onHorizontalDragCancel: () {
             setState(() => _isResizing = false);

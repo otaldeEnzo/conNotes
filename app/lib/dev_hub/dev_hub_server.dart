@@ -101,10 +101,17 @@ class DevHubServer {
           }
           WebSocketTransformer.upgrade(request).then((WebSocket socket) {
             _clients.add(socket);
+            _updateTelemetryTimer();
             socket.listen(
               (data) => _handleClientMessage(data),
-              onDone: () => _clients.remove(socket),
-              onError: (_) => _clients.remove(socket),
+              onDone: () {
+                _clients.remove(socket);
+                _updateTelemetryTimer();
+              },
+              onError: (_) {
+                _clients.remove(socket);
+                _updateTelemetryTimer();
+              },
             );
           });
         } else if (request.uri.path == '/export-report') {
@@ -117,12 +124,23 @@ class DevHubServer {
       // Hook no Scheduler do Flutter para calcular FPS e Frame Time com precisão
       SchedulerBinding.instance.addTimingsCallback(_onFrameTimings);
 
-      // Timer de telemetria (30 atualizações por segundo)
-      _telemetryTimer = Timer.periodic(const Duration(milliseconds: 33), (_) {
-        _broadcastTelemetry();
-      });
+      // Inicia timer de telemetria dinamicamente apenas sob demanda
+      _updateTelemetryTimer();
     } catch (e) {
       // Ignorar se a porta já estiver em uso
+    }
+  }
+
+  void _updateTelemetryTimer() {
+    if (_clients.isNotEmpty) {
+      if (_telemetryTimer == null || !_telemetryTimer!.isActive) {
+        _telemetryTimer = Timer.periodic(const Duration(milliseconds: 33), (_) {
+          _broadcastTelemetry();
+        });
+      }
+    } else {
+      _telemetryTimer?.cancel();
+      _telemetryTimer = null;
     }
   }
 
@@ -143,6 +161,7 @@ class DevHubServer {
   DateTime _lastFpsCalculation = DateTime.now();
 
   void _onFrameTimings(List<FrameTiming> timings) {
+    if (_clients.isEmpty) return;
     if (timings.isEmpty) return;
     
     for (final t in timings) {

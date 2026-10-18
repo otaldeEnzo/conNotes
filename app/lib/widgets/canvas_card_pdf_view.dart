@@ -147,6 +147,11 @@ class _CanvasCardPdfViewState extends State<CanvasCardPdfView> {
   int? _pendingSyncPage;
   late final PdfSearchEngine _searchEngine;
   late final bool _isLocalSearchEngine;
+  List<int>? _cachedActivePages;
+  List<double>? _cachedPageTopOffsets;
+  Map<int, double>? _cachedPageTopOffsetMap;
+  int _lastCameraCheckMs = 0;
+  Timer? _cameraThrottleTimer;
 
   void _onSearchResultsChanged() {
     if (mounted) setState(() {});
@@ -173,6 +178,9 @@ class _CanvasCardPdfViewState extends State<CanvasCardPdfView> {
     super.didUpdateWidget(oldWidget);
 
     if (widget.card.pdfPath != _loadedPdfPath) {
+      if (_loadedPdfPath != null) {
+        PdfDocumentService.instance.releaseActiveDocument(_loadedPdfPath!);
+      }
       _searchEngine.clearSearch();
       _loadPdfDocument();
     }
@@ -184,6 +192,16 @@ class _CanvasCardPdfViewState extends State<CanvasCardPdfView> {
     if (oldWidget.card.pdfDisplayMode != widget.card.pdfDisplayMode) {
       _activeTextSelection = null;
       _pageSyncDebounceTimer?.cancel();
+    }
+
+    if (oldWidget.card.pageOrder != widget.card.pageOrder ||
+        oldWidget.card.excludedPageIndices != widget.card.excludedPageIndices ||
+        oldWidget.card.totalPdfPages != widget.card.totalPdfPages ||
+        oldWidget.card.pdfPageGap != widget.card.pdfPageGap ||
+        oldWidget.card.width != widget.card.width ||
+        oldWidget.card.pageRotations != widget.card.pageRotations ||
+        oldWidget.card.pdfDisplayMode != widget.card.pdfDisplayMode) {
+      _invalidateActivePagesCache();
     }
 
     if (oldWidget.panNotifier != widget.panNotifier) {
@@ -199,6 +217,10 @@ class _CanvasCardPdfViewState extends State<CanvasCardPdfView> {
 
   @override
   void dispose() {
+    if (_loadedPdfPath != null) {
+      PdfDocumentService.instance.releaseActiveDocument(_loadedPdfPath!);
+    }
+    _cameraThrottleTimer?.cancel();
     PdfProvenanceHighlightController.instance.removeListener(_onProvenanceHighlightChanged);
     _pageSyncDebounceTimer?.cancel();
     if (!_searchEngine.isDisposed) {
@@ -266,10 +288,12 @@ class _CanvasCardPdfViewState extends State<CanvasCardPdfView> {
 
     try {
       final doc = await PdfDocumentService.instance.loadDocument(path);
+      PdfDocumentService.instance.retainActiveDocument(path);
       if (!mounted) return;
       setState(() {
         _pdfDocument = doc;
         _loadedPdfPath = path;
+        _invalidateActivePagesCache();
       });
 
       final firstPage = doc.pages.isNotEmpty ? doc.pages.first : null;
@@ -293,6 +317,7 @@ class _CanvasCardPdfViewState extends State<CanvasCardPdfView> {
         setState(() {
           _pdfDocument = null;
           _loadedPdfPath = null;
+          _invalidateActivePagesCache();
         });
       }
     }
@@ -301,6 +326,18 @@ class _CanvasCardPdfViewState extends State<CanvasCardPdfView> {
   void _onCameraChanged() {
     if (!mounted) return;
     if (widget.card.pdfDisplayMode == PdfDisplayMode.singlePage) return;
+    final now = DateTime.now().millisecondsSinceEpoch;
+    if (now - _lastCameraCheckMs < 50) {
+      _cameraThrottleTimer?.cancel();
+      _cameraThrottleTimer = Timer(const Duration(milliseconds: 50), () {
+        if (mounted) {
+          _lastCameraCheckMs = DateTime.now().millisecondsSinceEpoch;
+          _recomputeActivePageFromCamera();
+        }
+      });
+      return;
+    }
+    _lastCameraCheckMs = now;
     _recomputeActivePageFromCamera();
   }
 
@@ -308,8 +345,10 @@ class _CanvasCardPdfViewState extends State<CanvasCardPdfView> {
     final pan = widget.panNotifier?.value ?? Offset.zero;
     final zoom = (widget.zoomNotifier?.value ?? widget.zoomScale).clamp(0.05, 10.0);
 
-    final mediaQuery = MediaQuery.maybeSizeOf(context);
-    final viewportHeight = mediaQuery?.height ?? 900.0;
+    final view = View.maybeOf(context);
+    final viewportHeight = view != null && view.devicePixelRatio > 0
+        ? view.physicalSize.height / view.devicePixelRatio
+        : (MediaQuery.maybeSizeOf(context)?.height ?? 900.0);
 
     final canvasCenterY = (viewportHeight / 2.0 - pan.dy) / zoom;
     final cardLocalY = canvasCenterY - widget.card.y;
@@ -318,34 +357,37 @@ class _CanvasCardPdfViewState extends State<CanvasCardPdfView> {
     if (activePages.isEmpty) return;
 
     final isGrid = widget.card.pdfDisplayMode == PdfDisplayMode.grid;
-    int? candidatePage;
-    double minDistance = double.infinity;
-    double currentTop = 0.0;
     final gap = widget.card.pdfPageGap;
+    int? candidatePage;
 
-    for (int idx = 0; idx < activePages.length; idx++) {
-      final pageNum = activePages[idx];
-      final pageH = _getPageHeight(pageNum);
-      final pageBottom = currentTop + pageH;
-      final pageCenter = currentTop + (pageH / 2.0);
+    if (_cachedPageTopOffsets != null && _cachedPageTopOffsets!.length == activePages.length) {
+      int low = 0;
+      int high = activePages.length - 1;
+      int bestIdx = 0;
+      final itemWidth = isGrid ? (widget.card.width - gap) / 2.0 : widget.card.width;
 
-      if (cardLocalY >= (currentTop - gap / 2.0) && cardLocalY <= (pageBottom + gap / 2.0)) {
-        candidatePage = pageNum;
-        break;
+      while (low <= high) {
+        final mid = (low + high) >> 1;
+        final top = _cachedPageTopOffsets![mid];
+        final pageH = _getPageHeight(activePages[mid]) * (itemWidth / widget.card.width);
+        final bottom = top + pageH;
+
+        if (cardLocalY < top - (gap / 2.0)) {
+          high = mid - 1;
+        } else if (cardLocalY > bottom + (gap / 2.0)) {
+          bestIdx = mid;
+          low = mid + 1;
+        } else {
+          bestIdx = mid;
+          break;
+        }
       }
-
-      final dist = (pageCenter - cardLocalY).abs();
-      if (dist < minDistance) {
-        minDistance = dist;
-        candidatePage = pageNum;
-      }
-
-      if (!isGrid || idx % 2 == 1) {
-        currentTop = pageBottom + gap;
-      }
+      candidatePage = activePages[bestIdx.clamp(0, activePages.length - 1)];
+    } else {
+      candidatePage = activePages.first;
     }
 
-    final newActivePage = candidatePage ?? activePages.first;
+    final newActivePage = candidatePage;
     if (newActivePage != _activePageNumber) {
       setState(() {
         _activePageNumber = newActivePage;
@@ -371,7 +413,14 @@ class _CanvasCardPdfViewState extends State<CanvasCardPdfView> {
     });
   }
 
+  void _invalidateActivePagesCache() {
+    _cachedActivePages = null;
+    _cachedPageTopOffsets = null;
+    _cachedPageTopOffsetMap = null;
+  }
+
   List<int> _getActivePages() {
+    if (_cachedActivePages != null) return _cachedActivePages!;
     final total = _pdfDocument?.pages.length ?? widget.card.totalPdfPages;
     final excluded = widget.card.excludedPageIndices.toSet();
     final ordered = widget.card.pageOrder.isNotEmpty
@@ -383,7 +432,46 @@ class _CanvasCardPdfViewState extends State<CanvasCardPdfView> {
         active.add(p);
       }
     }
+    _cachedActivePages = active;
+    _computeCachedTopOffsets();
     return active;
+  }
+
+  void _computeCachedTopOffsets() {
+    final active = _cachedActivePages ?? const [];
+    final offsets = <double>[];
+    final offsetMap = <int, double>{};
+    final isGrid = widget.card.pdfDisplayMode == PdfDisplayMode.grid;
+    final gap = widget.card.pdfPageGap;
+    final itemWidth = isGrid ? (widget.card.width - gap) / 2.0 : widget.card.width;
+    double currentTop = 0.0;
+
+    if (isGrid) {
+      for (int i = 0; i < active.length; i += 2) {
+        final p1 = active[i];
+        final p2 = (i + 1 < active.length) ? active[i + 1] : null;
+        offsets.add(currentTop);
+        offsetMap[p1] = currentTop;
+        final h1 = _getPageHeight(p1) * (itemWidth / widget.card.width);
+        double rowH = h1;
+        if (p2 != null) {
+          offsets.add(currentTop);
+          offsetMap[p2] = currentTop;
+          final h2 = _getPageHeight(p2) * (itemWidth / widget.card.width);
+          rowH = math.max(h1, h2);
+        }
+        currentTop += rowH + gap;
+      }
+    } else {
+      for (int i = 0; i < active.length; i++) {
+        final p = active[i];
+        offsets.add(currentTop);
+        offsetMap[p] = currentTop;
+        currentTop += _getPageHeight(p) + gap;
+      }
+    }
+    _cachedPageTopOffsets = offsets;
+    _cachedPageTopOffsetMap = offsetMap;
   }
 
   double _getPageHeight(int pageNumber) {
@@ -410,14 +498,12 @@ class _CanvasCardPdfViewState extends State<CanvasCardPdfView> {
     return widget.card.width / ratio;
   }
 
-  double _getPageTopOffset(int targetPage, List<int> activePages) {
-    double top = 0.0;
-    final gap = widget.card.pdfPageGap;
-    for (final p in activePages) {
-      if (p == targetPage) return top;
-      top += _getPageHeight(p) + gap;
+  double _getPageTopOffset(int targetPage, [List<int>? activePages]) {
+    if (_cachedPageTopOffsetMap != null && _cachedPageTopOffsetMap!.containsKey(targetPage)) {
+      return _cachedPageTopOffsetMap![targetPage]!;
     }
-    return top;
+    _getActivePages();
+    return _cachedPageTopOffsetMap?[targetPage] ?? 0.0;
   }
 
   List<InkStroke> _getStrokesForPage(int pageNumber) {

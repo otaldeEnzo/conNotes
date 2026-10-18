@@ -114,12 +114,22 @@ class MediaCompressionService {
     }
 
     // 3. Seleciona o formato mais compacto:
-    // Se tiver canal alfa (transparencia), compara WebP lossless e PNG.
-    // Se for opaca (fotos, prints comuns), utiliza JPEG com qualidade calibrada.
+    // Se tiver canal alfa (transparencia) real, compara WebP lossless e PNG.
+    // Se for 100% opaca (fotos, prints comuns), comprima direto em JPEG sem codificacao dupla.
     Uint8List encodedBytes;
     String mimeType;
 
+    bool hasRealAlpha = false;
     if (processed.hasAlpha) {
+      for (final pixel in processed) {
+        if (pixel.a < 255) {
+          hasRealAlpha = true;
+          break;
+        }
+      }
+    }
+
+    if (hasRealAlpha) {
       final webpBytes = img.WebPEncoder().encode(processed);
       final pngBytes = img.encodePng(processed, level: 6);
       if (webpBytes.length < pngBytes.length) {

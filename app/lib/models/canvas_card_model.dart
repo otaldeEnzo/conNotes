@@ -21,6 +21,15 @@ enum PdfDisplayMode {
 
 /// Modelo de Dados para Cards no Canvas Infinito (Texto, Markdown, LaTeX, Mermaid & Mídia).
 class CanvasCardModel {
+  static final RegExp _latexBeginEnvRegex = RegExp(r'\\begin\{(?:aligned|gathered|matrix|bmatrix|pmatrix|cases)\}');
+  static final RegExp _latexEndEnvRegex = RegExp(r'\\end\{(?:aligned|gathered|matrix|bmatrix|pmatrix|cases)\}');
+  static final RegExp _latexLineSplitRegex = RegExp(r'\\\\|\n');
+  static final RegExp _latexFracRegex = RegExp(r'\\(?:frac|cfrac)');
+  static final RegExp _latexSqrtRegex = RegExp(r'\\sqrt');
+  static final RegExp _latexBigOpRegex = RegExp(r'\\(?:iint|iiint|oint|int|sum|prod)');
+
+  late final double cachedMinHeight = calculateMinHeight();
+
   final String id;
   final CardType cardType;
   String title;
@@ -161,10 +170,10 @@ class CanvasCardModel {
   Offset get center => Offset(x + width / 2.0, y + height / 2.0);
 
   /// Retorna a altura mínima requerida para acomodar todo o conteúdo sem barras de rolagem
-  double get minHeight => calculateMinHeight();
+  double get minHeight => cachedMinHeight;
 
   /// Retorna a área mínima (largura * altura mínima) requerida pelo conteúdo.
-  double get minArea => width * calculateMinHeight();
+  double get minArea => width * cachedMinHeight;
 
   /// Calcula a altura mínima necessária para que todo o conteúdo do card caiba
   /// perfeitamente sem gerar barras de rolagem (scroll) ou avisos de overflow.
@@ -258,19 +267,19 @@ class CanvasCardModel {
         // Bloco LaTeX: extrai linhas reais de fórmulas descartando delimitadores e ambientes
         var cleanTex = trimmed.replaceAll(r'$$', '').trim();
         cleanTex = cleanTex
-            .replaceAll(RegExp(r'\\begin\{(?:aligned|gathered|matrix|bmatrix|pmatrix|cases)\}'), '')
-            .replaceAll(RegExp(r'\\end\{(?:aligned|gathered|matrix|bmatrix|pmatrix|cases)\}'), '');
+            .replaceAll(_latexBeginEnvRegex, '')
+            .replaceAll(_latexEndEnvRegex, '');
         final lines = cleanTex
-            .split(RegExp(r'\\\\|\n'))
+            .split(_latexLineSplitRegex)
             .map((l) => l.trim())
             .where((l) => l.isNotEmpty)
             .toList();
         
         double mathBlockH = 20.0; // padding interno do container LaTeX (10px topo + 10px base)
         for (final line in lines) {
-          final fracCount = RegExp(r'\\(?:frac|cfrac)').allMatches(line).length;
-          final sqrtCount = RegExp(r'\\sqrt').allMatches(line).length;
-          final hasBigOp = RegExp(r'\\(?:iint|iiint|oint|int|sum|prod)').hasMatch(line);
+          final fracCount = _latexFracRegex.allMatches(line).length;
+          final sqrtCount = _latexSqrtRegex.allMatches(line).length;
+          final hasBigOp = _latexBigOpRegex.hasMatch(line);
           if (fracCount >= 2) {
             mathBlockH += 56.0;
           } else if (fracCount == 1) {
@@ -388,18 +397,18 @@ class CanvasCardModel {
       } else if (trimmed.startsWith(r'$$')) {
         var cleanTex = trimmed.replaceAll(r'$$', '').trim();
         cleanTex = cleanTex
-            .replaceAll(RegExp(r'\\begin\{(?:aligned|gathered|matrix|bmatrix|pmatrix|cases)\}'), '')
-            .replaceAll(RegExp(r'\\end\{(?:aligned|gathered|matrix|bmatrix|pmatrix|cases)\}'), '');
+            .replaceAll(_latexBeginEnvRegex, '')
+            .replaceAll(_latexEndEnvRegex, '');
         final lines = cleanTex
-            .split(RegExp(r'\\\\|\n'))
+            .split(_latexLineSplitRegex)
             .map((l) => l.trim())
             .where((l) => l.isNotEmpty)
             .toList();
         double mathBlockH = 20.0;
         for (final line in lines) {
-          final fracCount = RegExp(r'\\(?:frac|cfrac)').allMatches(line).length;
-          final sqrtCount = RegExp(r'\\sqrt').allMatches(line).length;
-          final hasBigOp = RegExp(r'\\(?:iint|iiint|oint|int|sum|prod)').hasMatch(line);
+          final fracCount = _latexFracRegex.allMatches(line).length;
+          final sqrtCount = _latexSqrtRegex.allMatches(line).length;
+          final hasBigOp = _latexBigOpRegex.hasMatch(line);
           if (fracCount >= 2) {
             mathBlockH += 56.0;
           } else if (fracCount == 1) {

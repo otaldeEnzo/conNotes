@@ -5,6 +5,7 @@ import 'package:pdfrx/pdfrx.dart' hide PdfTextMatch;
 import '../models/pdf_internal_object_models.dart';
 import '../models/pdf_text_search_models.dart';
 import '../models/pdf_text_selection_models.dart';
+import '../services/pdf_document_service.dart';
 import '../services/pdf_image_bounds_service.dart';
 import '../services/pdf_page_spatial_index.dart';
 import '../theme/moscaro_theme_controller.dart';
@@ -182,9 +183,12 @@ class PdfPageSubcardWidget extends StatefulWidget {
 }
 
 class _PdfPageSubcardWidgetState extends State<PdfPageSubcardWidget> {
-  bool _isHovered = false;
+  final ValueNotifier<bool> _isHovered = ValueNotifier<bool>(false);
   PdfPageText? _pageText;
   PdfPageSpatialIndex? _spatialIndex;
+
+  static bool _isInkTool(String tool) =>
+      tool == 'pen' || tool == 'highlighter' || tool == 'eraser' || tool == 'shapes' || tool == 'laser';
 
   @override
   void initState() {
@@ -210,9 +214,23 @@ class _PdfPageSubcardWidgetState extends State<PdfPageSubcardWidget> {
     }
   }
 
+  @override
+  void dispose() {
+    _isHovered.dispose();
+    super.dispose();
+  }
+
   void _rebuildSpatialIndex() {
     if (_pageText != null) {
       final docPath = widget.document?.sourceName ?? '';
+      if (docPath.isNotEmpty) {
+        final cached = PdfDocumentService.instance.getCachedSpatialIndex(docPath, widget.pageNumber);
+        if (cached != null) {
+          _spatialIndex = cached;
+          return;
+        }
+      }
+
       final imageRects = docPath.isNotEmpty
           ? PdfImageBoundsService.instance.getImageRectsForPageSync(
               pdfPath: docPath,
@@ -221,13 +239,17 @@ class _PdfPageSubcardWidgetState extends State<PdfPageSubcardWidget> {
               nativePageHeight: _nativePageHeight,
             )
           : <Rect>[];
-      _spatialIndex = PdfPageSpatialIndex.fromPageText(
+      final index = PdfPageSpatialIndex.fromPageText(
         pageText: _pageText!,
         pageNumber: widget.pageNumber,
         nativeWidth: _nativePageWidth,
         nativeHeight: _nativePageHeight,
         excludedImageRects: imageRects,
       );
+      if (docPath.isNotEmpty) {
+        PdfDocumentService.instance.cacheSpatialIndex(docPath, widget.pageNumber, index);
+      }
+      _spatialIndex = index;
     } else {
       _spatialIndex = null;
     }
@@ -237,6 +259,22 @@ class _PdfPageSubcardWidgetState extends State<PdfPageSubcardWidget> {
     if (_pageText != null || widget.document == null) return;
     if (widget.pageNumber < 1 || widget.pageNumber > widget.document!.pages.length) return;
     try {
+      final docPath = widget.document!.sourceName;
+      final cachedIndex = docPath.isNotEmpty
+          ? PdfDocumentService.instance.getCachedSpatialIndex(docPath, widget.pageNumber)
+          : null;
+      if (cachedIndex != null) {
+        final page = widget.document!.pages[widget.pageNumber - 1];
+        final loaded = await page.loadText();
+        if (mounted) {
+          setState(() {
+            _pageText = loaded;
+            _spatialIndex = cachedIndex;
+          });
+        }
+        return;
+      }
+
       final page = widget.document!.pages[widget.pageNumber - 1];
       final loaded = await page.loadText();
       if (mounted) {
@@ -364,8 +402,8 @@ class _PdfPageSubcardWidgetState extends State<PdfPageSubcardWidget> {
       cursor: _pageText != null
           ? SystemMouseCursors.text
           : MouseCursor.defer,
-      onEnter: (_) => setState(() => _isHovered = true),
-      onExit: (_) => setState(() => _isHovered = false),
+      onEnter: (_) => _isHovered.value = true,
+      onExit: (_) => _isHovered.value = false,
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,
         onTap: _pageText != null ? null : _handleTap,
@@ -473,23 +511,26 @@ class _PdfPageSubcardWidgetState extends State<PdfPageSubcardWidget> {
                       if (_pageText != null)
                         Positioned.fill(
                           key: ValueKey('pdf_smart_cursor_overlay_pos_${widget.pageNumber}'),
-                          child: PdfSmartCursorOverlay(
-                            key: ValueKey('pdf_smart_cursor_overlay_${widget.pageNumber}'),
-                            pageNumber: widget.pageNumber,
-                            pageWidth: widget.width,
-                            pageHeight: effectiveHeight,
-                            nativeWidth: _nativePageWidth,
-                            nativeHeight: _nativePageHeight,
-                            spatialIndex: _spatialIndex,
-                            activeTextSelection: widget.textSelection,
-                            onTextSelectionChanged: widget.onTextSelectionChanged,
-                            onHighlightText: widget.onHighlightSelection,
-                            onDismissSelection: () {
-                              widget.onTextSelectionChanged?.call(null);
-                            },
-                            onSelectPage: widget.onSelectPage,
-                            onGenerateStemCard: widget.onGenerateStemCardFromSelection,
-                            onAskAi: widget.onAskAiSelection,
+                          child: IgnorePointer(
+                            ignoring: _isInkTool(widget.activeTool),
+                            child: PdfSmartCursorOverlay(
+                              key: ValueKey('pdf_smart_cursor_overlay_${widget.pageNumber}'),
+                              pageNumber: widget.pageNumber,
+                              pageWidth: widget.width,
+                              pageHeight: effectiveHeight,
+                              nativeWidth: _nativePageWidth,
+                              nativeHeight: _nativePageHeight,
+                              spatialIndex: _spatialIndex,
+                              activeTextSelection: widget.textSelection,
+                              onTextSelectionChanged: widget.onTextSelectionChanged,
+                              onHighlightText: widget.onHighlightSelection,
+                              onDismissSelection: () {
+                                widget.onTextSelectionChanged?.call(null);
+                              },
+                              onSelectPage: widget.onSelectPage,
+                              onGenerateStemCard: widget.onGenerateStemCardFromSelection,
+                              onAskAi: widget.onAskAiSelection,
+                            ),
                           ),
                         ),
 
@@ -573,7 +614,7 @@ class _PdfPageSubcardWidgetState extends State<PdfPageSubcardWidget> {
       width: width,
       height: height,
       child: PdfPageView(
-        key: ValueKey('pdfrx_page_${widget.pageNumber}_w${width.round()}'),
+        key: ValueKey('pdfrx_page_${doc.sourceName}_${widget.pageNumber}'),
         document: doc,
         pageNumber: widget.pageNumber,
         maximumDpi: 300,
@@ -647,10 +688,16 @@ class _PdfPageSubcardWidgetState extends State<PdfPageSubcardWidget> {
     return Positioned(
       top: 10.0,
       left: 10.0,
-      child: AnimatedOpacity(
-        duration: const Duration(milliseconds: 180),
-        opacity: _isHovered ? 1.0 : 0.0,
-        curve: Curves.easeOut,
+      child: ValueListenableBuilder<bool>(
+        valueListenable: _isHovered,
+        builder: (context, hovered, child) {
+          return AnimatedOpacity(
+            duration: const Duration(milliseconds: 180),
+            opacity: hovered ? 1.0 : 0.0,
+            curve: Curves.easeOut,
+            child: child,
+          );
+        },
         child: IgnorePointer(
           child: Container(
             padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 4.0),

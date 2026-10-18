@@ -5,30 +5,38 @@ import 'canvas_dot_grid_painter.dart';
 /// Painter de alta performance para o Brilho Orgânico e Reativo do Mouse no Dot Grid.
 /// Executa com complexidade O(K) onde K <= 80 pontos dentro do raio de influência do cursor.
 class InteractiveDotGridGlowPainter extends CustomPainter {
-  final Offset mousePosition;
-  final Offset panOffset;
-  final double zoomScale;
+  final ValueNotifier<Offset?> mousePosNotifier;
+  final ValueNotifier<Offset> panNotifier;
+  final ValueNotifier<double> zoomNotifier;
   final double gridSpacing;
   final double glowRadius;
   final Color glowColor;
   final CanvasBackgroundType backgroundType;
   final bool isDark;
 
+  final Paint _dotPaint = Paint()..style = PaintingStyle.fill;
+
   InteractiveDotGridGlowPainter({
-    required this.mousePosition,
-    required this.panOffset,
-    required this.zoomScale,
+    required this.mousePosNotifier,
+    required this.panNotifier,
+    required this.zoomNotifier,
     required this.gridSpacing,
     required this.glowRadius,
     required this.glowColor,
     required this.backgroundType,
     required this.isDark,
-  });
+    Listenable? repaint,
+  }) : super(repaint: repaint ?? Listenable.merge([mousePosNotifier, panNotifier, zoomNotifier]));
 
   @override
   void paint(Canvas canvas, Size size) {
+    final mousePosition = mousePosNotifier.value;
+    if (mousePosition == null) return;
     if (glowRadius <= 0) return;
     if (backgroundType != CanvasBackgroundType.dotGrid) return;
+
+    final panOffset = panNotifier.value;
+    final zoomScale = zoomNotifier.value;
 
     // 1. Determinação do espaçamento em coordenadas de mundo (idêntico ao CanvasDotGridPainter)
     double spacing = gridSpacing;
@@ -51,8 +59,15 @@ class InteractiveDotGridGlowPainter extends CustomPainter {
     final int maxRow = math.max(0, ((worldMouseY + worldRadius) / spacing).ceil());
 
     final double baseDotRadius = (1.2 / zoomScale).clamp(0.6, 2.2) * zoomScale;
-    final Paint dotPaint = Paint()..style = PaintingStyle.fill;
     final double rSquared = glowRadius * glowRadius;
+
+    // Cores base para interpolação ARGB inteira direta (Zero alocações de Color na heap)
+    final int startR = isDark ? 148 : 100;
+    final int startG = isDark ? 163 : 116;
+    final int startB = isDark ? 184 : 139;
+    final int deltaR = 255 - startR;
+    final int deltaG = 255 - startG;
+    final int deltaB = 255 - startB;
 
     // 3. Renderização sutil, orgânica e pontual (sem névoa no fundo, apenas os pontos ganham vida)
     for (int col = minCol; col <= maxCol; col++) {
@@ -81,14 +96,13 @@ class InteractiveDotGridGlowPainter extends CustomPainter {
 
           // Luminosidade viva: passa de opacidade discreta a branco puro brilhante no centro
           final double opacity = (0.22 + (0.78 * falloff)).clamp(0.0, 1.0);
-          final Color dotColor = Color.lerp(
-            isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
-            Colors.white,
-            falloff,
-          )!.withValues(alpha: opacity);
+          final int a = (opacity * 255.0).round().clamp(0, 255);
+          final int r = (startR + deltaR * falloff).round().clamp(0, 255);
+          final int g = (startG + deltaG * falloff).round().clamp(0, 255);
+          final int b = (startB + deltaB * falloff).round().clamp(0, 255);
 
-          dotPaint.color = dotColor;
-          canvas.drawCircle(Offset(sx, sy), expandedRadius, dotPaint);
+          _dotPaint.color = Color.fromARGB(a, r, g, b);
+          canvas.drawCircle(Offset(sx, sy), expandedRadius, _dotPaint);
         }
       }
     }
@@ -96,10 +110,10 @@ class InteractiveDotGridGlowPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant InteractiveDotGridGlowPainter oldDelegate) {
-    return oldDelegate.mousePosition != mousePosition ||
-        oldDelegate.panOffset != panOffset ||
-        oldDelegate.zoomScale != zoomScale ||
+    return oldDelegate.gridSpacing != gridSpacing ||
         oldDelegate.glowRadius != glowRadius ||
-        oldDelegate.glowColor != glowColor;
+        oldDelegate.glowColor != glowColor ||
+        oldDelegate.backgroundType != backgroundType ||
+        oldDelegate.isDark != isDark;
   }
 }

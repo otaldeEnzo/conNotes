@@ -102,6 +102,7 @@ class _CanvasCardWidgetState extends State<CanvasCardWidget> {
   late TextEditingController _titleController;
   final FocusNode _titleFocusNode = FocusNode();
   final GlobalKey<MarkdownLatexBlockViewState> _blockViewKey = GlobalKey<MarkdownLatexBlockViewState>();
+  static final _fallbackZoomNotifier = ValueNotifier<double>(1.0);
   CardActiveTextStyles _activeStyles = const CardActiveTextStyles();
   final ValueNotifier<Offset> _dragOffsetNotifier = ValueNotifier<Offset>(Offset.zero);
   late final ValueNotifier<double> _dragRotationNotifier = ValueNotifier<double>(widget.card.rotation);
@@ -403,18 +404,22 @@ class _CanvasCardWidgetState extends State<CanvasCardWidget> {
   }
 
   void _onHeaderPanStart(DragStartDetails details) {
+    if (_dragStartPos != null) return;
     _startDragAt(details.globalPosition);
   }
 
   void _onHeaderPanUpdate(DragUpdateDetails details) {
+    if (_dragStartPos == null) return;
     _updateDragAt(details.globalPosition);
   }
 
   void _onHeaderPanEnd(DragEndDetails details) {
+    if (_dragStartPos == null) return;
     _finishHeaderDrag();
   }
 
   void _onHeaderPanCancel() {
+    if (_dragStartPos == null) return;
     _finishHeaderDrag();
   }
 
@@ -496,27 +501,6 @@ class _CanvasCardWidgetState extends State<CanvasCardWidget> {
       if (widget.card.cardType == CardType.pdf) {
         PdfFamilyLivePreviewController.instance.endInteraction();
       }
-      _dragOffsetNotifier.value = Offset.zero;
-      _dragStartPos = null;
-      _currentMouseGlobalPos = null;
-      _grabOffset = null;
-      _currentDelta = null;
-      _initialCardX = null;
-      _initialCardY = null;
-      _activeDragPointerId = null;
-    }
-  }
-
-  void _abortHeaderDrag() {
-    if (_dragStartPos == null) return;
-    widget.panNotifier?.removeListener(_onCanvasTransformDuringDrag);
-    widget.zoomNotifier?.removeListener(_onCanvasTransformDuringDrag);
-    try {
-      if (widget.card.cardType == CardType.pdf) {
-        PdfFamilyLivePreviewController.instance.endInteraction();
-      }
-    } finally {
-      CardsTelemetryController.instance.endCardDrag();
       _dragOffsetNotifier.value = Offset.zero;
       _dragStartPos = null;
       _currentMouseGlobalPos = null;
@@ -629,14 +613,19 @@ class _CanvasCardWidgetState extends State<CanvasCardWidget> {
                               },
                               onRequiredEditingHeightChanged: (reqHeight) {
                                 if (mounted) {
-                                  setState(() {
-                                    _elasticEditingHeight = (reqHeight > 0.0) ? reqHeight : null;
-                                  });
+                                  final newHeight = (reqHeight > 0.0) ? reqHeight : null;
+                                  if (_elasticEditingHeight != newHeight) {
+                                    setState(() {
+                                      _elasticEditingHeight = newHeight;
+                                    });
+                                  }
                                 }
                               },
                               onActiveStylesChanged: (styles) {
                                 if (mounted) {
-                                  setState(() => _activeStyles = styles);
+                                  if (_activeStyles != styles) {
+                                    setState(() => _activeStyles = styles);
+                                  }
                                 }
                               },
                               onContentChanged: (newContent) {
@@ -699,10 +688,10 @@ class _CanvasCardWidgetState extends State<CanvasCardWidget> {
                             resizeHandle: resizeHandle,
                           ),
                         )
-                      : ClipRRect(
-                          key: _cardContainerKey,
-                          borderRadius: BorderRadius.circular(14),
-                          child: RepaintBoundary(
+                      : RepaintBoundary(
+                          child: ClipRRect(
+                            key: _cardContainerKey,
+                            borderRadius: BorderRadius.circular(14),
                             child: _buildCardContainer(
                               isSelected: isSelected,
                               themeAccent: themeAccent,
@@ -779,7 +768,8 @@ class _CanvasCardWidgetState extends State<CanvasCardWidget> {
                                   ),
                                 );
                               },
-                              child: Align(
+                              child: RepaintBoundary(
+                                child: Align(
                                 alignment: Alignment.bottomCenter,
                                 child: Transform.rotate(
                                   angle: -currentRotation,
@@ -788,7 +778,7 @@ class _CanvasCardWidgetState extends State<CanvasCardWidget> {
                                     padding: const EdgeInsets.only(bottom: 6.0),
                                 child: isMediaCard
                                     ? ValueListenableBuilder<double>(
-                                        valueListenable: widget.zoomNotifier ?? ValueNotifier(1.0),
+                                        valueListenable: widget.zoomNotifier ?? _fallbackZoomNotifier,
                                         builder: (context, currentZoomVal, _) {
                                           return MediaCardFloatingPill(
                                             card: widget.card,
@@ -822,7 +812,7 @@ class _CanvasCardWidgetState extends State<CanvasCardWidget> {
                                       )
                                     : (isPdfCard
                                         ? ValueListenableBuilder<double>(
-                                            valueListenable: widget.zoomNotifier ?? ValueNotifier(1.0),
+                                            valueListenable: widget.zoomNotifier ?? _fallbackZoomNotifier,
                                             builder: (context, currentZoomVal, _) {
                                               final selIds = CanvasSelectionController.instance.state.selectedCardIds;
                                               return PdfCardFloatingPill(
@@ -928,6 +918,7 @@ class _CanvasCardWidgetState extends State<CanvasCardWidget> {
                                         onDeleteCard: () => widget.onDeleteCard(widget.card.id),
                                         onDuplicateCard: () => widget.onDuplicateCard(widget.card),
                                       )),
+                              ),
                               ),
                             ),
                           ),
@@ -1281,9 +1272,7 @@ class _CanvasCardWidgetState extends State<CanvasCardWidget> {
       );
     }
 
-    return AnimatedContainer(
-      duration: const Duration(milliseconds: 180),
-      curve: Curves.easeOutCubic,
+    return Container(
       width: currentSize.width,
       height: currentSize.height,
       child: ClipRect(

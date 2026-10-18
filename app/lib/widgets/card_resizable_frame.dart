@@ -49,7 +49,7 @@ class _CardResizableFrameState extends State<CardResizableFrame> {
   @override
   void initState() {
     super.initState();
-    _cachedStaticMinHeight = widget.card.calculateMinHeight();
+    _cachedStaticMinHeight = widget.card.cachedMinHeight;
   }
 
   @override
@@ -63,7 +63,7 @@ class _CardResizableFrameState extends State<CardResizableFrame> {
         oldWidget.card.pdfDisplayMode != widget.card.pdfDisplayMode ||
         oldWidget.card.totalPdfPages != widget.card.totalPdfPages ||
         oldWidget.card.excludedPageIndices != widget.card.excludedPageIndices) {
-      _cachedStaticMinHeight = widget.card.calculateMinHeight();
+      _cachedStaticMinHeight = widget.card.cachedMinHeight;
     }
   }
 
@@ -76,7 +76,7 @@ class _CardResizableFrameState extends State<CardResizableFrame> {
   void _onPanStart(DragStartDetails details, {bool isRight = false, bool isBottom = false, bool isCorner = false}) {
     _dragStartPos = details.globalPosition;
     _initialWidth = widget.card.width;
-    _cachedDragMinHeight = _cachedStaticMinHeight ?? widget.card.calculateMinHeight();
+    _cachedDragMinHeight = _cachedStaticMinHeight ?? widget.card.cachedMinHeight;
     _lastDragMeasuredWidth = widget.card.width;
     _initialHeight = math.max(widget.card.height, _cachedDragMinHeight!);
     _dragSizeNotifier.value = Size(_initialWidth!, _initialHeight!);
@@ -136,11 +136,11 @@ class _CardResizableFrameState extends State<CardResizableFrame> {
       if (isRight || isCorner) {
         newWidth = (_initialWidth! + delta.dx).clamp(200.0, 1600.0);
         if (_lastDragMeasuredWidth == null || (newWidth - _lastDragMeasuredWidth!).abs() >= 4.0) {
-          _cachedDragMinHeight = widget.card.copyWith(width: newWidth).calculateMinHeight();
+          _cachedDragMinHeight = widget.card.copyWith(width: newWidth).cachedMinHeight;
           _lastDragMeasuredWidth = newWidth;
         }
       }
-      final dynamicMinHeight = _cachedDragMinHeight ?? _cachedStaticMinHeight ?? widget.card.calculateMinHeight();
+      final dynamicMinHeight = _cachedDragMinHeight ?? _cachedStaticMinHeight ?? widget.card.cachedMinHeight;
       final dynamicMinArea = widget.card.minArea;
 
       if (isBottom || isCorner) {
@@ -176,7 +176,7 @@ class _CardResizableFrameState extends State<CardResizableFrame> {
       double finalHeight = _dragSizeNotifier.value!.height;
 
       if (widget.card.cardType != CardType.media) {
-        final dynamicMin = widget.card.copyWith(width: finalWidth).calculateMinHeight();
+        final dynamicMin = widget.card.copyWith(width: finalWidth).cachedMinHeight;
         final dynamicMinArea = widget.card.minArea;
         finalHeight = math.max(finalHeight, dynamicMin);
         if (widget.card.lockAspectRatio &&
@@ -219,8 +219,8 @@ class _CardResizableFrameState extends State<CardResizableFrame> {
       builder: (context, dragSize, child) {
         final currentWidth = dragSize?.width ?? widget.card.width;
         final effectiveMinHeight = dragSize != null
-            ? (_cachedDragMinHeight ?? _cachedStaticMinHeight ?? widget.card.calculateMinHeight())
-            : (_cachedStaticMinHeight ?? widget.card.calculateMinHeight());
+            ? (_cachedDragMinHeight ?? _cachedStaticMinHeight ?? widget.card.cachedMinHeight)
+            : (_cachedStaticMinHeight ?? widget.card.cachedMinHeight);
         final currentHeight = math.max(dragSize?.height ?? widget.card.height, effectiveMinHeight);
         
         final showHandles = widget.isSelected && !widget.card.isPinned && !widget.card.isCollapsed;

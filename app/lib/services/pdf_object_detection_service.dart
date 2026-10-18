@@ -79,6 +79,26 @@ class PdfObjectDetectionService {
     }
   }
 
+  static final RegExp _mathSymbolsRegex = RegExp(r'[\u0391-\u03C9\u2200-\u22FF\u2A00-\u2AFF]{2,}');
+  static final RegExp _relationOpRegex = RegExp(r'[=><\u2248]');
+  static final RegExp _tableSplitRegex = RegExp(r'\t|\s{2,}');
+
+  static bool _isLinearMathMatch(String lineText) {
+    if (_mathSymbolsRegex.hasMatch(lineText)) return true;
+    final match = _relationOpRegex.firstMatch(lineText);
+    if (match != null) {
+      final opIdx = match.start;
+      if (opIdx >= 2 && opIdx <= lineText.length - 3) {
+        final left = lineText.substring(0, opIdx).trim();
+        final right = lineText.substring(opIdx + 1).trim();
+        if (left.length >= 2 && right.length >= 2) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
   /// Detects structured entities directly from an already computed [PdfPageSpatialIndex].
   List<PdfInternalObject> detectObjectsFromSpatialIndex(
     PdfPageSpatialIndex spatialIndex, {
@@ -89,10 +109,9 @@ class PdfObjectDetectionService {
     final pageNumber = spatialIndex.pageNumber;
 
     // 1. STEM Formula Detection (Heuristic: isolated Greek / Math symbols, fractions, matrices)
-    final mathRegex = RegExp(r'([a-zA-Z0-9_\^\+\-\*/\(\)=]{2,}\s*[=><\u2248]\s*[\d\w\s\+\-\*/\(\)\\\^]+|[\u0391-\u03C9\u2200-\u22FF\u2A00-\u2AFF]{2,})');
     for (final line in spatialIndex.lines) {
       final lineText = fullText.substring(line.startIndex, math.min(fullText.length, line.endIndex));
-      if (mathRegex.hasMatch(lineText) && line.charRects.length > 3) {
+      if (_isLinearMathMatch(lineText) && line.charRects.length > 3) {
         detected.add(PdfInternalObject(
           id: 'formula_${idPrefix}_p${pageNumber}_${line.startIndex}',
           pageNumber: pageNumber,
@@ -118,9 +137,9 @@ class PdfObjectDetectionService {
         final t2 = fullText.substring(l2.startIndex, l2.endIndex);
         final t3 = fullText.substring(l3.startIndex, l3.endIndex);
 
-        final cols1 = t1.trim().split(RegExp(r'\s{2,}|\t'));
-        final cols2 = t2.trim().split(RegExp(r'\s{2,}|\t'));
-        final cols3 = t3.trim().split(RegExp(r'\s{2,}|\t'));
+        final cols1 = t1.trim().split(_tableSplitRegex);
+        final cols2 = t2.trim().split(_tableSplitRegex);
+        final cols3 = t3.trim().split(_tableSplitRegex);
 
         if (cols1.length >= 2 && cols2.length >= 2 && cols3.length >= 2) {
           final tableBounds = Rect.fromLTRB(

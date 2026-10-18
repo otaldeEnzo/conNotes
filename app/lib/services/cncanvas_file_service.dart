@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:isolate';
 import 'package:flutter/painting.dart';
 import '../widgets/note_models.dart';
 import '../widgets/ink_models.dart';
@@ -13,73 +14,96 @@ class CncanvasFileService {
   static Future<void> saveToCnCanvasFile(NoteDocument doc, String targetPath) async {
     final file = File(targetPath);
     final parentDir = file.parent;
-    if (!parentDir.existsSync()) {
-      parentDir.createSync(recursive: true);
+    if (!await parentDir.exists()) {
+      await parentDir.create(recursive: true);
     }
 
+    // doc contém referências a dart:ui (como cachedPath em InkStroke e pictureCache),
+    // que são 'unsendable' em isolates do Dart (NativePath não pode cruzar SendPort).
+    // Portanto, construímos o jsonMap e os SVGs no isolate da UI (onde dart:ui vive)
+    // e passamos apenas estruturas primitivas (String, Map<String, dynamic>) para o worker isolate!
     final jsonMap = doc.toCnCanvasMap();
-    // Escapa '</' como '<\/' (válido na RFC 8259) para impedir que '</script>' no conteúdo quebre o bloco HTML
-    final rawJsonStr = jsonEncode(jsonMap).replaceAll('</', r'<\/');
-    final htmlContent = _generateStandaloneHtmlContent(doc, rawJsonStr);
+    final strokesSvg = _generateSvgPaths(doc.strokes);
+    final cardsSvg = _generateCardsSvg(doc.cards);
+    final docTitle = doc.title;
+    final panX = doc.panX;
+    final panY = doc.panY;
+    final zoomScale = doc.zoomScale;
 
-    final tmpPath = '$targetPath.tmp';
-    final tmpFile = File(tmpPath);
-    await tmpFile.writeAsString(htmlContent, flush: true);
+    await Isolate.run(() async {
+      // Escapa '</' como '<\/' (válido na RFC 8259) para impedir que '</script>' no conteúdo quebre o bloco HTML
+      final rawJsonStr = jsonEncode(jsonMap).replaceAll('</', r'<\/');
+      final htmlContent = _generateStandaloneHtmlContentFromPrimitives(
+        docTitle: docTitle,
+        embeddedJson: rawJsonStr,
+        strokesSvg: strokesSvg,
+        cardsSvg: cardsSvg,
+        panX: panX,
+        panY: panY,
+        zoomScale: zoomScale,
+      );
 
-    if (tmpFile.existsSync() && tmpFile.lengthSync() > 0) {
-      try {
-        await tmpFile.rename(targetPath);
-      } on FileSystemException {
-        await tmpFile.copy(targetPath);
+      final tmpPath = '$targetPath.tmp';
+      final tmpFile = File(tmpPath);
+      await tmpFile.writeAsString(htmlContent, flush: true);
+
+      if (await tmpFile.exists() && await tmpFile.length() > 0) {
         try {
-          await tmpFile.delete();
-        } catch (_) {}
+          await tmpFile.rename(targetPath);
+        } on FileSystemException {
+          await tmpFile.copy(targetPath);
+          try {
+            await tmpFile.delete();
+          } catch (_) {}
+        }
       }
-    }
+    });
+
     doc.filePath = targetPath;
   }
 
   /// Carrega um NoteDocument a partir de um arquivo .cncanvas do disco
   static Future<NoteDocument?> loadFromCnCanvasFile(String filePath) async {
     final file = File(filePath);
-    if (!file.existsSync()) return null;
+    if (!await file.exists()) return null;
 
     final content = await file.readAsString();
-    Map<String, dynamic>? jsonMap;
 
-    // 1. Extração robusta do bloco <script id="connotes-data" type="application/json">
-    const startTag = '<script id="connotes-data" type="application/json">';
-    const endTag = '</script>';
-    final startIndex = content.indexOf(startTag);
-    if (startIndex != -1) {
-      final jsonStart = startIndex + startTag.length;
-      final endIndex = content.indexOf(endTag, jsonStart);
-      if (endIndex != -1) {
-        try {
-          final jsonString = content.substring(jsonStart, endIndex).trim();
-          jsonMap = jsonDecode(jsonString) as Map<String, dynamic>;
-        } catch (_) {
-          // Recuperação resiliente caso notas antigas contenham '</script>' literal dentro do JSON
-          const motorMarker = '<!-- MOTOR OFFLINE DE PAN & ZOOM';
-          final motorIdx = content.indexOf(motorMarker, jsonStart);
-          final searchLimit = motorIdx != -1 ? motorIdx : content.length;
-          final fallbackEndIdx = content.lastIndexOf(endTag, searchLimit);
-          if (fallbackEndIdx > jsonStart) {
-            try {
-              final recoveredJson = content.substring(jsonStart, fallbackEndIdx).trim();
-              jsonMap = jsonDecode(recoveredJson) as Map<String, dynamic>;
-            } catch (_) {}
+    final jsonMap = await Isolate.run<Map<String, dynamic>?>(() {
+      // 1. Extração robusta do bloco <script id="connotes-data" type="application/json">
+      const startTag = '<script id="connotes-data" type="application/json">';
+      const endTag = '</script>';
+      final startIndex = content.indexOf(startTag);
+      if (startIndex != -1) {
+        final jsonStart = startIndex + startTag.length;
+        final endIndex = content.indexOf(endTag, jsonStart);
+        if (endIndex != -1) {
+          try {
+            final jsonString = content.substring(jsonStart, endIndex).trim();
+            return jsonDecode(jsonString) as Map<String, dynamic>;
+          } catch (_) {
+            // Recuperação resiliente caso notas antigas contenham '</script>' literal dentro do JSON
+            const motorMarker = '<!-- MOTOR OFFLINE DE PAN & ZOOM';
+            final motorIdx = content.indexOf(motorMarker, jsonStart);
+            final searchLimit = motorIdx != -1 ? motorIdx : content.length;
+            final fallbackEndIdx = content.lastIndexOf(endTag, searchLimit);
+            if (fallbackEndIdx > jsonStart) {
+              try {
+                final recoveredJson = content.substring(jsonStart, fallbackEndIdx).trim();
+                return jsonDecode(recoveredJson) as Map<String, dynamic>;
+              } catch (_) {}
+            }
           }
         }
       }
-    }
 
-    // 2. Fallback caso o arquivo seja JSON puro
-    if (jsonMap == null) {
+      // 2. Fallback caso o arquivo seja JSON puro
       try {
-        jsonMap = jsonDecode(content.trim()) as Map<String, dynamic>;
-      } catch (_) {}
-    }
+        return jsonDecode(content.trim()) as Map<String, dynamic>;
+      } catch (_) {
+        return null;
+      }
+    });
 
     if (jsonMap == null) return null;
 
@@ -94,9 +118,28 @@ class CncanvasFileService {
 
   /// Constrói a casca HTML5 autônoma com visualizador Moscaro v2 e SVG interativo (< 10 KB)
   static String _generateStandaloneHtmlContent(NoteDocument doc, String embeddedJson) {
-    final titleEscaped = const HtmlEscape().convert(doc.title);
-    final strokesSvg = _generateSvgPaths(doc.strokes);
-    final cardsSvg = _generateCardsSvg(doc.cards);
+    return _generateStandaloneHtmlContentFromPrimitives(
+      docTitle: doc.title,
+      embeddedJson: embeddedJson,
+      strokesSvg: _generateSvgPaths(doc.strokes),
+      cardsSvg: _generateCardsSvg(doc.cards),
+      panX: doc.panX,
+      panY: doc.panY,
+      zoomScale: doc.zoomScale,
+    );
+  }
+
+  /// Constrói a casca HTML5 autônoma a partir de tipos primitivos (seguro para isolates)
+  static String _generateStandaloneHtmlContentFromPrimitives({
+    required String docTitle,
+    required String embeddedJson,
+    required String strokesSvg,
+    required String cardsSvg,
+    required double panX,
+    required double panY,
+    required double zoomScale,
+  }) {
+    final titleEscaped = const HtmlEscape().convert(docTitle);
 
     return '''<!DOCTYPE html>
 <html lang="pt-BR">
@@ -236,9 +279,9 @@ $embeddedJson
 
   <!-- MOTOR OFFLINE DE PAN & ZOOM INTERATIVO (< 5 KB) -->
   <script>
-    let panX = ${doc.panX};
-    let panY = ${doc.panY};
-    let scale = ${doc.zoomScale};
+    let panX = ${panX};
+    let panY = ${panY};
+    let scale = ${zoomScale};
     let isDragging = false;
     let startX = 0, startY = 0;
 

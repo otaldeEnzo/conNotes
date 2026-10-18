@@ -251,104 +251,110 @@ class _ToolbarActionButtonState extends State<_ToolbarActionButton> {
 
     final double currentRotation = (widget.rotateWhenActive && isActive) ? 0.125 : 0.0;
 
-    return MouseRegion(
-      cursor: widget.isEnabled ? SystemMouseCursors.click : SystemMouseCursors.basic,
-      onEnter: (_) {
-        if (widget.isEnabled) setState(() => _isHovered = true);
-      },
-      onExit: (_) {
-        if (widget.isEnabled) setState(() => _isHovered = false);
-      },
-      child: GestureDetector(
-        onTapDown: widget.isEnabled && widget.onPressed != null
-            ? (_) => setState(() => _isPressed = true)
-            : null,
-        onTapUp: widget.isEnabled && widget.onPressed != null
-            ? (_) => setState(() => _isPressed = false)
-            : null,
-        onTapCancel: () {
-          if (_isPressed) setState(() => _isPressed = false);
+    final Widget iconSwitcher = AnimatedSwitcher(
+      duration: const Duration(milliseconds: 180),
+      switchInCurve: Curves.easeOutCubic,
+      switchOutCurve: Curves.easeInCubic,
+      transitionBuilder: (child, anim) => ScaleTransition(scale: anim, child: child),
+      child: SvgIcon(
+        key: ValueKey(widget.assetName),
+        name: widget.assetName,
+        size: widget.iconSize,
+        color: currentColor,
+      ),
+    );
+
+    return RepaintBoundary(
+      child: MouseRegion(
+        cursor: widget.isEnabled ? SystemMouseCursors.click : SystemMouseCursors.basic,
+        onEnter: (_) {
+          if (widget.isEnabled) setState(() => _isHovered = true);
         },
-        onTap: widget.isEnabled ? widget.onPressed : null,
-        child: Tooltip(
-          message: widget.tooltip,
-          child: AnimatedScale(
-            scale: currentScale,
-            duration: const Duration(milliseconds: 140),
-            curve: Curves.easeOutCubic,
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 180),
+        onExit: (_) {
+          if (widget.isEnabled) setState(() => _isHovered = false);
+        },
+        child: GestureDetector(
+          onTapDown: widget.isEnabled && widget.onPressed != null
+              ? (_) => setState(() => _isPressed = true)
+              : null,
+          onTapUp: widget.isEnabled && widget.onPressed != null
+              ? (_) => setState(() => _isPressed = false)
+              : null,
+          onTapCancel: () {
+            if (_isPressed) setState(() => _isPressed = false);
+          },
+          onTap: widget.isEnabled ? widget.onPressed : null,
+          child: Tooltip(
+            message: widget.tooltip,
+            child: AnimatedScale(
+              scale: currentScale,
+              duration: const Duration(milliseconds: 140),
               curve: Curves.easeOutCubic,
-              padding: const EdgeInsets.all(7),
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: isActive
-                    ? activeColor.withValues(alpha: 0.18)
-                    : (_isHovered && widget.isEnabled
-                        ? (isLight ? Colors.black.withValues(alpha: 0.05) : Colors.white.withValues(alpha: 0.08))
-                        : Colors.transparent),
-                border: Border.all(
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 180),
+                curve: Curves.easeOutCubic,
+                padding: const EdgeInsets.all(7),
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
                   color: isActive
-                      ? activeColor.withValues(alpha: 0.45)
-                      : Colors.transparent,
-                  width: 1,
-                ),
-                boxShadow: isActive
-                    ? [
-                        BoxShadow(
-                          color: activeColor.withValues(alpha: 0.35),
-                          blurRadius: 8,
-                          spreadRadius: 1,
-                        ),
-                      ]
-                    : null,
-              ),
-              child: Stack(
-                clipBehavior: Clip.none,
-                alignment: Alignment.center,
-                children: [
-                  AnimatedRotation(
-                    turns: currentRotation,
-                    duration: const Duration(milliseconds: 180),
-                    curve: Curves.easeOutCubic,
-                    child: AnimatedSwitcher(
-                      duration: const Duration(milliseconds: 180),
-                      switchInCurve: Curves.easeOutCubic,
-                      switchOutCurve: Curves.easeInCubic,
-                      transitionBuilder: (child, anim) => ScaleTransition(scale: anim, child: child),
-                      child: SvgIcon(
-                        key: ValueKey(widget.assetName),
-                        name: widget.assetName,
-                        size: widget.iconSize,
-                        color: currentColor,
-                      ),
-                    ),
+                      ? activeColor.withValues(alpha: 0.18)
+                      : (_isHovered && widget.isEnabled
+                          ? (isLight ? Colors.black.withValues(alpha: 0.05) : Colors.white.withValues(alpha: 0.08))
+                          : Colors.transparent),
+                  border: Border.all(
+                    color: isActive
+                        ? activeColor.withValues(alpha: 0.45)
+                        : Colors.transparent,
+                    width: 1,
                   ),
-                  if (widget.badgeColor != null)
-                    Positioned(
-                      right: -3,
-                      bottom: -3,
-                      child: AnimatedContainer(
-                        duration: const Duration(milliseconds: 180),
-                        width: 9,
-                        height: 9,
-                        decoration: BoxDecoration(
-                          color: widget.badgeColor,
-                          shape: BoxShape.circle,
-                          border: Border.all(
-                            color: isLight ? Colors.black45 : Colors.white,
-                            width: 1.0,
+                  boxShadow: isActive
+                      ? [
+                          BoxShadow(
+                            color: activeColor.withValues(alpha: 0.35),
+                            blurRadius: 8,
+                            spreadRadius: 1,
                           ),
-                          boxShadow: [
-                            BoxShadow(
-                              color: widget.badgeColor!.withValues(alpha: 0.6),
-                              blurRadius: 4,
+                        ]
+                      : null,
+                ),
+                child: Stack(
+                  clipBehavior: Clip.none,
+                  alignment: Alignment.center,
+                  children: [
+                    widget.rotateWhenActive
+                        ? AnimatedRotation(
+                            turns: currentRotation,
+                            duration: const Duration(milliseconds: 180),
+                            curve: Curves.easeOutCubic,
+                            child: iconSwitcher,
+                          )
+                        : iconSwitcher,
+                    if (widget.badgeColor != null)
+                      Positioned(
+                        right: -3,
+                        bottom: -3,
+                        child: AnimatedContainer(
+                          duration: const Duration(milliseconds: 180),
+                          width: 9,
+                          height: 9,
+                          decoration: BoxDecoration(
+                            color: widget.badgeColor,
+                            shape: BoxShape.circle,
+                            border: Border.all(
+                              color: isLight ? Colors.black45 : Colors.white,
+                              width: 1.0,
                             ),
-                          ],
+                            boxShadow: [
+                              BoxShadow(
+                                color: widget.badgeColor!.withValues(alpha: 0.6),
+                                blurRadius: 4,
+                              ),
+                            ],
+                          ),
                         ),
                       ),
-                    ),
-                ],
+                  ],
+                ),
               ),
             ),
           ),

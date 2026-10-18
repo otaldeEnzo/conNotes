@@ -75,8 +75,8 @@ extension MoscaroV2Extension on Widget {
       return ClipRRect(
         borderRadius: BorderRadius.circular(borderRadius),
         child: BackdropFilter(
-          filter: ui.ImageFilter.blur(sigmaX: computedBlur, sigmaY: computedBlur),
-          child: styledBox,
+          filter: _getCachedBlurFilter(computedBlur),
+          child: RepaintBoundary(child: styledBox),
         ),
       );
     }
@@ -84,6 +84,16 @@ extension MoscaroV2Extension on Widget {
     return ClipRRect(
       borderRadius: BorderRadius.circular(borderRadius),
       child: styledBox,
+    );
+  }
+
+  static final Map<int, ui.ImageFilter> _blurFilterCache = {};
+
+  static ui.ImageFilter _getCachedBlurFilter(double blur) {
+    final key = (blur * 10).round();
+    return _blurFilterCache.putIfAbsent(
+      key,
+      () => ui.ImageFilter.blur(sigmaX: blur, sigmaY: blur),
     );
   }
 }

@@ -133,6 +133,7 @@ class CardsTelemetryController extends ChangeNotifier {
   CardsTelemetryController._internal();
 
   final ValueNotifier<CardsTelemetryData> telemetryNotifier = ValueNotifier(const CardsTelemetryData());
+  bool isOverlayActive = false;
 
   CardsTelemetryData get current => telemetryNotifier.value;
   bool get isInteractingWithCard => current.isInteractingWithCard || current.isDraggingCard || current.isResizingCard;
@@ -143,6 +144,10 @@ class CardsTelemetryController extends ChangeNotifier {
     required String? selectedCardId,
     required Offset canvasPoint,
   }) {
+    if (cards.isEmpty) {
+      return (zone: CardHoverZone.none, card: null);
+    }
+
     const edgeThickness = 12.0;
     const cornerSize = 24.0;
 
@@ -151,7 +156,7 @@ class CardsTelemetryController extends ChangeNotifier {
       final selected = cards.where((c) => c.id == selectedCardId).firstOrNull;
       if (selected != null) {
         final double headerH = (selected.cardType == CardType.pdf && (selected.sourceMasterCardId == null || selected.isDetached)) ? 28.0 : 0.0;
-        final double minH = selected.calculateMinHeight();
+        final double minH = selected.cachedMinHeight;
         final double cardH = selected.isCollapsed ? 36.0 : math.max(selected.height + headerH, minH);
 
         // Alca de Rotacao (~24px acima do topo central do card quando selecionado)
@@ -237,11 +242,19 @@ class CardsTelemetryController extends ChangeNotifier {
     }
 
     // 2. Testa os demais cards em ordem reversa (topo para fundo) - Hitbox exata na geometria visível
+    const double handleMargin = 12.0;
     for (final card in cards.reversed) {
       if (card.id == selectedCardId) continue;
+      // Early-Reject horizontal rápido ANTES de calcular a altura:
+      if (canvasPoint.dx < card.x - handleMargin || canvasPoint.dx > card.x + card.width + handleMargin) {
+        continue;
+      }
       final double headerH = (card.cardType == CardType.pdf && (card.sourceMasterCardId == null || card.isDetached)) ? 28.0 : 0.0;
-      final double minH = card.calculateMinHeight();
+      final double minH = card.cachedMinHeight;
       final double cardH = card.isCollapsed ? 36.0 : math.max(card.height + headerH, minH);
+      if (canvasPoint.dy < card.y - handleMargin || canvasPoint.dy > card.y + cardH + handleMargin) {
+        continue;
+      }
 
       final totalCardRect = Rect.fromLTWH(card.x, card.y, card.width, cardH);
       if (totalCardRect.contains(canvasPoint)) {
@@ -286,6 +299,20 @@ class CardsTelemetryController extends ChangeNotifier {
         (current.isDraggingCard ||
             current.isResizingCard ||
             (eventType == 'Down' && detectedZone != CardHoverZone.none));
+
+    final bool semanticChanged = detectedZone != current.hoverZone ||
+        detectedCard?.id != current.hoveredCardId ||
+        interacting != current.isInteractingWithCard ||
+        selectedCardId != current.selectedCardId ||
+        eventType != current.lastEventType ||
+        buttons != current.buttons ||
+        activeTool != current.activeTool;
+
+    final bool overlayActive = isOverlayActive || hasListeners || telemetryNotifier.hasListeners;
+
+    if (!overlayActive && !semanticChanged) {
+      return;
+    }
 
     telemetryNotifier.value = current.copyWith(
       lastEventType: eventType,

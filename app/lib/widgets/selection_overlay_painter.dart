@@ -1,11 +1,9 @@
 import 'dart:math' as math;
 import 'dart:ui' as ui;
-import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import '../theme/moscaro_v2_tokens.dart';
 import '../theme/stem_ink_theme_adapter.dart';
 import 'canvas_layers.dart';
-import 'ink_models.dart';
 import 'note_models.dart';
 import 'selection_models.dart';
 
@@ -13,9 +11,16 @@ import 'selection_models.dart';
 class SelectedStrokesPictureCache {
   ui.Picture? _picture;
   Set<String>? _cachedIds;
+  int? _cachedStrokesVersion;
+  bool? _cachedIsLight;
 
   void update(NoteDocument note, Set<String> selectedIds) {
+    final isLight = MoscaroTokens.isLight;
+    final strokesVersion = note.strokesVersion;
+
     if (_cachedIds != null &&
+        _cachedStrokesVersion == strokesVersion &&
+        _cachedIsLight == isLight &&
         _cachedIds!.length == selectedIds.length &&
         _cachedIds!.containsAll(selectedIds) &&
         _picture != null) {
@@ -27,6 +32,8 @@ class SelectedStrokesPictureCache {
 
     if (selectedIds.isEmpty) {
       _cachedIds = null;
+      _cachedStrokesVersion = null;
+      _cachedIsLight = null;
       return;
     }
 
@@ -37,12 +44,14 @@ class SelectedStrokesPictureCache {
     for (final id in selectedIds) {
       final stroke = note.getStroke(id);
       if (stroke != null) {
-        SelectionOverlayPainter._drawStrokeDirectFast(canvas, stroke, reusablePaint);
+        StrokePictureCache.drawSingleStroke(canvas, stroke, reusablePaint);
       }
     }
 
     _picture = recorder.endRecording();
     _cachedIds = Set<String>.from(selectedIds);
+    _cachedStrokesVersion = strokesVersion;
+    _cachedIsLight = isLight;
   }
 
   void draw(Canvas canvas) {
@@ -55,12 +64,16 @@ class SelectedStrokesPictureCache {
     _picture?.dispose();
     _picture = null;
     _cachedIds = null;
+    _cachedStrokesVersion = null;
+    _cachedIsLight = null;
   }
 
   void dispose() {
     _picture?.dispose();
     _picture = null;
     _cachedIds = null;
+    _cachedStrokesVersion = null;
+    _cachedIsLight = null;
   }
 }
 
@@ -182,6 +195,9 @@ class SelectionOverlayPainter extends CustomPainter {
     _drawDashedPath(canvas, path, borderPaint);
   }
 
+  static final Map<int, TextPainter> _degTextPainters = {};
+  static double _degCachedZoom = 1.0;
+
   void _drawSelectionBox(
     Canvas canvas,
     Rect bounds, {
@@ -222,18 +238,24 @@ class SelectionOverlayPainter extends CustomPainter {
     // HUD Moscaro de Graus em Rotação (Exibido no topo da seleção durante rotação ativa)
     if (rotation != 0.0 || activeHandle == SelectionHandleType.rotation) {
       final deg = ((rotation * 180.0 / math.pi) % 360.0).round();
-      final textSpan = TextSpan(
-        text: '$deg°',
-        style: TextStyle(
-          color: MoscaroTokens.auroraBlue,
-          fontSize: 12.0 / zoomScale,
-          fontWeight: FontWeight.bold,
-        ),
-      );
-      final textPainter = TextPainter(
-        text: textSpan,
-        textDirection: TextDirection.ltr,
-      )..layout();
+      if (_degCachedZoom != zoomScale) {
+        _degTextPainters.clear();
+        _degCachedZoom = zoomScale;
+      }
+      final textPainter = _degTextPainters.putIfAbsent(deg, () {
+        final textSpan = TextSpan(
+          text: '$deg°',
+          style: TextStyle(
+            color: MoscaroTokens.auroraBlue,
+            fontSize: 12.0 / zoomScale,
+            fontWeight: FontWeight.bold,
+          ),
+        );
+        return TextPainter(
+          text: textSpan,
+          textDirection: TextDirection.ltr,
+        )..layout();
+      });
 
       final hudCenter = Offset(inflated.center.dx, inflated.top - (20.0 / zoomScale));
       final hudRect = Rect.fromCenter(
@@ -263,66 +285,6 @@ class SelectionOverlayPainter extends CustomPainter {
     canvas.restore();
   }
 
-  static void _drawStrokeDirectFast(Canvas canvas, InkStroke stroke, Paint reusablePaint) {
-    if (stroke.points.isEmpty) return;
-
-    final bool hasTransform = stroke.transform != Offset.zero;
-    if (hasTransform) {
-      canvas.save();
-      canvas.translate(stroke.transform.dx, stroke.transform.dy);
-    }
-
-    try {
-      final adapted = StemInkThemeAdapter.adaptStrokeColor(stroke.color, isLightTheme: MoscaroTokens.isLight);
-      
-      if ((stroke.toolType == InkToolType.fountain || stroke.enablePressure) && !stroke.isShape) {
-        reusablePaint
-          ..color = adapted
-          ..style = PaintingStyle.fill;
-
-        if (stroke.cachedPath != null) {
-          canvas.drawPath(stroke.cachedPath!, reusablePaint);
-        } else {
-          final path = FreehandOutlineRenderer.generateOutlinePath(
-            stroke.points,
-            baseWidth: stroke.strokeWidth,
-            isTapered: stroke.toolType == InkToolType.fountain,
-          );
-          canvas.drawPath(path, reusablePaint);
-        }
-        return;
-      }
-
-      final color = stroke.toolType == InkToolType.highlighter
-          ? adapted.withValues(alpha: 0.35)
-          : (stroke.toolType == InkToolType.pencil ? adapted.withValues(alpha: 0.65) : adapted);
-
-      reusablePaint
-        ..color = color
-        ..strokeWidth = stroke.strokeWidth * (stroke.toolType == InkToolType.highlighter ? 3.5 : 1.0)
-        ..strokeCap = stroke.toolType == InkToolType.highlighter ? StrokeCap.square : StrokeCap.round
-        ..strokeJoin = stroke.toolType == InkToolType.highlighter ? StrokeJoin.bevel : StrokeJoin.round
-        ..style = PaintingStyle.stroke;
-
-      if (stroke.cachedPath != null) {
-        canvas.drawPath(stroke.cachedPath!, reusablePaint);
-      } else if (stroke.toolType == InkToolType.technical && !stroke.enablePressure && stroke.points.length > 50) {
-        final rawPoints = Float32List(stroke.points.length * 2);
-        for (int i = 0; i < stroke.points.length; i++) {
-          rawPoints[i * 2] = stroke.points[i].point.dx;
-          rawPoints[i * 2 + 1] = stroke.points[i].point.dy;
-        }
-        canvas.drawRawPoints(ui.PointMode.polygon, rawPoints, reusablePaint);
-      } else {
-        final path = InkStroke.buildCatmullRomPath(stroke.points);
-        canvas.drawPath(path, reusablePaint);
-      }
-    } finally {
-      if (hasTransform) {
-        canvas.restore();
-      }
-    }
-  }
 
   void _drawResizedStrokesPreview(
     Canvas canvas,
@@ -335,67 +297,16 @@ class SelectionOverlayPainter extends CustomPainter {
 
     final double scaleX = transformBounds.width / bounds.width;
     final double scaleY = transformBounds.height / bounds.height;
-    final double geomScale = math.sqrt(scaleX.abs() * scaleY.abs());
-    final reusablePaint = Paint();
 
-    for (final id in selectedIds) {
-      final stroke = note.getStroke(id);
-      if (stroke == null || stroke.points.isEmpty) continue;
+    canvas.save();
+    canvas.translate(transformBounds.left, transformBounds.top);
+    canvas.scale(scaleX, scaleY);
+    canvas.translate(-bounds.left, -bounds.top);
 
-      final mappedPoints = <StrokePoint>[];
-      for (int i = 0; i < stroke.points.length; i++) {
-        final p = stroke.points[i];
-        final localP = p.point + stroke.transform;
-        final u = (localP.dx - bounds.left) / bounds.width;
-        final v = (localP.dy - bounds.top) / bounds.height;
-        final newX = transformBounds.left + u * transformBounds.width;
-        final newY = transformBounds.top + v * transformBounds.height;
-        mappedPoints.add(StrokePoint(
-          point: Offset(newX, newY),
-          pressure: p.pressure,
-          tilt: p.tilt,
-        ));
-      }
+    dragCache.update(note, selectedIds);
+    dragCache.draw(canvas);
 
-      final newStrokeWidth = (stroke.strokeWidth * geomScale).clamp(0.5, 50.0);
-      final adapted = StemInkThemeAdapter.adaptStrokeColor(stroke.color, isLightTheme: MoscaroTokens.isLight);
-
-      // Renderização direta 1:1 idêntica aos traços finais
-      if (stroke.toolType == InkToolType.fountain || stroke.enablePressure) {
-        reusablePaint
-          ..color = adapted
-          ..style = PaintingStyle.fill;
-        final path = FreehandOutlineRenderer.generateOutlinePath(
-          mappedPoints,
-          baseWidth: newStrokeWidth,
-          isTapered: stroke.toolType == InkToolType.fountain,
-        );
-        canvas.drawPath(path, reusablePaint);
-      } else {
-        final color = stroke.toolType == InkToolType.highlighter
-            ? adapted.withValues(alpha: 0.35)
-            : (stroke.toolType == InkToolType.pencil ? adapted.withValues(alpha: 0.65) : adapted);
-
-        reusablePaint
-          ..color = color
-          ..strokeWidth = newStrokeWidth * (stroke.toolType == InkToolType.highlighter ? 3.5 : 1.0)
-          ..strokeCap = stroke.toolType == InkToolType.highlighter ? StrokeCap.square : StrokeCap.round
-          ..strokeJoin = stroke.toolType == InkToolType.highlighter ? StrokeJoin.bevel : StrokeJoin.round
-          ..style = PaintingStyle.stroke;
-
-        if (stroke.toolType == InkToolType.technical && !stroke.enablePressure && mappedPoints.length > 50) {
-          final rawPoints = Float32List(mappedPoints.length * 2);
-          for (int i = 0; i < mappedPoints.length; i++) {
-            rawPoints[i * 2] = mappedPoints[i].point.dx;
-            rawPoints[i * 2 + 1] = mappedPoints[i].point.dy;
-          }
-          canvas.drawRawPoints(ui.PointMode.polygon, rawPoints, reusablePaint);
-        } else {
-          final path = InkStroke.buildCatmullRomPath(mappedPoints);
-          canvas.drawPath(path, reusablePaint);
-        }
-      }
-    }
+    canvas.restore();
   }
 
   void _drawDashedRect(Canvas canvas, Rect rect, Paint paint) {

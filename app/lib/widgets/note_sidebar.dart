@@ -51,10 +51,14 @@ class _NoteSidebarState extends State<NoteSidebar> {
 
   // Overlay Menu à Direita da Sidebar
   OverlayEntry? _activeMenuOverlay;
+  bool _keepMounted = false;
+  bool _animateOpen = false;
 
   @override
   void initState() {
     super.initState();
+    _keepMounted = widget.isOpen;
+    _animateOpen = widget.isOpen;
     _searchFocusNode.addListener(_syncEditingTextFocus);
     _inlineRenameFocusNode.addListener(_syncEditingTextFocus);
   }
@@ -75,7 +79,16 @@ class _NoteSidebarState extends State<NoteSidebar> {
   @override
   void didUpdateWidget(NoteSidebar oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.isOpen != widget.isOpen && !widget.isOpen) {
+    if (!oldWidget.isOpen && widget.isOpen) {
+      _keepMounted = true;
+      _animateOpen = false;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && widget.isOpen) {
+          setState(() => _animateOpen = true);
+        }
+      });
+    } else if (oldWidget.isOpen && !widget.isOpen) {
+      _animateOpen = false;
       _closeActiveMenu();
       if (_searchFocusNode.hasFocus) _searchFocusNode.unfocus();
       if (_inlineRenameFocusNode.hasFocus) _inlineRenameFocusNode.unfocus();
@@ -135,6 +148,10 @@ class _NoteSidebarState extends State<NoteSidebar> {
 
   @override
   Widget build(BuildContext context) {
+    if (!widget.isOpen && !_keepMounted) {
+      return const SizedBox.shrink();
+    }
+
     return ListenableBuilder(
       listenable: Listenable.merge([
         WorkspaceStorageService.instance,
@@ -153,11 +170,17 @@ class _NoteSidebarState extends State<NoteSidebar> {
         return AnimatedPositioned(
           duration: const Duration(milliseconds: 350),
           curve: Curves.easeInOutCubic,
-          left: widget.isOpen ? 24 : -390,
+          left: (widget.isOpen && _animateOpen) ? 24 : -390,
           top: 48,
           bottom: 24,
-          child: TapRegion(
-            groupId: 'note_sidebar_region',
+          onEnd: () {
+            if (!widget.isOpen && mounted && _keepMounted) {
+              setState(() => _keepMounted = false);
+            }
+          },
+          child: RepaintBoundary(
+            child: TapRegion(
+              groupId: 'note_sidebar_region',
             onTapOutside: (_) {
               if (widget.isOpen) {
                 widget.onClose?.call();
@@ -295,7 +318,8 @@ class _NoteSidebarState extends State<NoteSidebar> {
             ),
           ),
         ),
-      );
+      ),
+    );
       },
     );
   }

@@ -106,6 +106,9 @@ class PdfSearchEngine {
         if (_isDisposed || generation != _searchGeneration) return;
         if (excludedSet.contains(pageNum)) continue;
 
+        if (pageNum % 8 == 0) await Future<void>.delayed(Duration.zero);
+        if (_isDisposed || generation != _searchGeneration) return;
+
         final pageText = await _documentService.loadPageText(filePath, pageNum);
         if (_isDisposed || generation != _searchGeneration) return;
         if (pageText == null || pageText.fullText.isEmpty) continue;

@@ -109,6 +109,20 @@ class InkStroke {
   Path? cachedPath; // Caminho pré-calculado (no espaço local, SEM transform) para renderização instantânea durante Pan/Zoom
   Float32List? cachedRawPoints; // Geometria compacta para drawRawPoints sem alocação no paint
 
+  // Estado incremental O(1) exclusivo do traço ativo (spine de pontos médios, append-only)
+  Path? incrementalSpinePath;
+  int incrementalSpineCount = 0;
+  // Blocos de contorno já finalizados da caneta com pressão (o contorno fechado não é append-only)
+  final List<Path> liveFrozenOutlines = [];
+  int liveFrozenUpTo = 0;
+
+  void disposeLiveCache() {
+    incrementalSpinePath = null;
+    incrementalSpineCount = 0;
+    liveFrozenOutlines.clear();
+    liveFrozenUpTo = 0;
+  }
+
   InkStroke({
     required this.id,
     required this.points,

@@ -43,7 +43,7 @@ class NoteTabBar extends StatefulWidget {
 
 class _NoteTabBarState extends State<NoteTabBar> {
   final ScrollController _scrollController = ScrollController();
-  double _scrollProgress = 0.0;
+  final ValueNotifier<double> _scrollProgress = ValueNotifier<double>(0.0);
   bool _hasScrollOverflow = false;
   bool _showScrollIndicator = false;
   Timer? _scrollIndicatorTimer;
@@ -72,6 +72,7 @@ class _NoteTabBarState extends State<NoteTabBar> {
     _scrollIndicatorTimer?.cancel();
     _scrollController.removeListener(_updateScrollProgress);
     _scrollController.dispose();
+    _scrollProgress.dispose();
     super.dispose();
   }
 
@@ -92,9 +93,11 @@ class _NoteTabBarState extends State<NoteTabBar> {
     final maxScroll = _scrollController.position.maxScrollExtent;
     final hasOverflow = maxScroll > 0.5;
     if (!hasOverflow) {
-      if (_scrollProgress != 0.0 || _hasScrollOverflow) {
+      if (_scrollProgress.value != 0.0) {
+        _scrollProgress.value = 0.0;
+      }
+      if (_hasScrollOverflow) {
         setState(() {
-          _scrollProgress = 0.0;
           _hasScrollOverflow = false;
         });
       }
@@ -103,11 +106,13 @@ class _NoteTabBarState extends State<NoteTabBar> {
     final progress = (_scrollController.offset / maxScroll).clamp(0.0, 1.0);
     _triggerScrollIndicator();
 
-    if ((progress - _scrollProgress).abs() > 0.01 || !_hasScrollOverflow) {
+    if (!_hasScrollOverflow) {
       setState(() {
-        _scrollProgress = progress;
         _hasScrollOverflow = true;
       });
+    }
+    if ((progress - _scrollProgress.value).abs() > 0.01) {
+      _scrollProgress.value = progress;
     }
   }
 
@@ -134,7 +139,6 @@ class _NoteTabBarState extends State<NoteTabBar> {
     return ListenableBuilder(
       listenable: Listenable.merge([
         WorkspaceStorageService.instance,
-        WorkspaceStorageService.instance.notesListNotifier,
         MoscaroThemeController.instance,
       ]),
       builder: (context, _) {
@@ -291,15 +295,20 @@ class _NoteTabBarState extends State<NoteTabBar> {
                               color: isLight ? Colors.black12 : Colors.white12,
                               child: Align(
                                 alignment: Alignment.centerLeft,
-                                child: FractionallySizedBox(
-                                  widthFactor: _scrollProgress.clamp(0.1, 1.0),
-                                  child: Container(
-                                    decoration: BoxDecoration(
-                                      gradient: LinearGradient(
-                                        colors: [accent, accentSecondary],
+                                child: ValueListenableBuilder<double>(
+                                  valueListenable: _scrollProgress,
+                                  builder: (context, progress, _) {
+                                    return FractionallySizedBox(
+                                      widthFactor: progress.clamp(0.1, 1.0),
+                                      child: Container(
+                                        decoration: BoxDecoration(
+                                          gradient: LinearGradient(
+                                            colors: [accent, accentSecondary],
+                                          ),
+                                        ),
                                       ),
-                                    ),
-                                  ),
+                                    );
+                                  },
                                 ),
                               ),
                             ),

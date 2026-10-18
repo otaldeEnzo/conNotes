@@ -54,6 +54,39 @@ class WorkspaceStorageService extends ChangeNotifier {
   Timer? _watcherDebounceTimer;
   final Set<String> _pendingSaveDocIds = {};
   final Map<String, NoteDocument> _pendingDocs = {};
+  final Map<String, DateTime> _recentInternalWrites = {};
+  final Map<String, ({DateTime lastModified, NoteDocument doc})> _mtimeCache = {};
+
+  void _recordInternalWrite(String path, [NoteDocument? doc]) {
+    final normalized = path.replaceAll('\\', '/').toLowerCase();
+    _recentInternalWrites[normalized] = DateTime.now();
+    if (doc != null) {
+      try {
+        final stat = File(path).statSync();
+        _mtimeCache[normalized] = (lastModified: stat.modified, doc: doc);
+      } catch (_) {}
+    }
+  }
+
+  Future<NoteDocument?> _loadCachedDoc(File file) async {
+    try {
+      final stat = await file.stat();
+      final normalizedPath = file.path.replaceAll('\\', '/').toLowerCase();
+      final cached = _mtimeCache[normalizedPath];
+      if (cached != null && cached.lastModified.isAtSameMomentAs(stat.modified)) {
+        return cached.doc;
+      }
+      final doc = await CncanvasFileService.loadFromCnCanvasFile(file.path);
+      if (doc != null) {
+        _mtimeCache[normalizedPath] = (lastModified: stat.modified, doc: doc);
+      } else {
+        _mtimeCache.remove(normalizedPath);
+      }
+      return doc;
+    } catch (_) {
+      return null;
+    }
+  }
 
   /// Retorna o caminho padrão de Documentos do usuário no Windows / SO
   static String getDefaultWorkspacePath() {
@@ -104,6 +137,10 @@ class WorkspaceStorageService extends ChangeNotifier {
       if (dir.existsSync()) {
         _watcherSubscription = dir.watch(recursive: true).listen((event) {
           final p = event.path;
+          // Ignorar arquivos temporários .tmp imediatamente antes de qualquer verificação
+          if (p.endsWith('.tmp')) {
+            return;
+          }
           // Ignorar arquivos temporários ou de sistema
           if (p.contains(r'\.') || p.contains('/.')) {
             return;
@@ -111,6 +148,17 @@ class WorkspaceStorageService extends ChangeNotifier {
           // Apenas reagir se for arquivo .cncanvas ou alteração de pasta
           if (!p.endsWith('.cncanvas') && !FileSystemEntity.isDirectorySync(p)) {
             return;
+          }
+
+          // Ignorar eventos gerados por escritas internas recentes (janela de 2.5 segundos)
+          final normalized = p.replaceAll('\\', '/').toLowerCase();
+          final writeTime = _recentInternalWrites[normalized];
+          if (writeTime != null) {
+            if (DateTime.now().difference(writeTime).inMilliseconds < 2500) {
+              return;
+            } else {
+              _recentInternalWrites.remove(normalized);
+            }
           }
 
           // Debounce para evitar varreduras repetitivas em operações de escrita rápida
@@ -146,7 +194,7 @@ class WorkspaceStorageService extends ChangeNotifier {
           final folder = await _scanFolder(entity, folderName);
           scannedNotebooks.add(folder);
         } else if (entity is File && entity.path.endsWith('.cncanvas')) {
-          final doc = await CncanvasFileService.loadFromCnCanvasFile(entity.path);
+          final doc = await _loadCachedDoc(entity);
           if (doc != null) {
             scannedRootNotes.add(doc);
           }
@@ -164,7 +212,7 @@ class WorkspaceStorageService extends ChangeNotifier {
         final trashEntities = trashDir.listSync();
         for (final entity in trashEntities) {
           if (entity is File && entity.path.endsWith('.cncanvas')) {
-            final doc = await CncanvasFileService.loadFromCnCanvasFile(entity.path);
+            final doc = await _loadCachedDoc(entity);
             if (doc != null) {
               scannedTrashNotes.add(doc);
             }
@@ -210,7 +258,7 @@ class WorkspaceStorageService extends ChangeNotifier {
           final sub = await _scanFolder(entity, subName);
           subFolders.add(sub);
         } else if (entity is File && entity.path.endsWith('.cncanvas')) {
-          final doc = await CncanvasFileService.loadFromCnCanvasFile(entity.path);
+          final doc = await _loadCachedDoc(entity);
           if (doc != null) {
             notes.add(doc);
           }
@@ -378,7 +426,9 @@ class WorkspaceStorageService extends ChangeNotifier {
     }
 
     try {
+      _recordInternalWrite(filePath, doc);
       await CncanvasFileService.saveToCnCanvasFile(doc, filePath);
+      _recordInternalWrite(filePath, doc);
       _liveNoteMetadata[doc.id] = (title: doc.title, filePath: doc.filePath);
     } catch (e) {
       debugPrint('[WorkspaceStorageService] Erro ao salvar nota ${doc.id}: $e');
@@ -443,7 +493,9 @@ class WorkspaceStorageService extends ChangeNotifier {
     );
 
     _liveNoteMetadata[doc.id] = (title: resolvedTitle, filePath: filePath);
+    _recordInternalWrite(filePath, doc);
     await CncanvasFileService.saveToCnCanvasFile(doc, filePath);
+    _recordInternalWrite(filePath, doc);
     await scanWorkspace();
     notifyListeners();
     notesListNotifier.notifyListeners();
@@ -482,7 +534,9 @@ class WorkspaceStorageService extends ChangeNotifier {
     _liveNoteMetadata[note.id] = (title: resolvedTitle, filePath: note.filePath);
 
     if (note.filePath != null) {
+      _recordInternalWrite(note.filePath!, note);
       await CncanvasFileService.saveToCnCanvasFile(note, note.filePath!);
+      _recordInternalWrite(note.filePath!, note);
     }
     await scanWorkspace();
     notifyListeners();
@@ -499,7 +553,9 @@ class WorkspaceStorageService extends ChangeNotifier {
       oldParent.children.removeWhere((c) => c.id == childNote.id);
       if (oldParent.filePath != null && File(oldParent.filePath!).existsSync()) {
         try {
+          _recordInternalWrite(oldParent.filePath!, oldParent);
           await CncanvasFileService.saveToCnCanvasFile(oldParent, oldParent.filePath!);
+          _recordInternalWrite(oldParent.filePath!, oldParent);
         } catch (_) {}
       }
     }
@@ -519,7 +575,9 @@ class WorkspaceStorageService extends ChangeNotifier {
     }
 
     if (parentNote.filePath != null) {
+      _recordInternalWrite(parentNote.filePath!, parentNote);
       await CncanvasFileService.saveToCnCanvasFile(parentNote, parentNote.filePath!);
+      _recordInternalWrite(parentNote.filePath!, parentNote);
       // Remove o arquivo autônomo antigo somente após o pai ter sido salvo atomicamente no disco
       if (oldStandalonePath != null &&
           oldStandalonePath != parentNote.filePath &&
@@ -565,7 +623,9 @@ class WorkspaceStorageService extends ChangeNotifier {
       parent.children.removeWhere((c) => c.id == subnote.id);
       if (parent.filePath != null && File(parent.filePath!).existsSync()) {
         try {
+          _recordInternalWrite(parent.filePath!, parent);
           await CncanvasFileService.saveToCnCanvasFile(parent, parent.filePath!);
+          _recordInternalWrite(parent.filePath!, parent);
         } catch (e) {
           debugPrint('[WorkspaceStorageService] Erro ao salvar nota pai após desaninhamento: $e');
         }
@@ -586,13 +646,20 @@ class WorkspaceStorageService extends ChangeNotifier {
 
     final newFilePath = _resolveUniqueFilePath(folder, subnote.title, ignoreCurrentPath: subnote.filePath);
     subnote.filePath = newFilePath;
+    _recordInternalWrite(newFilePath, subnote);
     await CncanvasFileService.saveToCnCanvasFile(subnote, newFilePath);
+    _recordInternalWrite(newFilePath, subnote);
     _liveNoteMetadata[subnote.id] = (title: subnote.title, filePath: newFilePath);
 
     if (targetFolderName != null && targetFolderName.isNotEmpty) {
-      final nb = _notebooks.firstWhere((n) => n.name == targetFolderName, orElse: () => _notebooks.first);
-      nb.notes.removeWhere((n) => n.id == subnote.id);
-      nb.notes.add(subnote);
+      final nb = _notebooks.where((n) => n.name == targetFolderName).firstOrNull ?? _notebooks.firstOrNull;
+      if (nb != null) {
+        nb.notes.removeWhere((n) => n.id == subnote.id);
+        nb.notes.add(subnote);
+      } else {
+        _rootNotes.removeWhere((n) => n.id == subnote.id);
+        _rootNotes.add(subnote);
+      }
     } else {
       _rootNotes.removeWhere((n) => n.id == subnote.id);
       _rootNotes.add(subnote);
@@ -614,7 +681,9 @@ class WorkspaceStorageService extends ChangeNotifier {
       parent.children.removeWhere((c) => c.id == dragged.id);
       if (parent.filePath != null && File(parent.filePath!).existsSync()) {
         try {
+          _recordInternalWrite(parent.filePath!, parent);
           await CncanvasFileService.saveToCnCanvasFile(parent, parent.filePath!);
+          _recordInternalWrite(parent.filePath!, parent);
         } catch (_) {}
       }
 
@@ -629,7 +698,9 @@ class WorkspaceStorageService extends ChangeNotifier {
         if (!dir.existsSync()) dir.createSync(recursive: true);
         final newPath = _resolveUniqueFilePath(folder, dragged.title);
         dragged.filePath = newPath;
+        _recordInternalWrite(newPath, dragged);
         await CncanvasFileService.saveToCnCanvasFile(dragged, newPath);
+        _recordInternalWrite(newPath, dragged);
         _liveNoteMetadata[dragged.id] = (title: dragged.title, filePath: newPath);
       }
     } else {
@@ -640,8 +711,8 @@ class WorkspaceStorageService extends ChangeNotifier {
     // Ajusta a ordem na lista apropriada
     List<NoteDocument> list;
     if (targetFolderName != null && targetFolderName.isNotEmpty) {
-      final nb = _notebooks.firstWhere((n) => n.name == targetFolderName, orElse: () => _notebooks.first);
-      list = nb.notes;
+      final nb = _notebooks.where((n) => n.name == targetFolderName).firstOrNull ?? _notebooks.firstOrNull;
+      list = nb != null ? nb.notes : _rootNotes;
     } else {
       list = _rootNotes;
     }

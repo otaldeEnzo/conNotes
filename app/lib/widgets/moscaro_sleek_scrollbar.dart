@@ -28,6 +28,9 @@ class MoscaroSleekScrollbar extends StatelessWidget {
   /// Optional custom thumb color override. If null, automatically binds to active theme accent.
   final Color? thumbColor;
 
+  /// The scroll direction of the scrollbar. Defaults to [Axis.vertical].
+  final Axis scrollDirection;
+
   const MoscaroSleekScrollbar({
     super.key,
     required this.child,
@@ -37,6 +40,7 @@ class MoscaroSleekScrollbar extends StatelessWidget {
     this.thickness = 4.0,
     this.padding,
     this.thumbColor,
+    this.scrollDirection = Axis.vertical,
   });
 
   @override
@@ -67,6 +71,9 @@ class MoscaroSleekScrollbar extends StatelessWidget {
           trackColor: trackColor,
           padding: padding,
           interactive: true,
+          scrollbarOrientation: scrollDirection == Axis.horizontal
+              ? ScrollbarOrientation.bottom
+              : ScrollbarOrientation.right,
           child: child,
         );
       },

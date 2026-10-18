@@ -6,6 +6,7 @@ import 'package:pdf/pdf.dart' as pw_pdf;
 import 'package:pdf/widgets.dart' as pw;
 import 'package:pdfrx/pdfrx.dart';
 import '../widgets/ink_models.dart';
+import 'pdf_page_spatial_index.dart';
 
 /// Singleton service managing pdfrx Pdfium document lifecycles, text fragment metrics,
 /// caching, and high-resolution 300 DPI composite annotation export.
@@ -23,8 +24,11 @@ class PdfDocumentService {
 
   static const int _maxCachedDocuments = 8;
   final Map<String, PdfDocument> _documentCache = <String, PdfDocument>{};
+  final Map<String, Future<PdfDocument>> _inFlightLoads = <String, Future<PdfDocument>>{};
   final Map<String, Map<int, PdfPageText>> _pageTextCache = <String, Map<int, PdfPageText>>{};
+  final Map<String, Map<int, PdfPageSpatialIndex>> _spatialIndexCache = <String, Map<int, PdfPageSpatialIndex>>{};
   final Map<String, List<PdfOutlineNode>> _outlineCache = <String, List<PdfOutlineNode>>{};
+  final Set<String> _activeMountedDocuments = <String>{};
   bool _isInitialized = false;
 
   /// Indicates whether pdfrx engine has been initialized.
@@ -45,7 +49,8 @@ class PdfDocumentService {
     _isInitialized = true;
   }
 
-  /// Opens and caches a PdfDocument from a local filesystem path with bounded LRU eviction.
+  /// Opens and caches a PdfDocument from a local filesystem path with bounded LRU eviction
+  /// and concurrent load deduplication.
   Future<PdfDocument> loadDocument(String filePath, {PdfPasswordProvider? passwordProvider}) async {
     await initialize();
 
@@ -56,14 +61,60 @@ class PdfDocumentService {
       return cached;
     }
 
-    while (_documentCache.length >= _maxCachedDocuments) {
-      final oldestKey = _documentCache.keys.first;
-      disposeDocument(oldestKey);
+    final inFlight = _inFlightLoads[filePath];
+    if (inFlight != null) {
+      return inFlight;
     }
 
-    final doc = await PdfDocument.openFile(filePath, passwordProvider: passwordProvider);
-    _documentCache[filePath] = doc;
-    return doc;
+    final loadFuture = () async {
+      try {
+        _evictOldestIfNeeded();
+        final doc = await PdfDocument.openFile(filePath, passwordProvider: passwordProvider);
+        _documentCache[filePath] = doc;
+        return doc;
+      } finally {
+        _inFlightLoads.remove(filePath);
+      }
+    }();
+
+    _inFlightLoads[filePath] = loadFuture;
+    return loadFuture;
+  }
+
+  void _evictOldestIfNeeded() {
+    while (_documentCache.length >= _maxCachedDocuments) {
+      String? keyToEvict;
+      for (final key in _documentCache.keys) {
+        if (!_activeMountedDocuments.contains(key)) {
+          keyToEvict = key;
+          break;
+        }
+      }
+      if (keyToEvict != null) {
+        disposeDocument(keyToEvict);
+      } else {
+        break;
+      }
+    }
+  }
+
+  /// Retains a document path as actively mounted on the canvas to prevent LRU eviction.
+  void retainActiveDocument(String filePath) {
+    _activeMountedDocuments.add(filePath);
+  }
+
+  /// Releases an active canvas document path.
+  void releaseActiveDocument(String filePath) {
+    _activeMountedDocuments.remove(filePath);
+  }
+
+  /// Spatial index caching accessors.
+  PdfPageSpatialIndex? getCachedSpatialIndex(String filePath, int pageNumber) {
+    return _spatialIndexCache[filePath]?[pageNumber];
+  }
+
+  void cacheSpatialIndex(String filePath, int pageNumber, PdfPageSpatialIndex index) {
+    _spatialIndexCache.putIfAbsent(filePath, () => <int, PdfPageSpatialIndex>{})[pageNumber] = index;
   }
 
   /// Asynchronously loads and caches the table of contents / outline hierarchy of the PDF.
@@ -247,7 +298,7 @@ class PdfDocumentService {
 
     final tmpFile = File('$outputPath.tmp');
     await tmpFile.writeAsBytes(pdfBytes, flush: true);
-    if (tmpFile.existsSync() && tmpFile.lengthSync() > 0) {
+    if (await tmpFile.exists() && (await tmpFile.length()) > 0) {
       try {
         await tmpFile.rename(outputPath);
       } on FileSystemException {
@@ -290,7 +341,9 @@ class PdfDocumentService {
     final doc = _documentCache.remove(filePath);
     doc?.dispose();
     _pageTextCache.remove(filePath);
+    _spatialIndexCache.remove(filePath);
     _outlineCache.remove(filePath);
+    _activeMountedDocuments.remove(filePath);
   }
 
   /// Disposes all cached documents and text fragments.
@@ -300,6 +353,8 @@ class PdfDocumentService {
     }
     _documentCache.clear();
     _pageTextCache.clear();
+    _spatialIndexCache.clear();
     _outlineCache.clear();
+    _activeMountedDocuments.clear();
   }
 }

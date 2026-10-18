@@ -134,6 +134,11 @@ class NoteDocument {
   /// Retorna a lista de traços (acesso direto sem wrapper para zero-allocation)
   List<InkStroke> get strokes => _strokesList;
 
+  /// Versão dos traços para invalidação reativa de caches
+  int _strokesVersion = 0;
+  int get strokesVersion => _strokesVersion;
+  void incrementStrokesVersion() => _strokesVersion++;
+
   /// Contadores cacheados para telemetria sem iteração
   int _cachedPointCount = 0;
   int get strokeCount => _strokesList.length;
@@ -149,6 +154,7 @@ class NoteDocument {
     _strokeMap[stroke.id] = stroke;
     _strokeIndex[stroke.id] = _strokesList.length - 1;
     _cachedPointCount += stroke.points.length;
+    _strokesVersion++;
     spatialIndex.insert(stroke.id, stroke.boundingBox!);
     pictureCache.insertStrokeToTiles(stroke);
   }
@@ -166,6 +172,7 @@ class NoteDocument {
       spatialIndex.insert(s.id, s.boundingBox!);
       pictureCache.insertStrokeToTiles(s);
     }
+    _strokesVersion++;
   }
 
   void removeStroke(String id) {
@@ -209,6 +216,7 @@ class NoteDocument {
     for (int i = minRemovedIndex; i < _strokesList.length; i++) {
       _strokeIndex[_strokesList[i].id] = i;
     }
+    _strokesVersion++;
     pictureCache.removeStrokesFromTiles(removedBounds);
   }
 
@@ -247,6 +255,7 @@ class NoteDocument {
     for (var i = 0; i < validUpdates.length; i++) {
       pictureCache.insertStrokeToTiles(validUpdates[i]);
     }
+    _strokesVersion++;
   }
 
   /// Mantido para retrocompatibilidade
@@ -267,6 +276,7 @@ class NoteDocument {
     _strokeMap.clear();
     _strokeIndex.clear();
     _cachedPointCount = 0;
+    _strokesVersion++;
     spatialIndex.clear();
     pictureCache.invalidate();
   }

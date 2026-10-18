@@ -43,6 +43,42 @@ class CardActiveTextStyles {
     this.fontSize,
     this.fontFamily,
   });
+
+  @override
+  bool operator ==(Object other) {
+    if (identical(this, other)) return true;
+    return other is CardActiveTextStyles &&
+        other.isBold == isBold &&
+        other.isItalic == isItalic &&
+        other.isUnderline == isUnderline &&
+        other.isStrikethrough == isStrikethrough &&
+        other.isSubscript == isSubscript &&
+        other.isSuperscript == isSuperscript &&
+        other.isCode == isCode &&
+        other.isLatex == isLatex &&
+        other.selectedText == selectedText &&
+        other.textColor == textColor &&
+        other.highlightColor == highlightColor &&
+        other.fontSize == fontSize &&
+        other.fontFamily == fontFamily;
+  }
+
+  @override
+  int get hashCode => Object.hash(
+        isBold,
+        isItalic,
+        isUnderline,
+        isStrikethrough,
+        isSubscript,
+        isSuperscript,
+        isCode,
+        isLatex,
+        selectedText,
+        textColor,
+        highlightColor,
+        fontSize,
+        fontFamily,
+      );
 }
 
 /// Enum para controle exclusivo dos popovers abertos da pílula flutuante.

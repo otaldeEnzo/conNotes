@@ -165,33 +165,24 @@ class CanvasLayerStack extends StatelessWidget {
 
         // Camada 1.5: Efeito de Brilho Orgânico e Vivo dos Pontos do Dot Grid (O(K) acelerado)
         if ((settings?.enableMouseGlow ?? true) && backgroundType == CanvasBackgroundType.dotGrid)
-          ValueListenableBuilder<Offset?>(
-            valueListenable: mousePosNotifier,
-            builder: (context, mousePos, _) {
-              if (mousePos == null) return const SizedBox.shrink();
-              final themeCtrl = MoscaroThemeController.instance;
-              final glowColor = themeCtrl.currentTheme.mouseGlowColor;
-              final radius = settings?.mouseGlowRadius ?? 140.0;
-
-              return Positioned.fill(
-                child: IgnorePointer(
-                  child: RepaintBoundary(
-                    child: CustomPaint(
-                      painter: InteractiveDotGridGlowPainter(
-                        mousePosition: mousePos,
-                        panOffset: panNotifier.value,
-                        zoomScale: zoomNotifier.value,
-                        gridSpacing: settings?.gridSpacing ?? 28.0,
-                        glowRadius: radius,
-                        glowColor: glowColor,
-                        backgroundType: backgroundType,
-                        isDark: !MoscaroTokens.isLight,
-                      ),
-                    ),
+          Positioned.fill(
+            child: IgnorePointer(
+              child: RepaintBoundary(
+                child: CustomPaint(
+                  painter: InteractiveDotGridGlowPainter(
+                    mousePosNotifier: mousePosNotifier,
+                    panNotifier: panNotifier,
+                    zoomNotifier: zoomNotifier,
+                    gridSpacing: settings?.gridSpacing ?? 28.0,
+                    glowRadius: settings?.mouseGlowRadius ?? 140.0,
+                    glowColor: MoscaroThemeController.instance.currentTheme.mouseGlowColor,
+                    backgroundType: backgroundType,
+                    isDark: !MoscaroTokens.isLight,
+                    repaint: Listenable.merge([mousePosNotifier, panNotifier, zoomNotifier]),
                   ),
                 ),
-              );
-            },
+              ),
+            ),
           ),
 
 
@@ -281,8 +272,9 @@ class CanvasLayerStack extends StatelessWidget {
                 size: Size.infinite,
                 painter: LaserPointerPainter(
                   engine: laserEngine,
-                  panOffset: panNotifier.value,
-                  zoomScale: zoomNotifier.value,
+                  panNotifier: panNotifier,
+                  zoomNotifier: zoomNotifier,
+                  repaint: Listenable.merge([laserEngine.repaintNotifier, panNotifier, zoomNotifier]),
                 ),
               ),
             ),
@@ -345,7 +337,7 @@ class CanvasLayerStack extends StatelessWidget {
         if (note != null)
           CanvasCardsLayer(
             cards: note!.cards,
-            getAttachedStrokes: (ids) => note!.strokes.where((s) => ids.contains(s.id)).toList(),
+            getAttachedStrokes: (ids) => ids.map((id) => note!.getStroke(id)).whereType<InkStroke>().toList(),
             activeTool: activeTool,
             selectedCardId: selectedCardId,
             selectionState: selectionState,

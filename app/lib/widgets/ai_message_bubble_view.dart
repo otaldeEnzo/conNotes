@@ -30,6 +30,14 @@ class AiMessageBubbleView extends StatefulWidget {
 }
 
 class _AiMessageBubbleViewState extends State<AiMessageBubbleView> {
+  static final RegExp _suggestionsRegex = RegExp(r'\[(?:SUGESTOES|SUGESTÕES):\s*(.*?)\]', caseSensitive: false);
+  static final RegExp _quoteItemsRegex = RegExp(r'["“](.*?)["”]');
+  static final RegExp _emojiRegex = RegExp(r'[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{1F600}-\u{1F64F}\u{1F680}-\u{1F6FF}]', unicode: true);
+  static final RegExp _leadingNonWordRegex = RegExp(r'^[^\w\s\$\\]+', unicode: true);
+  static final RegExp _orderedListRegex = RegExp(r'^\d+\.\s+');
+  static final RegExp _orderedListItemRegex = RegExp(r'^(\d+\.)\s+(.*)$');
+  static final RegExp _inlineMarkdownMathRegex = RegExp(r'(\$\$(?:\\\$|[^\$])+\$\$|\\\[(?:\\\]|[\s\S])+?\\\]|\$(?:\\\$|[^\$])+\$|\\\((?:\\\)|[\s\S])+?\\\)|`[^`]+`|\*\*[^\*]+\*\*|\*[^\*]+\*)');
+
   Widget? _cachedFormattedContent;
   List<Widget>? _cachedDynamicButtons;
   String? _lastContent;
@@ -37,6 +45,10 @@ class _AiMessageBubbleViewState extends State<AiMessageBubbleView> {
   int? _lastAccentValue;
   bool? _lastIsLight;
   bool? _lastIsStreaming;
+
+  final List<Widget> _memoizedCompletedBlocks = [];
+  int _memoizedLineIndex = 0;
+  String _memoizedPrefix = '';
 
   @override
   Widget build(BuildContext context) {
@@ -291,10 +303,10 @@ class _AiMessageBubbleViewState extends State<AiMessageBubbleView> {
     final buttons = <Widget>[];
 
     // 1. Extração de sugestões geradas dinamicamente pela própria IA
-    final match = RegExp(r'\[(?:SUGESTOES|SUGESTÕES):\s*(.*?)\]', caseSensitive: false).firstMatch(content);
+    final match = _suggestionsRegex.firstMatch(content);
     if (match != null) {
       final rawItems = match.group(1)!;
-      final itemMatches = RegExp(r'["“](.*?)["”]').allMatches(rawItems);
+      final itemMatches = _quoteItemsRegex.allMatches(rawItems);
       for (final m in itemMatches) {
         final rawText = m.group(1)!.trim();
         final cleanLabel = _cleanEmoji(rawText);
@@ -383,8 +395,8 @@ class _AiMessageBubbleViewState extends State<AiMessageBubbleView> {
 
   String _cleanEmoji(String text) {
     return text
-        .replaceAll(RegExp(r'[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{1F600}-\u{1F64F}\u{1F680}-\u{1F6FF}]', unicode: true), '')
-        .replaceAll(RegExp(r'^[^\w\s\$\\]+', unicode: true), '')
+        .replaceAll(_emojiRegex, '')
+        .replaceAll(_leadingNonWordRegex, '')
         .trim();
   }
 
@@ -480,6 +492,33 @@ class _AiMessageBubbleViewState extends State<AiMessageBubbleView> {
     final widgets = <Widget>[];
     int i = 0;
 
+    if (isStreaming) {
+      if (_memoizedPrefix.isNotEmpty &&
+          text.startsWith(_memoizedPrefix) &&
+          _memoizedLineIndex > 0 &&
+          _memoizedLineIndex < rawLines.length) {
+        widgets.addAll(_memoizedCompletedBlocks);
+        i = _memoizedLineIndex;
+      } else {
+        _memoizedCompletedBlocks.clear();
+        _memoizedLineIndex = 0;
+        _memoizedPrefix = '';
+      }
+    } else {
+      _memoizedCompletedBlocks.clear();
+      _memoizedLineIndex = 0;
+      _memoizedPrefix = '';
+    }
+
+    void commitBlock(Widget w, int nextI, {required bool isComplete}) {
+      widgets.add(w);
+      if (isStreaming && isComplete) {
+        _memoizedCompletedBlocks.add(w);
+        _memoizedLineIndex = nextI;
+        _memoizedPrefix = rawLines.sublist(0, nextI).join('\n') + (nextI < rawLines.length ? '\n' : '');
+      }
+    }
+
     while (i < rawLines.length) {
       final line = rawLines[i];
       final trimmed = line.trim();
@@ -500,7 +539,8 @@ class _AiMessageBubbleViewState extends State<AiMessageBubbleView> {
           codeLines.add(rawLines[i]);
           i++;
         }
-        if (i < rawLines.length) i++; // Pula o fechamento ```
+        final bool isCodeClosed = i < rawLines.length;
+        if (isCodeClosed) i++; // Pula o fechamento ```
 
         final code = codeLines.join('\n');
 
@@ -508,7 +548,7 @@ class _AiMessageBubbleViewState extends State<AiMessageBubbleView> {
         if (lang.toLowerCase() == 'mermaid') {
           if (code.trim().isEmpty) {
             if (isStreaming) {
-              widgets.add(
+              commitBlock(
                 Container(
                   margin: const EdgeInsets.symmetric(vertical: 6),
                   padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
@@ -535,10 +575,12 @@ class _AiMessageBubbleViewState extends State<AiMessageBubbleView> {
                     ],
                   ),
                 ),
+                i,
+                isComplete: isCodeClosed,
               );
             }
           } else {
-            widgets.add(
+            commitBlock(
               Padding(
                 padding: const EdgeInsets.symmetric(vertical: 6),
                 child: MermaidDiagramPainterView(
@@ -549,6 +591,8 @@ class _AiMessageBubbleViewState extends State<AiMessageBubbleView> {
                   fontSize: fontSize,
                 ),
               ),
+              i,
+              isComplete: isCodeClosed,
             );
           }
           continue;
@@ -558,8 +602,10 @@ class _AiMessageBubbleViewState extends State<AiMessageBubbleView> {
         final trimmedCode = code.trim();
         if (lang.toLowerCase() == 'svg' || (trimmedCode.startsWith('<svg') && trimmedCode.endsWith('</svg>'))) {
           if (trimmedCode.isNotEmpty) {
-            widgets.add(
+            commitBlock(
               _buildSvgVisualCard(code, accent, fontSize: fontSize),
+              i,
+              isComplete: isCodeClosed,
             );
           }
           continue;
@@ -570,7 +616,7 @@ class _AiMessageBubbleViewState extends State<AiMessageBubbleView> {
           continue;
         }
 
-        widgets.add(
+        commitBlock(
           Container(
             margin: const EdgeInsets.symmetric(vertical: 6),
             padding: const EdgeInsets.all(10),
@@ -595,7 +641,7 @@ class _AiMessageBubbleViewState extends State<AiMessageBubbleView> {
                       ),
                     ),
                   ),
-                SelectableText(
+                Text(
                   code,
                   style: TextStyle(
                     fontFamily: 'monospace',
@@ -607,6 +653,8 @@ class _AiMessageBubbleViewState extends State<AiMessageBubbleView> {
               ],
             ),
           ),
+          i,
+          isComplete: isCodeClosed,
         );
         continue;
       }
@@ -617,8 +665,8 @@ class _AiMessageBubbleViewState extends State<AiMessageBubbleView> {
         final closeToken = isBracket ? r'\]' : r'$$';
         if (trimmed.endsWith(closeToken) && trimmed.length > 4) {
           final mathContent = trimmed.substring(2, trimmed.length - 2).trim();
-          widgets.add(_buildMathBlock(mathContent, accent, fontSize: fontSize, isStreaming: isStreaming));
           i++;
+          commitBlock(_buildMathBlock(mathContent, accent, fontSize: fontSize, isStreaming: isStreaming), i, isComplete: true);
           continue;
         } else {
           // Bloco multi-linha com resiliência a streaming
@@ -629,14 +677,15 @@ class _AiMessageBubbleViewState extends State<AiMessageBubbleView> {
             mathLines.add(rawLines[i]);
             i++;
           }
-          if (i < rawLines.length) {
+          final bool isMathClosed = i < rawLines.length;
+          if (isMathClosed) {
             final last = rawLines[i].trim();
             if (last != closeToken) {
               mathLines.add(last.substring(0, last.length - 2));
             }
             i++;
           }
-          widgets.add(_buildMathBlock(mathLines.join('\n'), accent, fontSize: fontSize, isStreaming: isStreaming));
+          commitBlock(_buildMathBlock(mathLines.join('\n'), accent, fontSize: fontSize, isStreaming: isStreaming), i, isComplete: isMathClosed);
           continue;
         }
       }
@@ -702,7 +751,7 @@ class _AiMessageBubbleViewState extends State<AiMessageBubbleView> {
           displayTitle = upperTag.contains('DEFINI') ? 'DEFINIÇÃO' : (upperTag.contains('CONCEITO') ? 'CONCEITO' : 'CONCEPT');
         }
 
-        widgets.add(
+        commitBlock(
           Container(
             margin: const EdgeInsets.symmetric(vertical: 6),
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
@@ -773,6 +822,8 @@ class _AiMessageBubbleViewState extends State<AiMessageBubbleView> {
               ],
             ),
           ),
+          i,
+          isComplete: i < rawLines.length,
         );
         continue;
       }
@@ -796,7 +847,8 @@ class _AiMessageBubbleViewState extends State<AiMessageBubbleView> {
         }
 
         final double hFontSize = level == 1 ? fontSize * 1.25 : (level == 2 ? fontSize * 1.15 : (level == 3 ? fontSize * 1.05 : fontSize));
-        widgets.add(
+        i++;
+        commitBlock(
           Padding(
             padding: const EdgeInsets.only(top: 8, bottom: 4),
             child: Text.rich(
@@ -816,17 +868,18 @@ class _AiMessageBubbleViewState extends State<AiMessageBubbleView> {
               ),
             ),
           ),
+          i,
+          isComplete: i < rawLines.length,
         );
-        i++;
         continue;
       }
 
       // 5. Linhas de Listas (* ou - ou 1. )
-      if (trimmed.startsWith('* ') || trimmed.startsWith('- ') || RegExp(r'^\d+\.\s+').hasMatch(trimmed)) {
+      if (trimmed.startsWith('* ') || trimmed.startsWith('- ') || _orderedListRegex.hasMatch(trimmed)) {
         String bulletPrefix = '• ';
         String itemText = trimmed;
 
-        final numMatch = RegExp(r'^(\d+\.)\s+(.*)$').firstMatch(trimmed);
+        final numMatch = _orderedListItemRegex.firstMatch(trimmed);
         if (numMatch != null) {
           bulletPrefix = '${numMatch.group(1)} ';
           itemText = numMatch.group(2)!;
@@ -838,7 +891,8 @@ class _AiMessageBubbleViewState extends State<AiMessageBubbleView> {
         if ((trimmedItem.startsWith(r'$$') && trimmedItem.endsWith(r'$$') && trimmedItem.length > 4) ||
             (trimmedItem.startsWith(r'\[') && trimmedItem.endsWith(r'\]') && trimmedItem.length > 4)) {
           final mathContent = trimmedItem.substring(2, trimmedItem.length - 2).trim();
-          widgets.add(
+          i++;
+          commitBlock(
             Padding(
               padding: const EdgeInsets.symmetric(vertical: 2.5),
               child: Row(
@@ -859,12 +913,14 @@ class _AiMessageBubbleViewState extends State<AiMessageBubbleView> {
                 ],
               ),
             ),
+            i,
+            isComplete: i < rawLines.length,
           );
-          i++;
           continue;
         }
 
-        widgets.add(
+        i++;
+        commitBlock(
           Padding(
             padding: const EdgeInsets.symmetric(vertical: 2.5),
             child: Row(
@@ -893,26 +949,30 @@ class _AiMessageBubbleViewState extends State<AiMessageBubbleView> {
               ],
             ),
           ),
+          i,
+          isComplete: i < rawLines.length,
         );
-        i++;
         continue;
       }
 
       // 6. Linha horizontal separadora (--- ou ***)
       if (trimmed == '---' || trimmed == '***' || trimmed == '___') {
-        widgets.add(
+        i++;
+        commitBlock(
           Padding(
             padding: const EdgeInsets.symmetric(vertical: 6),
             child: Divider(height: 1, color: MoscaroTokens.borderSubtle),
           ),
+          i,
+          isComplete: i < rawLines.length,
         );
-        i++;
         continue;
       }
 
       // 7. Parágrafo / Linha comum com formatação inline rica (KaTeX, negrito, itálico, código)
+      i++;
       if (trimmed.isNotEmpty) {
-        widgets.add(
+        commitBlock(
           Padding(
             padding: const EdgeInsets.only(bottom: 4),
             child: Text.rich(
@@ -926,12 +986,12 @@ class _AiMessageBubbleViewState extends State<AiMessageBubbleView> {
               ),
             ),
           ),
+          i,
+          isComplete: i < rawLines.length,
         );
       } else {
-        widgets.add(const SizedBox(height: 4));
+        commitBlock(const SizedBox(height: 4), i, isComplete: i < rawLines.length);
       }
-
-      i++;
     }
 
     return Column(
@@ -1101,11 +1161,10 @@ class _AiMessageBubbleViewState extends State<AiMessageBubbleView> {
     FontStyle? fontStyle,
   }) {
     final spans = <InlineSpan>[];
-    final pattern = RegExp(r'(\$\$(?:\\\$|[^\$])+\$\$|\\\[(?:\\\]|[\s\S])+?\\\]|\$(?:\\\$|[^\$])+\$|\\\((?:\\\)|[\s\S])+?\\\)|`[^`]+`|\*\*[^\*]+\*\*|\*[^\*]+\*)');
     int lastIndex = 0;
     final textPrimary = MoscaroTokens.textPrimary;
 
-    for (final match in pattern.allMatches(text)) {
+    for (final match in _inlineMarkdownMathRegex.allMatches(text)) {
       if (match.start > lastIndex) {
         spans.add(TextSpan(
           text: text.substring(lastIndex, match.start),
@@ -1392,6 +1451,7 @@ class _ScrollableMathBlockState extends State<_ScrollableMathBlock> {
   Widget build(BuildContext context) {
     return MoscaroSleekScrollbar(
       controller: _scrollController,
+      scrollDirection: Axis.horizontal,
       thumbColor: widget.accent.withValues(alpha: 0.65),
       thickness: 3.5,
       padding: const EdgeInsets.only(top: 2),

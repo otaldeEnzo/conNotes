@@ -62,18 +62,24 @@ class _CanvasCardMediaViewState extends State<CanvasCardMediaView> {
       return;
     }
 
-    if (_globalMediaCache.containsKey(mediaData)) {
-      _cachedBytes = _globalMediaCache[mediaData];
-      return;
-    }
-
     if (mediaData.startsWith('data:')) {
       final commaIndex = mediaData.indexOf(',');
       if (commaIndex != -1) {
+        final b64 = mediaData.substring(commaIndex + 1);
+        final cacheKey = '${widget.card.id}_${b64.length}_${b64.hashCode}';
+        if (_globalMediaCache.containsKey(cacheKey)) {
+          final bytes = _globalMediaCache.remove(cacheKey)!;
+          _globalMediaCache[cacheKey] = bytes;
+          _cachedBytes = bytes;
+          return;
+        }
+
         try {
-          final b64 = mediaData.substring(commaIndex + 1);
           _cachedBytes = base64Decode(b64);
-          _globalMediaCache[mediaData] = _cachedBytes!;
+          _globalMediaCache[cacheKey] = _cachedBytes!;
+          if (_globalMediaCache.length > 32) {
+            _globalMediaCache.remove(_globalMediaCache.keys.first);
+          }
         } catch (e) {
           debugPrint('[CanvasCardMediaView] Erro ao decodificar Base64: $e');
           _cachedBytes = null;
@@ -102,6 +108,7 @@ class _CanvasCardMediaViewState extends State<CanvasCardMediaView> {
         fit: BoxFit.fill,
         gaplessPlayback: true,
         filterQuality: FilterQuality.medium,
+        cacheWidth: (card.width * 2.0).round().clamp(256, 2048),
         errorBuilder: (context, error, stackTrace) {
           return _buildPlaceholder(
             'Erro ao carregar midia',
@@ -251,6 +258,24 @@ class _CardMediaStrokesPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant _CardMediaStrokesPainter oldDelegate) {
-    return true; // Repaint whenever size or card changes (real-time 144 FPS)
+    if (cardX != oldDelegate.cardX ||
+        cardY != oldDelegate.cardY ||
+        baseWidth != oldDelegate.baseWidth ||
+        baseHeight != oldDelegate.baseHeight) {
+      return true;
+    }
+    if (identical(strokes, oldDelegate.strokes)) {
+      return false;
+    }
+    if (strokes.length != oldDelegate.strokes.length) {
+      return true;
+    }
+    for (int i = 0; i < strokes.length; i++) {
+      if (strokes[i].id != oldDelegate.strokes[i].id ||
+          strokes[i].points.length != oldDelegate.strokes[i].points.length) {
+        return true;
+      }
+    }
+    return false;
   }
 }

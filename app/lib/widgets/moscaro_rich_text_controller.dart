@@ -115,6 +115,25 @@ class _RichEditorHistoryState {
 /// Renderiza estilos (Negrito, Itálico, Sublinhado, LaTeX, Cores, Marca-Texto, Sub/Sobrescrito)
 /// diretamente com partições disjuntas e suporte completo a estilo de digitação pré-ativo.
 class MoscaroRichTextController extends TextEditingController {
+  static final RegExp _richFormatPattern = RegExp(
+    r'(\$\$([\s\S]*?)\$\$)|' // 1,2: Display LaTeX ($$...$$)
+    r'(\$([^\$\n]+)\$)|' // 3,4: Inline LaTeX ($...$)
+    r'(\*\*([\s\S]*?)\*\*)|' // 5,6: Bold
+    r'(\*([^\*\n]+)\*)|' // 7,8: Italic
+    r'(<u>([\s\S]*?)<\/u>)|' // 9,10: Underline
+    r'(~~([\s\S]*?)~~)|' // 11,12: Strikethrough
+    r'(`([^`\n]+)`)|' // 13,14: Inline Code
+    r'(<sub>([\s\S]*?)<\/sub>)|' // 15,16: Subscript
+    r'(<sup>([\s\S]*?)<\/sup>)|' // 17,18: Superscript
+    r'(<mark style="background:\s*([^"]+)">([\s\S]*?)<\/mark>)|' // 19,20,21: Styled Mark
+    r'(<mark>([\s\S]*?)<\/mark>)|' // 22,23: Plain Mark
+    r'(==([\s\S]*?)==)|' // 24,25: ==Mark==
+    r'(<span style="color:\s*([^"]+)">([\s\S]*?)<\/span>)|' // 26,27,28: Color Span
+    r'(<font color="([^"]+)">([\s\S]*?)<\/font>)|' // 29,30,31: Font Color
+    r'(<span style="font-size:\s*([0-9.]+)px">([\s\S]*?)<\/span>)|' // 32,33,34: Font Size Span
+    r'(<span style="font-family:\s*([^"]+)">([\s\S]*?)<\/span>)', // 35,36,37: Font Family Span
+  );
+
   final List<RichStyleSpan> styleSpans = [];
   RichStyleSpan typingStyle = RichStyleSpan(start: 0, end: 0);
   bool hasActiveTypingStyle = false;
@@ -291,6 +310,7 @@ class MoscaroRichTextController extends TextEditingController {
           textColor: typingStyle.textColor,
           highlightColor: typingStyle.highlightColor,
           fontSize: typingStyle.fontSize,
+          fontFamily: typingStyle.fontFamily,
         ));
       }
     }
@@ -365,27 +385,8 @@ class MoscaroRichTextController extends TextEditingController {
     final cleanBuffer = StringBuffer();
 
     void parseRecursive(String input, RichStyleSpan currentStyle) {
-      final pattern = RegExp(
-        r'(\$\$([\s\S]*?)\$\$)|' // 1,2: Display LaTeX ($$...$$)
-        r'(\$([^\$\n]+)\$)|' // 3,4: Inline LaTeX ($...$)
-        r'(\*\*([\s\S]*?)\*\*)|' // 5,6: Bold
-        r'(\*([^\*\n]+)\*)|' // 7,8: Italic
-        r'(<u>([\s\S]*?)<\/u>)|' // 9,10: Underline
-        r'(~~([\s\S]*?)~~)|' // 11,12: Strikethrough
-        r'(`([^`\n]+)`)|' // 13,14: Inline Code
-        r'(<sub>([\s\S]*?)<\/sub>)|' // 15,16: Subscript
-        r'(<sup>([\s\S]*?)<\/sup>)|' // 17,18: Superscript
-        r'(<mark style="background:\s*([^"]+)">([\s\S]*?)<\/mark>)|' // 19,20,21: Styled Mark
-        r'(<mark>([\s\S]*?)<\/mark>)|' // 22,23: Plain Mark
-        r'(==([\s\S]*?)==)|' // 24,25: ==Mark==
-        r'(<span style="color:\s*([^"]+)">([\s\S]*?)<\/span>)|' // 26,27,28: Color Span
-        r'(<font color="([^"]+)">([\s\S]*?)<\/font>)|' // 29,30,31: Font Color
-        r'(<span style="font-size:\s*([0-9.]+)px">([\s\S]*?)<\/span>)|' // 32,33,34: Font Size Span
-        r'(<span style="font-family:\s*([^"]+)">([\s\S]*?)<\/span>)', // 35,36,37: Font Family Span
-      );
-
       int lastEnd = 0;
-      for (final match in pattern.allMatches(input)) {
+      for (final match in _richFormatPattern.allMatches(input)) {
         if (match.start > lastEnd) {
           final plain = input.substring(lastEnd, match.start);
           final startPos = cleanBuffer.length;
@@ -707,6 +708,7 @@ class MoscaroRichTextController extends TextEditingController {
     }
 
     _normalizeSpans();
+    _saveSnapshot();
     notifyListeners();
   }
 
@@ -729,10 +731,7 @@ class MoscaroRichTextController extends TextEditingController {
     final spans = <InlineSpan>[];
     int current = 0;
 
-    final sorted = List<RichStyleSpan>.from(styleSpans)
-      ..sort((a, b) => a.start.compareTo(b.start));
-
-    for (final s in sorted) {
+    for (final s in styleSpans) {
       final safeStart = s.start.clamp(0, text.length);
       final safeEnd = s.end.clamp(safeStart, text.length);
 

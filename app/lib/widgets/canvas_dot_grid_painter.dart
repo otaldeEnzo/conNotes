@@ -1,4 +1,5 @@
 import 'dart:math' as math;
+import 'dart:typed_data';
 import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import '../models/theme_models.dart';
@@ -9,6 +10,21 @@ enum CanvasBackgroundType { dotGrid, pautado, isometric, emBranco }
 /// Engine de Renderização 2D do Canvas Infinito com suporte a Pautas de Caderno,
 /// Grid Isométrico Rígido, Temas Dinâmicos e Texturas Procedurais STEM.
 class CanvasDotGridPainter extends CustomPainter {
+  static Float32List _rawPointsBuffer = Float32List(16384 * 2);
+  static final Paint _dotPaint = Paint()..strokeCap = StrokeCap.round;
+  static final Paint _bgPaint = Paint();
+  static ui.Shader? _cachedBgShader;
+  static String? _cachedBgShaderKey;
+
+  static void _ensureRawPointsBufferSize(int requiredFloats) {
+    if (_rawPointsBuffer.length < requiredFloats) {
+      int newLen = _rawPointsBuffer.length * 2;
+      while (newLen < requiredFloats) {
+        newLen *= 2;
+      }
+      _rawPointsBuffer = Float32List(newLen);
+    }
+  }
   final Offset panOffset;
   final double zoomScale;
   final Offset? mousePosition;
@@ -45,51 +61,62 @@ class CanvasDotGridPainter extends CustomPainter {
   void paint(Canvas canvas, Size size) {
     // 1. Fundo do Canvas (Suporte a Cor Sólida, Gradiente, Wallpapers STEM, Imagem ou Preset Oficial)
     final rect = Rect.fromLTWH(0, 0, size.width, size.height);
-    final Paint bgPaint = Paint();
 
     final effectiveBgMode = theme.isCustom ? theme.bgMode : backgroundMode;
 
     if (effectiveBgMode == CanvasBackgroundMode.solidColor) {
-      bgPaint.color = theme.isCustom ? theme.backgroundSurface : customSolidColor;
-      canvas.drawRect(rect, bgPaint);
+      _bgPaint.shader = null;
+      _bgPaint.color = theme.isCustom ? theme.backgroundSurface : customSolidColor;
+      canvas.drawRect(rect, _bgPaint);
     } else if (effectiveBgMode == CanvasBackgroundMode.customImage) {
       // Deixa a camada do painter transparente para que a imagem do disco (Renderizada na Camada 0) fique visível
-      bgPaint.color = Colors.transparent;
-      canvas.drawRect(rect, bgPaint);
+      _bgPaint.shader = null;
+      _bgPaint.color = Colors.transparent;
+      canvas.drawRect(rect, _bgPaint);
     } else if (effectiveBgMode == CanvasBackgroundMode.stemWallpaper) {
       _paintStemWallpaperBackground(canvas, rect);
     } else if (effectiveBgMode == CanvasBackgroundMode.gradient ||
         (theme.gradientColors != null && theme.gradientColors!.length >= 2 && theme.isCustom) ||
         theme.bgMode == CanvasBackgroundMode.gradient) {
-      final List<Color> colors = (theme.gradientColors != null && theme.gradientColors!.length >= 2)
-          ? theme.gradientColors!
-          : (theme.effectiveGradientColors.length >= 2
-              ? theme.effectiveGradientColors
-              : [customGradientStart, customGradientEnd]);
-      
-      final List<double> stops = (theme.gradientStops != null && theme.gradientStops!.length == colors.length)
-          ? theme.gradientStops!
-          : (theme.effectiveGradientStops.length == colors.length
-              ? theme.effectiveGradientStops
-              : [
-                  for (int i = 0; i < colors.length; i++) i / (colors.length - 1)
-                ]);
+      final key = '${size.width}x${size.height}_${theme.isCustom ? theme.customId : theme.preset.name}_${effectiveBgMode.name}_${customGradientStart.toARGB32()}_${customGradientEnd.toARGB32()}_${theme.gradientColors?.map((c) => c.toARGB32()).join(',')}';
+      if (_cachedBgShaderKey != key || _cachedBgShader == null) {
+        final List<Color> colors = (theme.gradientColors != null && theme.gradientColors!.length >= 2)
+            ? theme.gradientColors!
+            : (theme.effectiveGradientColors.length >= 2
+                ? theme.effectiveGradientColors
+                : [customGradientStart, customGradientEnd]);
+        
+        final List<double> stops = (theme.gradientStops != null && theme.gradientStops!.length == colors.length)
+            ? theme.gradientStops!
+            : (theme.effectiveGradientStops.length == colors.length
+                ? theme.effectiveGradientStops
+                : [
+                    for (int i = 0; i < colors.length; i++) i / (colors.length - 1)
+                  ]);
 
-      bgPaint.shader = LinearGradient(
-        begin: Alignment.topLeft,
-        end: Alignment.bottomRight,
-        colors: colors,
-        stops: stops,
-      ).createShader(rect);
-      canvas.drawRect(rect, bgPaint);
+        _cachedBgShader = LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: colors,
+          stops: stops,
+        ).createShader(rect);
+        _cachedBgShaderKey = key;
+      }
+      _bgPaint.shader = _cachedBgShader;
+      canvas.drawRect(rect, _bgPaint);
     } else {
-      bgPaint.shader = RadialGradient(
-        center: Alignment.center,
-        radius: 1.4,
-        colors: [theme.backgroundDeep, theme.backgroundSurface],
-        stops: const [0.0, 1.0],
-      ).createShader(rect);
-      canvas.drawRect(rect, bgPaint);
+      final key = '${size.width}x${size.height}_${theme.isCustom ? theme.customId : theme.preset.name}_radial_${theme.backgroundDeep.toARGB32()}_${theme.backgroundSurface.toARGB32()}';
+      if (_cachedBgShaderKey != key || _cachedBgShader == null) {
+        _cachedBgShader = RadialGradient(
+          center: Alignment.center,
+          radius: 1.4,
+          colors: [theme.backgroundDeep, theme.backgroundSurface],
+          stops: const [0.0, 1.0],
+        ).createShader(rect);
+        _cachedBgShaderKey = key;
+      }
+      _bgPaint.shader = _cachedBgShader;
+      canvas.drawRect(rect, _bgPaint);
     }
 
     // Salva o estado do Canvas e aplica a transformação mundial (World Space)
@@ -301,23 +328,28 @@ class CanvasDotGridPainter extends CustomPainter {
     final double startY = (top / spacing).floor() * spacing;
     final double dotRadius = (1.2 / zoomScale).clamp(0.6, 2.2);
 
-    final Paint dotPaint = Paint()
-      ..color = theme.dotGridColor
-      ..strokeWidth = dotRadius * 2
-      ..strokeCap = StrokeCap.round;
-
-    final points = <Offset>[];
-
+    int count = 0;
     for (double x = startX; x <= right + spacing; x += spacing) {
       if (x < 0) continue; // Confinado ao 4º quadrante (x >= 0)
       for (double y = startY; y <= bottom + spacing; y += spacing) {
         if (y < 0) continue; // Confinado ao 4º quadrante (y >= 0)
-        points.add(Offset(x, y));
+        if (count + 2 > _rawPointsBuffer.length) {
+          _ensureRawPointsBufferSize(math.max(_rawPointsBuffer.length * 2, count + 2));
+        }
+        _rawPointsBuffer[count++] = x;
+        _rawPointsBuffer[count++] = y;
       }
     }
 
-    if (points.isNotEmpty) {
-      canvas.drawPoints(ui.PointMode.points, points, dotPaint);
+    if (count > 0) {
+      _dotPaint
+        ..color = theme.dotGridColor
+        ..strokeWidth = dotRadius * 2;
+      canvas.drawRawPoints(
+        ui.PointMode.points,
+        Float32List.sublistView(_rawPointsBuffer, 0, count),
+        _dotPaint,
+      );
     }
   }
 

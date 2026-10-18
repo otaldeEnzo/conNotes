@@ -39,8 +39,16 @@ class AiServiceBridge {
     buffer.writeln('   [SUGESTOES: "Ação 1", "Ação 2", "Ação 3"]');
     buffer.writeln('   Exemplo para matemática: [SUGESTOES: "Deduzir passo a passo", "Estruturar em KaTeX", "Esboçar gráfico"]');
     buffer.writeln('   Exemplo para conceitos: [SUGESTOES: "Exemplo prático", "Testar meu conhecimento"]');
-    buffer.writeln('10. Quebra de Fórmulas Longas: Para equações matemáticas extensas ou deduções com múltiplos passos, use blocos destacados (\$\$...\$\$) organizados com \\begin{aligned} ... \\end{aligned} alinhando nos operadores de igual (&=) com quebras de linha (\\\\). Evite equações excessivamente longas em uma única linha.');
-    buffer.writeln('11. Verificação Rigorosa e Imediata de Resultados (Sem Complacência / Anti-Sycophancy): Antes de responder, efetue internamente o cálculo completo com rigor matemático absoluto. NUNCA seja complacente: se houver qualquer erro de cálculo, sinal, limite de integração, simplificação ou raciocínio, o modelo NUNCA deve dizer que o usuário acertou. Se o resultado ou qualquer passagem estiver incorreta ou incompleta, você DEVE OBRIGATORIAMENTE iniciar a resposta declarando de forma direta: "O seu resultado está incorreto" ou "Você errou o cálculo: o valor correto é X", apontando exatamente onde ocorreu o desvio antes de detalhar o passo a passo. Apenas e tão somente se a resolução e o resultado estiverem 100% corretos, declare: "Você acertou! O resultado está correto." Somente após esse veredito inicial apresente a resolução detalhada passo a passo.');
+    buffer.writeln('11. Verificação Rigorosa e Auditoria Passo a Passo (Zero Complacência / Anti-Sycophancy):');
+    buffer.writeln('   - Quando o usuário enviar cálculos manuscritos, anotações ou perguntar se acertou uma resolução:');
+    buffer.writeln('   - REGRA DE OURO: NUNCA presuma ou adivinhe o que o usuário pretendia escrever. Audite estritamente o que está REALMENTE escrito linha por linha, caractere por caractere, expoente por expoente e sinal por sinal.');
+    buffer.writeln('   - PROTOCOLO OBRIGATÓRIO DE AUDITORIA:');
+    buffer.writeln('     1. Transcrição Fiel (OCR Mental): Transcreva internamente cada linha e expressão escrita pelo usuário antes de julgar.');
+    buffer.writeln('     2. Rastreamento Termo a Termo: Verifique se cada termo, constante ou sinal da linha anterior foi transportado corretamente para a linha seguinte. Cuidado crítico com termos espúrios somados ou subtraídos inadvertidamente (ex: somar uma constante +5 a uma componente errada P(x,y) em vez de Q(x,y), gerando termos incorretos como +5x).');
+    buffer.writeln('     3. Veredito Imediato e Rigoroso: Se o usuário cometeu QUALQUER deslize (seja na resposta final ou em QUALQUER passagem intermediária), é expressamente PROIBIDO dizer que ele acertou ou que o resultado está correto. Você DEVE iniciar a resposta declarando de forma categórica e honesta:');
+    buffer.writeln('        "O seu desenvolvimento contém um erro" ou "O seu resultado está incorreto: [apontar o termo exato]".');
+    buffer.writeln('     4. Explicação do Ponto de Ruptura: Aponte a linha exata onde ocorreu o erro, qual termo foi introduzido ou calculado erroneamente e qual seria o correto.');
+    buffer.writeln('     5. Confirmação Apenas se 100% Perfeito: Declare "Você acertou! O resultado está correto." ÚNICA E EXCLUSIVAMENTE se todas as passagens intermediárias e a resposta final forem absolutamente perfeitas e sem discrepâncias.');
     buffer.writeln('12. Notação Matemática e LaTeX: NUNCA envolva fórmulas, variáveis, expressões ou notações de cálculo em crases de código inline (`...`). Toda e qualquer notação matemática ou de cálculo DEVE ser delimitada por cifrões (\$...\$ para inline ou \$\$...\$\$ para bloco destacado) para compilação nativa pelo KaTeX. NUNCA gere blocos de código ou diagramas vazios.');
 
     if (scopeContext != null && scopeContext.trim().isNotEmpty) {
@@ -109,9 +117,10 @@ class AiServiceBridge {
       }
     }
 
+    final Stream<String> rawStream;
     switch (model.provider) {
       case AiProviderType.gemini:
-        return _streamGemini(
+        rawStream = _streamGemini(
           userPrompt,
           model.id,
           systemPrompt,
@@ -120,8 +129,9 @@ class AiServiceBridge {
           imagesBase64: allImages,
           maxOutputTokens: maxOutputTokens,
         );
+        break;
       case AiProviderType.openAi:
-        return _streamOpenAi(
+        rawStream = _streamOpenAi(
           userPrompt,
           model.id,
           systemPrompt,
@@ -130,8 +140,9 @@ class AiServiceBridge {
           imageBase64: allImages.isNotEmpty ? allImages.first : null,
           maxOutputTokens: maxOutputTokens,
         );
+        break;
       case AiProviderType.claude:
-        return _streamClaude(
+        rawStream = _streamClaude(
           userPrompt,
           model.id,
           systemPrompt,
@@ -140,15 +151,71 @@ class AiServiceBridge {
           imageBase64: allImages.isNotEmpty ? allImages.first : null,
           maxOutputTokens: maxOutputTokens,
         );
+        break;
       case AiProviderType.ollama:
-        return _streamOllama(
+        rawStream = _streamOllama(
           userPrompt,
           model.id,
           systemPrompt,
           settings.ollamaEndpointUrl,
           conversationHistory: conversationHistory,
         );
+        break;
     }
+    return _bufferStream(rawStream);
+  }
+
+  /// Agrupa blocos de tokens SSE com janela de 24ms para garantir fluidez máxima de renderização
+  static Stream<String> _bufferStream(Stream<String> source, {Duration duration = const Duration(milliseconds: 24)}) {
+    late StreamController<String> controller;
+    StreamSubscription<String>? subscription;
+    final StringBuffer buffer = StringBuffer();
+    Timer? flushTimer;
+
+    void flush() {
+      if (buffer.isNotEmpty) {
+        final content = buffer.toString();
+        buffer.clear();
+        controller.add(content);
+      }
+    }
+
+    void scheduleFlush() {
+      if (flushTimer == null || !flushTimer!.isActive) {
+        flushTimer = Timer(duration, () {
+          flush();
+        });
+      }
+    }
+
+    controller = StreamController<String>(
+      onListen: () {
+        subscription = source.listen(
+          (chunk) {
+            buffer.write(chunk);
+            scheduleFlush();
+          },
+          onError: (error, stackTrace) {
+            flush();
+            controller.addError(error, stackTrace);
+          },
+          onDone: () {
+            flushTimer?.cancel();
+            flush();
+            controller.close();
+          },
+          cancelOnError: false,
+        );
+      },
+      onPause: () => subscription?.pause(),
+      onResume: () => subscription?.resume(),
+      onCancel: () {
+        flushTimer?.cancel();
+        return subscription?.cancel();
+      },
+    );
+
+    return controller.stream;
   }
 
   /// Sanitiza dados base64 de imagem extraindo o MIME type e removendo headers data URI
@@ -279,27 +346,28 @@ class AiServiceBridge {
             await Future.delayed(const Duration(milliseconds: 300));
             bool succeeded = false;
             final chunkBuffer = StringBuffer();
-            await for (final chunk in _streamGemini(
-              userPrompt,
-              fbModel,
-              systemPrompt,
-              apiKey,
-              conversationHistory: conversationHistory,
-              imagesBase64: imagesBase64,
-              maxOutputTokens: maxOutputTokens,
-              isFallback: true,
-            )) {
-              if (!chunk.startsWith('Não foi possível') &&
-                  !chunk.startsWith('Limite de requisições') &&
-                  !chunk.startsWith('O servidor da IA está temporariamente sobrecarregado') &&
-                  !chunk.startsWith('O modelo')) {
+            try {
+              await for (final chunk in _streamGemini(
+                userPrompt,
+                fbModel,
+                systemPrompt,
+                apiKey,
+                conversationHistory: conversationHistory,
+                imagesBase64: imagesBase64,
+                maxOutputTokens: maxOutputTokens,
+                isFallback: true,
+              )) {
                 succeeded = true;
                 chunkBuffer.write(chunk);
                 yield chunk;
               }
-            }
-            if (succeeded && chunkBuffer.isNotEmpty) {
-              return;
+              if (succeeded && chunkBuffer.isNotEmpty) {
+                return;
+              }
+            } on AiApiException {
+              continue;
+            } catch (_) {
+              continue;
             }
           }
         }
@@ -324,6 +392,10 @@ class AiServiceBridge {
             userFriendlyError = _redactSecrets(msg);
           }
         } catch (_) {}
+
+        if (isFallback) {
+          throw AiApiException(response.statusCode, userFriendlyError);
+        }
         yield userFriendlyError;
         return;
       }
@@ -372,28 +444,30 @@ class AiServiceBridge {
         await Future.delayed(const Duration(milliseconds: 300));
         bool succeeded = false;
         final chunkBuffer = StringBuffer();
-        await for (final chunk in _streamGemini(
-          userPrompt,
-          'gemini-2.5-flash-lite',
-          systemPrompt,
-          apiKey,
-          conversationHistory: conversationHistory,
-          imagesBase64: imagesBase64,
-          maxOutputTokens: maxOutputTokens,
-          isFallback: true,
-        )) {
-          if (!chunk.startsWith('Falha') && !chunk.startsWith('Não foi')) {
+        try {
+          await for (final chunk in _streamGemini(
+            userPrompt,
+            'gemini-2.5-flash-lite',
+            systemPrompt,
+            apiKey,
+            conversationHistory: conversationHistory,
+            imagesBase64: imagesBase64,
+            maxOutputTokens: maxOutputTokens,
+            isFallback: true,
+          )) {
             succeeded = true;
             chunkBuffer.write(chunk);
             yield chunk;
           }
-        }
-        if (succeeded && chunkBuffer.isNotEmpty) {
-          return;
-        }
+          if (succeeded && chunkBuffer.isNotEmpty) {
+            return;
+          }
+        } catch (_) {}
       }
+      if (isFallback) rethrow;
       yield 'O servidor da IA demorou muito para responder (tempo limite esgotado). Verifique sua conexão de rede ou tente reenviar.';
     } catch (e) {
+      if (isFallback) rethrow;
       yield 'Falha na conexão com o Gemini: ${_redactSecrets(e)}';
     } finally {
       client.close();
@@ -701,4 +775,14 @@ class AiServiceBridge {
       client.close();
     }
   }
+}
+
+/// Exceção tipada para erros de API HTTP durante chamadas e fallbacks de IA
+class AiApiException implements Exception {
+  final int statusCode;
+  final String userFriendlyMessage;
+  const AiApiException(this.statusCode, this.userFriendlyMessage);
+
+  @override
+  String toString() => userFriendlyMessage;
 }
