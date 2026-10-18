@@ -15,7 +15,6 @@ import '../widgets/stem_ruler_model.dart';
 import '../widgets/stem_protractor_model.dart';
 import '../widgets/card_format_floating_pill.dart';
 import '../theme/moscaro_theme_controller.dart';
-import '../theme/moscaro_v2_tokens.dart';
 import '../services/cards_telemetry_controller.dart';
 import '../services/stylus_native_channel.dart';
 
@@ -320,6 +319,18 @@ class _CanvasInputRouterState extends State<CanvasInputRouter> {
     if (kind != PointerDeviceKind.stylus && kind != PointerDeviceKind.invertedStylus) {
       return StylusBarrelAction.disabled;
     }
+
+    // Se Shift ou Ctrl estiverem pressionados (desenho de reta ou seta com mesa digitalizadora),
+    // ignora mapeamentos de clique secundário do driver a menos que o botão físico da caneta esteja realmente pressionado.
+    final isModifierHeld = InkInputHandler.isShiftModifierPressed() || InkInputHandler.isCtrlModifierPressed();
+    if (isModifierHeld &&
+        !StylusNativeChannel.instance.state.isPrimaryBarrelPressed &&
+        !StylusNativeChannel.instance.state.isSecondaryBarrelPressed &&
+        !StylusNativeChannel.instance.state.isInvertedEraser &&
+        kind != PointerDeviceKind.invertedStylus) {
+      return StylusBarrelAction.disabled;
+    }
+
     final settings = SettingsService.instance.currentSettings;
 
     // 1. Botão Superior (Secundário / Barrel 2)
@@ -834,6 +845,7 @@ class _CanvasInputRouterState extends State<CanvasInputRouter> {
                   preset: widget.activePenPreset,
                   rulerState: ctx.rulerState,
                   protractorState: ctx.protractorState,
+                  drawAndHoldDurationMs: SettingsService.instance.currentSettings.drawAndHoldDurationMs,
                 );
               } else if (ctx.activeTool == 'shapes') {
                 final pressure = event.kind != PointerDeviceKind.mouse && event.pressure > 0.0
@@ -862,9 +874,7 @@ class _CanvasInputRouterState extends State<CanvasInputRouter> {
           }
 
           _lastPointerLocalPosition = event.localPosition;
-          if (!_inkHandler.isDrawing) {
-            ctx.updateMousePos(event.localPosition);
-          }
+          ctx.updateMousePos(event.localPosition);
 
           if (_lastMediaClickPos != null && (event.localPosition - _lastMediaClickPos!).distance > 6.0) {
             _lastMediaClickTime = 0;
@@ -894,8 +904,8 @@ class _CanvasInputRouterState extends State<CanvasInputRouter> {
             );
           }
 
+          final effectiveAction = _getEffectiveStylusAction(event.buttons, event.kind);
           if (!_inkHandler.isDrawing) {
-            final effectiveAction = _getEffectiveStylusAction(event.buttons, event.kind);
             _updateHoverState(
               position: event.localPosition,
               deviceKind: event.kind,
@@ -956,7 +966,11 @@ class _CanvasInputRouterState extends State<CanvasInputRouter> {
             }
           }
 
-          if (event.buttons == 1 || (event.buttons & kPrimaryMouseButton != 0)) {
+          final isStylusDrawingMove = event.kind == PointerDeviceKind.stylus &&
+              effectiveAction == StylusBarrelAction.disabled &&
+              (event.pressure > 0.0 || _inkHandler.isDrawing);
+
+          if (event.buttons == 1 || (event.buttons & kPrimaryMouseButton != 0) || isStylusDrawingMove) {
             if (ctx.activeTool == 'laser') {
               ctx.laserEngine.onPointerMove(canvasPoint);
               return;
@@ -1045,6 +1059,7 @@ class _CanvasInputRouterState extends State<CanvasInputRouter> {
                   preset: widget.activePenPreset,
                   rulerState: ctx.rulerState,
                   protractorState: ctx.protractorState,
+                  drawAndHoldDurationMs: SettingsService.instance.currentSettings.drawAndHoldDurationMs,
                 );
               } else if (ctx.activeTool == 'shapes') {
                 final pressure = event.kind != PointerDeviceKind.mouse && event.pressure > 0.0
@@ -1080,31 +1095,36 @@ class _CanvasInputRouterState extends State<CanvasInputRouter> {
           final rawCanvasPoint = (event.localPosition - ctx.panOffset) / ctx.zoomScale;
           final canvasPoint = Offset(math.max(0.0, rawCanvasPoint.dx), math.max(0.0, rawCanvasPoint.dy));
 
+          final bool primaryStillPressed = (event.buttons & kPrimaryMouseButton) != 0;
+          final bool stillDraggingCard = CardsTelemetryController.instance.current.isDraggingCard && primaryStillPressed;
+
           CardsTelemetryController.instance.updatePointerEvent(
             eventType: 'Up',
             deviceKind: event.kind,
-            buttons: 0,
+            buttons: event.buttons,
             pressure: 0.0,
             screenPosition: event.localPosition,
             canvasPosition: canvasPoint,
             activeTool: ctx.activeTool,
             selectedCardId: ctx.selectedCardId,
             cards: note?.cards,
-            isInteractingWithCard: false,
+            isInteractingWithCard: stillDraggingCard || (primaryStillPressed && _isInteractingWithCard),
           );
 
-          // Failsafe: se houver resquício de drag ou resize de card não finalizado por interrupção de ponteiro, encerra imediatamente
-          if (CardsTelemetryController.instance.current.isResizingCard) {
-            CardsTelemetryController.instance.endCardResize();
-          }
-          if (CardsTelemetryController.instance.current.isDraggingCard) {
-            CardsTelemetryController.instance.endCardDrag();
-          }
+          // Failsafe: encerra drag ou resize apenas quando o botao primario foi de fato liberado
+          if (!primaryStillPressed) {
+            if (CardsTelemetryController.instance.current.isResizingCard) {
+              CardsTelemetryController.instance.endCardResize();
+            }
+            if (CardsTelemetryController.instance.current.isDraggingCard) {
+              CardsTelemetryController.instance.endCardDrag();
+            }
 
-          if (_isInteractingWithCard) {
-            _isInteractingWithCard = false;
-            CardsTelemetryController.instance.setInteractingWithCard(false);
-            return;
+            if (_isInteractingWithCard) {
+              _isInteractingWithCard = false;
+              CardsTelemetryController.instance.setInteractingWithCard(false);
+              return;
+            }
           }
 
           if (_isActionExecuting && _currentActiveAction != null) {
@@ -1212,22 +1232,31 @@ class _CanvasInputRouterState extends State<CanvasInputRouter> {
         },
         onPointerCancel: (event) {
           _lastPointerLocalPosition = null;
-          _handleButtonTransitions(0);
+          _handleButtonTransitions(event.buttons);
           _activeDrawOverCardId = null;
           _activePalmPointerIds.remove(event.pointer);
-          _isInteractingWithCard = false;
-          CardsTelemetryController.instance.setInteractingWithCard(false);
+          final bool primaryStillPressed = (event.buttons & kPrimaryMouseButton) != 0;
+          if (!primaryStillPressed) {
+            _isInteractingWithCard = false;
+            CardsTelemetryController.instance.setInteractingWithCard(false);
+            if (CardsTelemetryController.instance.current.isResizingCard) {
+              CardsTelemetryController.instance.endCardResize();
+            }
+            if (CardsTelemetryController.instance.current.isDraggingCard) {
+              CardsTelemetryController.instance.endCardDrag();
+            }
+          }
           CardsTelemetryController.instance.updatePointerEvent(
             eventType: 'Cancel',
             deviceKind: event.kind,
-            buttons: 0,
+            buttons: event.buttons,
             pressure: 0.0,
             screenPosition: event.localPosition,
             canvasPosition: null,
             activeTool: ctx.activeTool,
             selectedCardId: ctx.selectedCardId,
             cards: note?.cards,
-            isInteractingWithCard: false,
+            isInteractingWithCard: primaryStillPressed && (CardsTelemetryController.instance.current.isDraggingCard || _isInteractingWithCard),
           );
           if (_isActionExecuting && _currentActiveAction != null) {
             if (_currentActiveAction == StylusBarrelAction.strokeEraser ||
@@ -1404,17 +1433,6 @@ class _HoverRingCustomPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     if (isEraser) {
-      // Feedback da Borracha: Anel fino minimalista com micro-ponto central
-      final ringPaint = Paint()
-        ..color = MoscaroTokens.auroraPink.withValues(alpha: 0.70)
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 1.0;
-      canvas.drawCircle(center, radius, ringPaint);
-
-      final corePaint = Paint()
-        ..color = Colors.white.withValues(alpha: 0.85)
-        ..style = PaintingStyle.fill;
-      canvas.drawCircle(center, 1.2, corePaint);
       return;
     }
 

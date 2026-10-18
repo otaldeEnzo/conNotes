@@ -229,15 +229,73 @@ class WorkspaceStorageService extends ChangeNotifier {
     );
   }
 
-  /// Agenda o salvamento contínuo (Autosave com debounce de ~400ms) de uma nota ativa
+  /// Sanitiza um nome de arquivo ou pasta contra Path Traversal (..), caracteres de controle de shell e nomes reservados do Windows
+  static String sanitizeFileSystemName(String rawName) {
+    var cleaned = rawName
+        .replaceAll(RegExp(r'[\\/:*?"<>|\x00-\x1F&^%!;]'), '_')
+        .trim();
+    // Remove pontos e espaços finais (inválidos na API Win32)
+    while (cleaned.endsWith('.') || cleaned.endsWith(' ')) {
+      cleaned = cleaned.substring(0, cleaned.length - 1);
+    }
+    while (cleaned.startsWith('.')) {
+      cleaned = cleaned.substring(1).trim();
+    }
+    if (cleaned.isEmpty || cleaned == '.' || cleaned == '..') {
+      cleaned = 'Sem_Titulo';
+    }
+    final reservedWin = RegExp(r'^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(\..*)?$', caseSensitive: false);
+    if (reservedWin.hasMatch(cleaned)) {
+      cleaned = '_$cleaned';
+    }
+    if (cleaned.length > 120) {
+      cleaned = cleaned.substring(0, 120).trim();
+    }
+    return cleaned;
+  }
+
+  /// Resolve um caminho único no diretório alvo para evitar sobrescrita silenciosa de notas existentes
+  static String _resolveUniqueFilePath(
+    String dirPath,
+    String baseNameWithoutExt, {
+    String? ignoreCurrentPath,
+    String extension = '.cncanvas',
+  }) {
+    final safeBase = sanitizeFileSystemName(baseNameWithoutExt);
+    final normalizedIgnore = ignoreCurrentPath?.replaceAll('\\', '/').toLowerCase();
+
+    var candidate = '$dirPath/$safeBase$extension';
+    if (normalizedIgnore != null && candidate.replaceAll('\\', '/').toLowerCase() == normalizedIgnore) {
+      return candidate;
+    }
+    int counter = 2;
+    while (File(candidate).existsSync()) {
+      final candidateNorm = candidate.replaceAll('\\', '/').toLowerCase();
+      if (normalizedIgnore != null && candidateNorm == normalizedIgnore) {
+        return candidate;
+      }
+      candidate = '$dirPath/$safeBase ($counter)$extension';
+      counter++;
+    }
+    return candidate;
+  }
+
+  /// Agenda o salvamento contínuo (Autosave com debounce de ~400ms) de todas as notas pendentes
   void queueAutosave(NoteDocument doc, {String? targetFolderName}) {
+    if ((doc.filePath == null || doc.filePath!.isEmpty) && _workspacePath.isNotEmpty) {
+      final safeFolder = targetFolderName != null && targetFolderName.isNotEmpty
+          ? sanitizeFileSystemName(targetFolderName)
+          : null;
+      final folder = safeFolder != null
+          ? '$_workspacePath/Cadernos/$safeFolder'
+          : '$_workspacePath/Cadernos';
+      doc.filePath = _resolveUniqueFilePath(folder, doc.title);
+    }
     _pendingSaveDocIds.add(doc.id);
     _pendingDocs[doc.id] = doc;
     _autosaveDebounceTimer?.cancel();
     _autosaveDebounceTimer = Timer(const Duration(milliseconds: 400), () async {
-      await saveNoteNow(doc, targetFolderName: targetFolderName);
-      _pendingSaveDocIds.remove(doc.id);
-      _pendingDocs.remove(doc.id);
+      await flushPendingSaves();
     });
   }
 
@@ -257,27 +315,71 @@ class WorkspaceStorageService extends ChangeNotifier {
   /// Alias para queueAutosave
   void scheduleAutoSave(NoteDocument doc) => queueAutosave(doc);
 
+  /// Registro em memória de títulos e caminhos atualizados para manter abas abertas sincronizadas
+  final Map<String, ({String title, String? filePath})> _liveNoteMetadata = {};
+
+  /// Busca uma nota pelo ID em toda a árvore (raiz, cadernos e subnotas recursivas)
+  NoteDocument? findNoteById(String noteId) {
+    NoteDocument? searchList(List<NoteDocument> list) {
+      for (final n in list) {
+        if (n.id == noteId) return n;
+        if (n.children.isNotEmpty) {
+          final found = searchList(n.children);
+          if (found != null) return found;
+        }
+      }
+      return null;
+    }
+
+    final inRoot = searchList(_rootNotes);
+    if (inRoot != null) return inRoot;
+
+    for (final nb in _notebooks) {
+      final inNb = searchList(nb.notes);
+      if (inNb != null) return inNb;
+    }
+    return null;
+  }
+
+  /// Retorna o título mais recente da nota para sincronização imediata com a NoteTabBar
+  String? getLiveNoteTitle(String noteId) {
+    final live = _liveNoteMetadata[noteId];
+    if (live != null) return live.title;
+    return findNoteById(noteId)?.title;
+  }
+
   /// Salva imediatamente a nota no disco em formato .cncanvas
   Future<void> saveNoteNow(NoteDocument doc, {String? targetFolderName}) async {
     if (_workspacePath.isEmpty) return;
 
+    // Sincroniza título e caminho caso a nota tenha sido renomeada ou movida pela Sidebar enquanto aberta
+    final liveMeta = _liveNoteMetadata[doc.id];
+    if (liveMeta != null) {
+      doc.title = liveMeta.title;
+      if (liveMeta.filePath != null && liveMeta.filePath!.isNotEmpty) {
+        doc.filePath = liveMeta.filePath;
+      }
+    }
+
     String filePath = doc.filePath ?? '';
-    if (filePath.isEmpty || !File(filePath).existsSync()) {
-      // Criar caminho se a nota ainda não tiver arquivo no disco
-      final safeTitle = doc.title.replaceAll(RegExp(r'[\\/:*?"<>|]'), '_');
-      final folder = targetFolderName != null && targetFolderName.isNotEmpty
-          ? '$_workspacePath/Cadernos/$targetFolderName'
+    if (filePath.isEmpty) {
+      final safeFolder = targetFolderName != null && targetFolderName.isNotEmpty
+          ? sanitizeFileSystemName(targetFolderName)
+          : null;
+      final folder = safeFolder != null
+          ? '$_workspacePath/Cadernos/$safeFolder'
           : '$_workspacePath/Cadernos';
       
       final dir = Directory(folder);
       if (!dir.existsSync()) {
         dir.createSync(recursive: true);
       }
-      filePath = '$folder/$safeTitle.cncanvas';
+      filePath = _resolveUniqueFilePath(folder, doc.title);
     }
 
     try {
       await CncanvasFileService.saveToCnCanvasFile(doc, filePath);
+      _liveNoteMetadata[doc.id] = (title: doc.title, filePath: doc.filePath);
     } catch (e) {
       debugPrint('[WorkspaceStorageService] Erro ao salvar nota ${doc.id}: $e');
     }
@@ -285,7 +387,7 @@ class WorkspaceStorageService extends ChangeNotifier {
 
   /// Cria um novo caderno físico no disco
   Future<NotebookFolder> createNotebook(String name, {Color color = const Color(0xFF00E1FF), String iconKey = 'book'}) async {
-    final safeName = name.replaceAll(RegExp(r'[\\/:*?"<>|]'), '_');
+    final safeName = sanitizeFileSystemName(name);
     final folderPath = '$_workspacePath/Cadernos/$safeName';
     final dir = Directory(folderPath);
     if (!dir.existsSync()) {
@@ -316,11 +418,13 @@ class WorkspaceStorageService extends ChangeNotifier {
     return folder;
   }
 
-  /// Cria uma nova nota .cncanvas em um caderno específico ou na raiz
+  /// Cria uma nova nota .cncanvas em um caderno específico ou na raiz (resolvendo título único como 'a (2)' se já existir)
   Future<NoteDocument> createNote({required String title, String? targetFolderName}) async {
-    final safeTitle = title.replaceAll(RegExp(r'[\\/:*?"<>|]'), '_');
-    final folderPath = targetFolderName != null && targetFolderName.isNotEmpty
-        ? '$_workspacePath/Cadernos/$targetFolderName'
+    final safeFolder = targetFolderName != null && targetFolderName.isNotEmpty
+        ? sanitizeFileSystemName(targetFolderName)
+        : null;
+    final folderPath = safeFolder != null
+        ? '$_workspacePath/Cadernos/$safeFolder'
         : '$_workspacePath/Cadernos';
 
     final dir = Directory(folderPath);
@@ -328,29 +432,39 @@ class WorkspaceStorageService extends ChangeNotifier {
       await dir.create(recursive: true);
     }
 
-    final filePath = '$folderPath/$safeTitle.cncanvas';
+    final filePath = _resolveUniqueFilePath(folderPath, title);
+    // Extrai o título resolvido (ex: se 'a' já existia, o título vira 'a (2)')
+    final resolvedTitle = File(filePath).uri.pathSegments.last.replaceAll('.cncanvas', '');
+
     final doc = NoteDocument(
       id: 'note_${DateTime.now().microsecondsSinceEpoch}',
-      title: title,
+      title: resolvedTitle,
       filePath: filePath,
     );
 
+    _liveNoteMetadata[doc.id] = (title: resolvedTitle, filePath: filePath);
     await CncanvasFileService.saveToCnCanvasFile(doc, filePath);
     await scanWorkspace();
+    notifyListeners();
     notesListNotifier.notifyListeners();
     return doc;
   }
 
-  /// Renomeia atomicamente a nota e o arquivo .cncanvas no disco
+  /// Renomeia atomicamente a nota e o arquivo .cncanvas no disco sem sobrescrever outras notas
   Future<void> renameNote(NoteDocument note, String newTitle) async {
     final cleanTitle = newTitle.trim();
     if (cleanTitle.isEmpty || cleanTitle == note.title) return;
 
+    String resolvedTitle = cleanTitle;
     final currentPath = note.filePath;
     if (currentPath != null && File(currentPath).existsSync()) {
       final parentDir = File(currentPath).parent.path;
-      final safeTitle = cleanTitle.replaceAll(RegExp(r'[\\/:*?"<>|]'), '_');
-      final newPath = '$parentDir/$safeTitle.cncanvas';
+      final newPath = _resolveUniqueFilePath(
+        parentDir,
+        cleanTitle,
+        ignoreCurrentPath: currentPath,
+      );
+      resolvedTitle = File(newPath).uri.pathSegments.last.replaceAll('.cncanvas', '');
 
       if (currentPath != newPath) {
         final file = File(currentPath);
@@ -364,7 +478,9 @@ class WorkspaceStorageService extends ChangeNotifier {
       }
     }
 
-    note.title = cleanTitle;
+    note.title = resolvedTitle;
+    _liveNoteMetadata[note.id] = (title: resolvedTitle, filePath: note.filePath);
+
     if (note.filePath != null) {
       await CncanvasFileService.saveToCnCanvasFile(note, note.filePath!);
     }
@@ -373,15 +489,29 @@ class WorkspaceStorageService extends ChangeNotifier {
     notesListNotifier.notifyListeners();
   }
 
-  /// Aninha uma nota arrastada como subnota (filha) de outra nota
+  /// Aninha uma nota arrastada como subnota (filha) de outra nota e remove o arquivo autônomo órfão após confirmação
   Future<void> nestNoteAsSubnote(NoteDocument childNote, NoteDocument parentNote) async {
     if (childNote.id == parentNote.id) return;
+
+    // Se childNote já pertencia a outro pai, desvincula do pai anterior
+    final oldParent = findParentNote(childNote.id);
+    if (oldParent != null && oldParent.id != parentNote.id) {
+      oldParent.children.removeWhere((c) => c.id == childNote.id);
+      if (oldParent.filePath != null && File(oldParent.filePath!).existsSync()) {
+        try {
+          await CncanvasFileService.saveToCnCanvasFile(oldParent, oldParent.filePath!);
+        } catch (_) {}
+      }
+    }
 
     // Remove child de onde ela estiver na árvore
     _removeNoteFromList(_rootNotes, childNote.id);
     for (final nb in _notebooks) {
       _removeNoteFromList(nb.notes, childNote.id);
     }
+
+    final oldStandalonePath = childNote.filePath;
+    childNote.filePath = null;
 
     // Se já estiver como filha, evita duplicata
     if (!parentNote.children.any((n) => n.id == childNote.id)) {
@@ -390,18 +520,122 @@ class WorkspaceStorageService extends ChangeNotifier {
 
     if (parentNote.filePath != null) {
       await CncanvasFileService.saveToCnCanvasFile(parentNote, parentNote.filePath!);
+      // Remove o arquivo autônomo antigo somente após o pai ter sido salvo atomicamente no disco
+      if (oldStandalonePath != null &&
+          oldStandalonePath != parentNote.filePath &&
+          File(oldStandalonePath).existsSync()) {
+        try {
+          await File(oldStandalonePath).delete();
+        } catch (_) {}
+      }
     }
     await scanWorkspace();
     notifyListeners();
     notesListNotifier.notifyListeners();
   }
 
+  /// Localiza a nota pai de uma subnota (se houver)
+  NoteDocument? findParentNote(String childId) {
+    NoteDocument? search(List<NoteDocument> list) {
+      for (final doc in list) {
+        if (doc.children.any((c) => c.id == childId)) {
+          return doc;
+        }
+        final deeper = search(doc.children);
+        if (deeper != null) return deeper;
+      }
+      return null;
+    }
+
+    final inRoot = search(_rootNotes);
+    if (inRoot != null) return inRoot;
+
+    for (final nb in _notebooks) {
+      final inNb = search(nb.notes);
+      if (inNb != null) return inNb;
+    }
+    return null;
+  }
+
+  /// Promove uma subnota para nota autônoma (independente), salvando-a em arquivo .cncanvas próprio
+  /// e removendo-a atomicamente da lista de filhos da nota pai no disco, evitando qualquer duplicação.
+  Future<NoteDocument?> promoteSubnote(NoteDocument subnote, {String? targetFolderName}) async {
+    final parent = findParentNote(subnote.id);
+    if (parent != null) {
+      parent.children.removeWhere((c) => c.id == subnote.id);
+      if (parent.filePath != null && File(parent.filePath!).existsSync()) {
+        try {
+          await CncanvasFileService.saveToCnCanvasFile(parent, parent.filePath!);
+        } catch (e) {
+          debugPrint('[WorkspaceStorageService] Erro ao salvar nota pai após desaninhamento: $e');
+        }
+      }
+    }
+
+    final safeFolder = targetFolderName != null && targetFolderName.isNotEmpty
+        ? sanitizeFileSystemName(targetFolderName)
+        : null;
+    final folder = safeFolder != null
+        ? '$_workspacePath/Cadernos/$safeFolder'
+        : '$_workspacePath/Cadernos';
+
+    final dir = Directory(folder);
+    if (!dir.existsSync()) {
+      dir.createSync(recursive: true);
+    }
+
+    final newFilePath = _resolveUniqueFilePath(folder, subnote.title, ignoreCurrentPath: subnote.filePath);
+    subnote.filePath = newFilePath;
+    await CncanvasFileService.saveToCnCanvasFile(subnote, newFilePath);
+    _liveNoteMetadata[subnote.id] = (title: subnote.title, filePath: newFilePath);
+
+    if (targetFolderName != null && targetFolderName.isNotEmpty) {
+      final nb = _notebooks.firstWhere((n) => n.name == targetFolderName, orElse: () => _notebooks.first);
+      nb.notes.removeWhere((n) => n.id == subnote.id);
+      nb.notes.add(subnote);
+    } else {
+      _rootNotes.removeWhere((n) => n.id == subnote.id);
+      _rootNotes.add(subnote);
+    }
+
+    await scanWorkspace();
+    notifyListeners();
+    notesListNotifier.notifyListeners();
+    return subnote;
+  }
+
   /// Reordena uma nota arrastada para antes ou depois de uma nota de destino
   Future<void> reorderNote(NoteDocument dragged, NoteDocument target, bool before, {String? targetFolderName}) async {
     if (dragged.id == target.id) return;
 
-    // Primeiro move o arquivo se for para outro caderno
-    await moveNoteToNotebook(dragged, targetFolderName);
+    // Se a nota arrastada era uma subnota, remove da nota pai e salva o pai
+    final parent = findParentNote(dragged.id);
+    if (parent != null) {
+      parent.children.removeWhere((c) => c.id == dragged.id);
+      if (parent.filePath != null && File(parent.filePath!).existsSync()) {
+        try {
+          await CncanvasFileService.saveToCnCanvasFile(parent, parent.filePath!);
+        } catch (_) {}
+      }
+
+      if (dragged.filePath == null || !File(dragged.filePath!).existsSync()) {
+        final safeFolder = targetFolderName != null && targetFolderName.isNotEmpty
+            ? sanitizeFileSystemName(targetFolderName)
+            : null;
+        final folder = safeFolder != null
+            ? '$_workspacePath/Cadernos/$safeFolder'
+            : '$_workspacePath/Cadernos';
+        final dir = Directory(folder);
+        if (!dir.existsSync()) dir.createSync(recursive: true);
+        final newPath = _resolveUniqueFilePath(folder, dragged.title);
+        dragged.filePath = newPath;
+        await CncanvasFileService.saveToCnCanvasFile(dragged, newPath);
+        _liveNoteMetadata[dragged.id] = (title: dragged.title, filePath: newPath);
+      }
+    } else {
+      // Primeiro move o arquivo se for para outro caderno
+      await moveNoteToNotebook(dragged, targetFolderName);
+    }
 
     // Ajusta a ordem na lista apropriada
     List<NoteDocument> list;
@@ -437,14 +671,23 @@ class WorkspaceStorageService extends ChangeNotifier {
     return false;
   }
 
-  /// Move uma nota entre cadernos (ou para a raiz de Cadernos/ se targetFolderName for null)
+  /// Move uma nota entre cadernos (ou para a raiz de Cadernos/ se targetFolderName for null) sem sobrescrever existentes
   Future<void> moveNoteToNotebook(NoteDocument note, String? targetFolderName) async {
+    // Se a nota for uma subnota, promove-a para nota autônoma no caderno ou raiz de destino
+    final parent = findParentNote(note.id);
+    if (parent != null) {
+      await promoteSubnote(note, targetFolderName: targetFolderName);
+      return;
+    }
+
     final currentPath = note.filePath;
     if (currentPath == null || !File(currentPath).existsSync()) return;
 
-    final fileName = File(currentPath).uri.pathSegments.last;
-    final targetDir = targetFolderName != null && targetFolderName.isNotEmpty
-        ? '$_workspacePath/Cadernos/$targetFolderName'
+    final safeFolder = targetFolderName != null && targetFolderName.isNotEmpty
+        ? sanitizeFileSystemName(targetFolderName)
+        : null;
+    final targetDir = safeFolder != null
+        ? '$_workspacePath/Cadernos/$safeFolder'
         : '$_workspacePath/Cadernos';
 
     final targetDirPath = Directory(targetDir);
@@ -452,7 +695,15 @@ class WorkspaceStorageService extends ChangeNotifier {
       targetDirPath.createSync(recursive: true);
     }
 
-    final newPath = '$targetDir/$fileName';
+    if (File(currentPath).parent.path.replaceAll('\\', '/') == targetDir.replaceAll('\\', '/')) {
+      return;
+    }
+
+    final newPath = _resolveUniqueFilePath(
+      targetDir,
+      note.title,
+      ignoreCurrentPath: currentPath,
+    );
     if (currentPath != newPath) {
       final file = File(currentPath);
       try {
@@ -467,28 +718,39 @@ class WorkspaceStorageService extends ChangeNotifier {
     }
   }
 
-  /// Abre a nota .cncanvas no navegador web padrão do sistema
+  /// Abre a nota no navegador web padrão do sistema via HTML autônomo temporário (imune a Command Injection)
   Future<void> openInBrowser(NoteDocument note) async {
     if (note.filePath == null || !File(note.filePath!).existsSync()) {
       await saveNoteNow(note);
     }
     if (note.filePath != null) {
-      final path = note.filePath!;
+      final safeId = sanitizeFileSystemName(note.id);
+      final tempHtmlPath = '${Directory.systemTemp.path}/connotes_web_$safeId.html';
+      await CncanvasFileService.exportToHtml(note, tempHtmlPath);
+
+      final absoluteHtmlPath = File(tempHtmlPath).absolute.path;
       if (Platform.isWindows) {
-        await Process.run('cmd', ['/c', 'start', '', path]);
+        await Process.run('rundll32.exe', ['url.dll,FileProtocolHandler', absoluteHtmlPath], runInShell: false);
       } else if (Platform.isMacOS) {
-        await Process.run('open', [path]);
+        await Process.run('open', [absoluteHtmlPath], runInShell: false);
       } else if (Platform.isLinux) {
-        await Process.run('xdg-open', [path]);
+        await Process.run('xdg-open', [absoluteHtmlPath], runInShell: false);
       }
     }
   }
 
-  /// Lixeira Etapa 1: Move a nota fisicamente para a pasta .trash/
+  /// Lixeira Etapa 1: Move a nota fisicamente para a pasta .trash/ sem colidir com arquivos de mesmo nome
   Future<void> moveToTrash(NoteDocument doc) async {
     if (doc.filePath != null && File(doc.filePath!).existsSync()) {
-      final fileName = File(doc.filePath!).uri.pathSegments.last;
-      final trashPath = '$_workspacePath/.trash/$fileName';
+      final trashDir = Directory('$_workspacePath/.trash');
+      if (!trashDir.existsSync()) {
+        trashDir.createSync(recursive: true);
+      }
+      final trashPath = _resolveUniqueFilePath(
+        trashDir.path,
+        doc.title,
+        ignoreCurrentPath: doc.filePath,
+      );
       final file = File(doc.filePath!);
       try {
         await file.rename(trashPath);
@@ -504,15 +766,25 @@ class WorkspaceStorageService extends ChangeNotifier {
     notesListNotifier.notifyListeners();
   }
 
-  /// Lixeira Etapa 2: Restaura uma nota da .trash/ de volta para a pasta de Cadernos
+  /// Lixeira Etapa 2: Restaura uma nota da .trash/ de volta para a pasta de Cadernos sem sobrescrever notas existentes
   Future<void> restoreFromTrash(NoteDocument doc, {String? targetFolderName}) async {
     if (doc.filePath != null && File(doc.filePath!).existsSync()) {
-      final fileName = File(doc.filePath!).uri.pathSegments.last;
-      final targetFolder = targetFolderName != null
-          ? '$_workspacePath/Cadernos/$targetFolderName'
+      final safeFolder = targetFolderName != null && targetFolderName.isNotEmpty
+          ? sanitizeFileSystemName(targetFolderName)
+          : null;
+      final targetFolder = safeFolder != null
+          ? '$_workspacePath/Cadernos/$safeFolder'
           : '$_workspacePath/Cadernos';
       
-      final targetPath = '$targetFolder/$fileName';
+      final targetDir = Directory(targetFolder);
+      if (!targetDir.existsSync()) {
+        targetDir.createSync(recursive: true);
+      }
+      final targetPath = _resolveUniqueFilePath(
+        targetFolder,
+        doc.title,
+        ignoreCurrentPath: doc.filePath,
+      );
       final file = File(doc.filePath!);
       try {
         await file.rename(targetPath);

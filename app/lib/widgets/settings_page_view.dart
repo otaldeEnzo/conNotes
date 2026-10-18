@@ -962,11 +962,14 @@ class _SettingsPageViewState extends State<SettingsPageView> {
           title: 'Tempo de Espera para Formas Inteligentes (Draw & Hold)',
           description: 'Duração necessária mantendo a caneta parada no final para converter o traço em forma perfeita.',
           value: widget.settings.drawAndHoldDurationMs.toDouble(),
-          min: 250.0,
-          max: 750.0,
-          divisions: 10,
-          formatValue: (val) => '${val.round()} ms',
-          onChanged: (val) => widget.onUpdateSettings(widget.settings.copyWith(drawAndHoldDurationMs: val.round())),
+          min: 100.0,
+          max: 1000.0,
+          divisions: null,
+          formatValue: (val) => '${((val / 5).round() * 5)} ms',
+          onChanged: (val) {
+            final snapped = ((val / 5).round() * 5);
+            widget.onUpdateSettings(widget.settings.copyWith(drawAndHoldDurationMs: snapped));
+          },
         ),
         SettingsSandboxCard(
           smoothingTolerance: widget.settings.rdpSmoothingTolerance,
@@ -1760,6 +1763,13 @@ class _SettingsPageViewState extends State<SettingsPageView> {
           description: 'Quando ativado, a IA prioriza formular perguntas e dicas progressivas (> [!TIP]) em vez de apenas dar a resposta pronta.',
           value: widget.settings.enableAiSocraticMode,
           onChanged: (val) => widget.onUpdateSettings(widget.settings.copyWith(enableAiSocraticMode: val)),
+        ),
+
+        SettingsToggleTile(
+          title: 'Consciência Profunda da Nota & PDFs',
+          description: 'Permite à IA ler todas as páginas de PDFs e cards inteiros do caderno.',
+          value: widget.settings.enableDeepNoteContext,
+          onChanged: (val) => widget.onUpdateSettings(widget.settings.copyWith(enableDeepNoteContext: val)),
         ),
 
         SettingsToggleTile(

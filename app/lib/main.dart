@@ -179,7 +179,7 @@ class _ConNotesAppState extends State<ConNotesApp> with SingleTickerProviderStat
   void _backToHome([List<String>? activeTabIds]) {
     final noteToSummarize = _currentCanvasNote;
     setState(() {
-      if (activeTabIds != null && activeTabIds.isNotEmpty) {
+      if (activeTabIds != null) {
         _initialOpenTabIds = List<String>.from(activeTabIds);
       }
       _isShowingCanvas = false;

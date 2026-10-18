@@ -5,6 +5,7 @@ import '../theme/moscaro_theme_controller.dart';
 import 'note_models.dart';
 import 'svg_icon.dart';
 import '../services/workspace_storage_service.dart';
+import '../models/canvas_card_model.dart';
 
 enum NoteDropZone { before, inside, after }
 
@@ -14,6 +15,7 @@ class NoteSidebar extends StatefulWidget {
   final String? selectedNoteId;
   final ValueChanged<NoteDocument> onSelectNote;
   final VoidCallback? onAddNote;
+  final VoidCallback? onClose;
 
   const NoteSidebar({
     super.key,
@@ -21,6 +23,7 @@ class NoteSidebar extends StatefulWidget {
     this.selectedNoteId,
     required this.onSelectNote,
     this.onAddNote,
+    this.onClose,
   });
 
   @override
@@ -33,6 +36,7 @@ class _NoteSidebarState extends State<NoteSidebar> {
   bool _isTrashExpanded = false;
   String _searchQuery = '';
   final TextEditingController _searchController = TextEditingController();
+  final FocusNode _searchFocusNode = FocusNode();
 
   // Estado de Renomeação Inline por Duplo Clique
   String? _editingNoteId;
@@ -49,16 +53,45 @@ class _NoteSidebarState extends State<NoteSidebar> {
   OverlayEntry? _activeMenuOverlay;
 
   @override
+  void initState() {
+    super.initState();
+    _searchFocusNode.addListener(_syncEditingTextFocus);
+    _inlineRenameFocusNode.addListener(_syncEditingTextFocus);
+  }
+
+  void _syncEditingTextFocus() {
+    globalIsEditingText = _searchFocusNode.hasFocus || _inlineRenameFocusNode.hasFocus;
+  }
+
+  bool _isDescendant(NoteDocument parent, String targetId) {
+    for (final child in parent.children) {
+      if (child.id == targetId || _isDescendant(child, targetId)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  @override
   void didUpdateWidget(NoteSidebar oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.isOpen != widget.isOpen && !widget.isOpen) {
       _closeActiveMenu();
+      if (_searchFocusNode.hasFocus) _searchFocusNode.unfocus();
+      if (_inlineRenameFocusNode.hasFocus) _inlineRenameFocusNode.unfocus();
+      globalIsEditingText = false;
     }
   }
 
   @override
   void dispose() {
     _closeActiveMenu();
+    if (_searchFocusNode.hasFocus || _inlineRenameFocusNode.hasFocus) {
+      globalIsEditingText = false;
+    }
+    _searchFocusNode.removeListener(_syncEditingTextFocus);
+    _inlineRenameFocusNode.removeListener(_syncEditingTextFocus);
+    _searchFocusNode.dispose();
     _searchController.dispose();
     _inlineRenameController.dispose();
     _inlineRenameFocusNode.dispose();
@@ -94,6 +127,9 @@ class _NoteSidebarState extends State<NoteSidebar> {
 
     if (newTitle.isNotEmpty && newTitle != note.title) {
       await storage.renameNote(note, newTitle);
+      if (widget.selectedNoteId == note.id) {
+        widget.onSelectNote(note);
+      }
     }
   }
 
@@ -120,9 +156,16 @@ class _NoteSidebarState extends State<NoteSidebar> {
           left: widget.isOpen ? 24 : -390,
           top: 48,
           bottom: 24,
-          child: SizedBox(
-            width: 340,
-            child: ClipRRect(
+          child: TapRegion(
+            groupId: 'note_sidebar_region',
+            onTapOutside: (_) {
+              if (widget.isOpen) {
+                widget.onClose?.call();
+              }
+            },
+            child: SizedBox(
+              width: 340,
+              child: ClipRRect(
               borderRadius: BorderRadius.circular(MoscaroTokens.radiusPanel),
               child: BackdropFilter(
                 filter: ImageFilter.blur(
@@ -210,6 +253,7 @@ class _NoteSidebarState extends State<NoteSidebar> {
                       // Barra de Busca com Moscaro
                       TextField(
                         controller: _searchController,
+                        focusNode: _searchFocusNode,
                         onChanged: (val) => setState(() => _searchQuery = val.trim().toLowerCase()),
                         style: TextStyle(color: textPrimary, fontSize: 12.5),
                         decoration: InputDecoration(
@@ -250,7 +294,8 @@ class _NoteSidebarState extends State<NoteSidebar> {
               ),
             ),
           ),
-        );
+        ),
+      );
       },
     );
   }
@@ -521,102 +566,105 @@ class _NoteSidebarState extends State<NoteSidebar> {
         ),
 
         // A Nota em si com DragTarget suave
-        DragTarget<NoteDocument>(
-          onWillAcceptWithDetails: (details) => details.data.id != note.id,
-          onMove: (details) {
-            final renderBox = context.findRenderObject() as RenderBox?;
-            if (renderBox != null) {
-              final localY = details.offset.dy;
-              const height = 38.0;
-              final relativeY = (localY % height) / height;
+        Builder(
+          builder: (itemContext) => DragTarget<NoteDocument>(
+            onWillAcceptWithDetails: (details) =>
+                details.data.id != note.id && !_isDescendant(details.data, note.id),
+            onMove: (details) {
+              final renderBox = itemContext.findRenderObject() as RenderBox?;
+              if (renderBox != null) {
+                final localPos = renderBox.globalToLocal(details.offset);
+                final height = renderBox.size.height > 0 ? renderBox.size.height : 38.0;
+                final relativeY = (localPos.dy / height).clamp(0.0, 1.0);
 
-              NoteDropZone zone = NoteDropZone.inside;
-              if (relativeY < 0.25) {
-                zone = NoteDropZone.before;
-              } else if (relativeY > 0.75) {
-                zone = NoteDropZone.after;
+                NoteDropZone zone = NoteDropZone.inside;
+                if (relativeY < 0.25) {
+                  zone = NoteDropZone.before;
+                } else if (relativeY > 0.75) {
+                  zone = NoteDropZone.after;
+                }
+
+                if (_dropHoverTargetId != note.id || _dropHoverZone != zone) {
+                  setState(() {
+                    _dropHoverTargetId = note.id;
+                    _dropHoverZone = zone;
+                  });
+                }
               }
-
-              if (_dropHoverTargetId != note.id || _dropHoverZone != zone) {
+            },
+            onLeave: (data) {
+              if (_dropHoverTargetId == note.id) {
                 setState(() {
-                  _dropHoverTargetId = note.id;
-                  _dropHoverZone = zone;
+                  _dropHoverTargetId = null;
+                  _dropHoverZone = null;
                 });
               }
-            }
-          },
-          onLeave: (data) {
-            if (_dropHoverTargetId == note.id) {
+            },
+            onAcceptWithDetails: (details) async {
+              final dragged = details.data;
+              if (_dropHoverZone == NoteDropZone.inside) {
+                // Tornar Subnota
+                await storage.nestNoteAsSubnote(dragged, note);
+                setState(() {
+                  _expandedNoteIds.add(note.id);
+                });
+              } else {
+                // Reordenar antes ou depois
+                final isBefore = _dropHoverZone == NoteDropZone.before;
+                await storage.reorderNote(dragged, note, isBefore, targetFolderName: folderName);
+              }
               setState(() {
-                _dropHoverTargetId = null;
-                _dropHoverZone = null;
-              });
-            }
-          },
-          onAcceptWithDetails: (details) async {
-            final dragged = details.data;
-            if (_dropHoverZone == NoteDropZone.inside) {
-              // Tornar Subnota
-              await storage.nestNoteAsSubnote(dragged, note);
-              setState(() {
-                _expandedNoteIds.add(note.id);
-              });
-            } else {
-              // Reordenar antes ou depois
-              final isBefore = _dropHoverZone == NoteDropZone.before;
-              await storage.reorderNote(dragged, note, isBefore, targetFolderName: folderName);
-            }
-            setState(() {
-              _isDragging = false;
-              _dropHoverTargetId = null;
-              _dropHoverZone = null;
-            });
-          },
-          builder: (context, candidateData, rejectedData) {
-            final isInsideDrop = isHoverTarget && _dropHoverZone == NoteDropZone.inside;
-
-            return Draggable<NoteDocument>(
-              data: note,
-              onDragStarted: () {
-                _closeActiveMenu();
-                setState(() => _isDragging = true);
-              },
-              onDragEnd: (_) => setState(() {
                 _isDragging = false;
                 _dropHoverTargetId = null;
                 _dropHoverZone = null;
-              }),
-              feedback: Material(
-                color: Colors.transparent,
-                child: SizedBox(
-                  width: 280,
-                  child: _buildNotePill(note, storage, indent: 0, isGhost: true),
-                ),
-              ),
-              childWhenDragging: Opacity(
-                opacity: 0.2,
-                child: _buildNotePill(note, storage, indent: indent),
-              ),
-              child: _buildNotePill(
-                note,
-                storage,
-                indent: indent,
-                isSubnoteHighlight: isInsideDrop,
-                hasChildren: hasChildren,
-                isExpanded: isExpanded,
-                onToggleExpand: () {
+              });
+            },
+            builder: (context, candidateData, rejectedData) {
+              final isInsideDrop = isHoverTarget && _dropHoverZone == NoteDropZone.inside;
+
+              return Draggable<NoteDocument>(
+                data: note,
+                onDragStarted: () {
                   _closeActiveMenu();
-                  setState(() {
-                    if (isExpanded) {
-                      _expandedNoteIds.remove(note.id);
-                    } else {
-                      _expandedNoteIds.add(note.id);
-                    }
-                  });
+                  setState(() => _isDragging = true);
                 },
-              ),
-            );
-          },
+                onDragEnd: (_) => setState(() {
+                  _isDragging = false;
+                  _dropHoverTargetId = null;
+                  _dropHoverZone = null;
+                }),
+                feedback: Material(
+                  color: Colors.transparent,
+                  child: SizedBox(
+                    width: 280,
+                    child: _buildNotePill(note, storage, indent: 0, isGhost: true),
+                  ),
+                ),
+                childWhenDragging: Opacity(
+                  opacity: 0.2,
+                  child: _buildNotePill(note, storage, indent: indent),
+                ),
+                child: _buildNotePill(
+                  note,
+                  storage,
+                  indent: indent,
+                  isSubnoteHighlight: isInsideDrop,
+                  hasChildren: hasChildren,
+                  isExpanded: isExpanded,
+                  onToggleExpand: () {
+                    _closeActiveMenu();
+                    setState(() {
+                      if (isExpanded) {
+                        _expandedNoteIds.remove(note.id);
+                      } else {
+                        _expandedNoteIds.add(note.id);
+                      }
+                    });
+                  },
+                ),
+              );
+            },
+          ),
         ),
 
         // Subnotas aninhadas (árvore recursiva)
@@ -680,7 +728,7 @@ class _NoteSidebarState extends State<NoteSidebar> {
                   ),
                 ),
                 IconButton(
-                  icon: Icon(Icons.check, size: 16, color: themeAccent),
+                  icon: SvgIcon(name: 'check', size: 15, color: themeAccent),
                   padding: EdgeInsets.zero,
                   constraints: const BoxConstraints(minWidth: 24, minHeight: 24),
                   tooltip: 'Salvar Nome',
@@ -857,6 +905,18 @@ class _NoteSidebarState extends State<NoteSidebar> {
                   _startInlineRename(note);
                 },
               ),
+              if (storage.findParentNote(note.id) != null) ...[
+                const SizedBox(height: 2),
+                _buildMenuItem(
+                  icon: 'file',
+                  iconColor: themeAccent,
+                  label: 'Promover a Nota Principal',
+                  onTap: () async {
+                    _closeActiveMenu();
+                    await storage.promoteSubnote(note);
+                  },
+                ),
+              ],
               const SizedBox(height: 2),
               Divider(
                 height: 8,

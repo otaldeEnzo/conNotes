@@ -115,23 +115,19 @@ class MoscaroGlassPopupMenu<T> extends StatelessWidget {
                       borderRadius: 16,
                       blurSigma: effectiveBlur,
                       enableBlur: isBlurEnabled && effectiveBlur > 0,
-                      backgroundColor: MoscaroTokens.isLight
-                          ? Colors.white.withValues(alpha: 0.75)
-                          : activeTheme.backgroundSurface.withValues(alpha: 0.35),
-                      padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 4),
-                      borderColor: activeAccent.withValues(alpha: 0.5),
-                      borderWidth: 1.1,
+                      backgroundColor: MoscaroTokens.glassTint,
+                      padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 6),
+                      borderColor: MoscaroTokens.isLight
+                          ? MoscaroTokens.borderSubtle
+                          : MoscaroTokens.borderGlow,
+                      borderWidth: 1.0,
                       customShadows: [
                         BoxShadow(
-                          color: Colors.black.withValues(alpha: 0.45),
+                          color: MoscaroTokens.isLight
+                              ? const Color(0x180F172A)
+                              : Colors.black.withValues(alpha: 0.55),
                           blurRadius: 24,
-                          spreadRadius: 2,
                           offset: const Offset(0, 8),
-                        ),
-                        BoxShadow(
-                          color: activeAccent.withValues(alpha: 0.25),
-                          blurRadius: 14,
-                          spreadRadius: -1,
                         ),
                       ],
                     ),
@@ -162,7 +158,6 @@ class MoscaroGlassPopupMenu<T> extends StatelessWidget {
       listenable: MoscaroThemeController.instance,
       builder: (context, _) {
         final theme = MoscaroThemeController.instance.currentTheme;
-        final accent = theme.accentPrimary;
         final isBlurEnabled = theme.enableCardsBlur || theme.enableModalsBlur;
         final effectiveBlur = isBlurEnabled ? theme.blurSigma : 0.0;
 
@@ -172,24 +167,17 @@ class MoscaroGlassPopupMenu<T> extends StatelessWidget {
           child: icon ??
               Container(
                 padding: const EdgeInsets.all(6),
-                child: SvgIcon(name: 'more_vertical', color: accent.withValues(alpha: 0.85), size: 14),
+                child: SvgIcon(name: 'more_vertical', color: MoscaroTokens.iconInactive, size: 14),
               ).moscaroV2(
                 borderRadius: 10,
                 blurSigma: effectiveBlur,
                 enableBlur: isBlurEnabled && effectiveBlur > 0,
-                backgroundColor: MoscaroTokens.isLight
-                    ? Colors.white.withValues(alpha: 0.75)
-                    : theme.backgroundSurface.withValues(alpha: 0.35),
-                borderColor: accent.withValues(alpha: 0.35),
-                borderWidth: 0.8,
+                backgroundColor: MoscaroTokens.glassTint,
+                borderColor: MoscaroTokens.isLight
+                    ? MoscaroTokens.borderSubtle
+                    : MoscaroTokens.borderGlow,
+                borderWidth: 1.0,
                 padding: const EdgeInsets.all(6),
-                customShadows: [
-                  BoxShadow(
-                    color: accent.withValues(alpha: 0.1),
-                    blurRadius: 8,
-                    spreadRadius: -2,
-                  ),
-                ],
               ),
         );
 
@@ -226,7 +214,7 @@ class _GlassMenuItemWidgetState<T> extends State<_GlassMenuItemWidget<T>> {
     final isDestructive = item.isDestructive;
     final color = isDestructive
         ? const Color(0xFFEF4444)
-        : (item.color ?? (_isHovered ? widget.accentColor : Colors.white));
+        : (_isHovered ? widget.accentColor : MoscaroTokens.textPrimary);
 
     return MouseRegion(
       onEnter: (_) => setState(() => _isHovered = true),

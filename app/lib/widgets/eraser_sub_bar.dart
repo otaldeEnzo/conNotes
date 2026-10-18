@@ -30,6 +30,12 @@ class EraserSubBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final isLight = MoscaroTokens.isLight;
+    final textPrimary = MoscaroTokens.textPrimary;
+    final textSecondary = MoscaroTokens.textSecondary;
+    final dividerColor = isLight ? Colors.black12 : Colors.white12;
+    final idleBorderColor = isLight ? Colors.black26 : Colors.white24;
+
     return IgnorePointer(
       ignoring: !isVisible,
       child: AnimatedSlide(
@@ -67,7 +73,7 @@ class EraserSubBar extends StatelessWidget {
                   ),
                   const SizedBox(width: 6),
 
-                  Container(width: 1, height: 18, color: Colors.white12),
+                  Container(width: 1, height: 18, color: dividerColor),
                   const SizedBox(width: 6),
 
                   // 3. Quatro Presets Rápidos de Tamanho
@@ -90,7 +96,7 @@ class EraserSubBar extends StatelessWidget {
                               border: Border.all(
                                 color: (radius - preset).abs() < 3.0
                                     ? MoscaroTokens.auroraBlue
-                                    : Colors.white24,
+                                    : idleBorderColor,
                                 width: (radius - preset).abs() < 3.0 ? 1.4 : 1.0,
                               ),
                             ),
@@ -102,7 +108,7 @@ class EraserSubBar extends StatelessWidget {
                                 shape: BoxShape.circle,
                                 color: (radius - preset).abs() < 3.0
                                     ? MoscaroTokens.auroraBlue
-                                    : Colors.white70,
+                                    : textSecondary,
                               ),
                             ),
                           ),
@@ -114,15 +120,15 @@ class EraserSubBar extends StatelessWidget {
 
                   // 4. Slider Contínuo com Snap Magnético
                   SizedBox(
-                    width: 80,
+                    width: 150,
                     child: SliderTheme(
                       data: SliderTheme.of(context).copyWith(
-                        trackHeight: 2.0,
+                        trackHeight: 3.5,
                         activeTrackColor: MoscaroTokens.auroraBlue,
-                        inactiveTrackColor: Colors.white24,
+                        inactiveTrackColor: idleBorderColor,
                         thumbColor: MoscaroTokens.auroraBlue,
                         overlayColor: MoscaroTokens.auroraBlue.withValues(alpha: 0.2),
-                        thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 5),
+                        thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6.5),
                       ),
                       child: Slider(
                         value: radius.clamp(6.0, 120.0),
@@ -145,15 +151,15 @@ class EraserSubBar extends StatelessWidget {
                   // Label com o tamanho atual em px
                   Text(
                     '${radius.round()}px',
-                    style: const TextStyle(
-                      color: Colors.white70,
+                    style: TextStyle(
+                      color: textSecondary,
                       fontSize: 10.5,
                       fontWeight: FontWeight.w600,
                     ),
                   ),
                   const SizedBox(width: 6),
 
-                  Container(width: 1, height: 18, color: Colors.white12),
+                  Container(width: 1, height: 18, color: dividerColor),
                   const SizedBox(width: 6),
 
                   // 5. Toggle: Apagar apenas marca-texto
@@ -187,7 +193,7 @@ class EraserSubBar extends StatelessWidget {
                                 shape: BoxShape.circle,
                                 color: eraseHighlighterOnly
                                     ? MoscaroTokens.auroraAmber
-                                    : Colors.white30,
+                                    : textSecondary.withValues(alpha: 0.5),
                               ),
                             ),
                             const SizedBox(width: 5),
@@ -196,7 +202,7 @@ class EraserSubBar extends StatelessWidget {
                               style: TextStyle(
                                 color: eraseHighlighterOnly
                                     ? MoscaroTokens.auroraAmber
-                                    : Colors.white60,
+                                    : textSecondary,
                                 fontSize: 11,
                                 fontWeight: eraseHighlighterOnly
                                     ? FontWeight.w600
@@ -212,6 +218,7 @@ class EraserSubBar extends StatelessWidget {
               ),
             ).moscaroV2(
               borderRadius: MoscaroTokens.radiusPill,
+              enableBlur: MoscaroTokens.enableSubBarsBlur,
               padding: EdgeInsets.zero,
             ),
           ),
@@ -226,6 +233,9 @@ class EraserSubBar extends StatelessWidget {
     required String assetName,
     required bool isSelected,
   }) {
+    final textPrimary = MoscaroTokens.textPrimary;
+    final textSecondary = MoscaroTokens.textSecondary;
+
     return Material(
       color: Colors.transparent,
       child: InkWell(
@@ -258,13 +268,13 @@ class EraserSubBar extends StatelessWidget {
               SvgIcon(
                 assetName: assetName,
                 size: 14,
-                color: isSelected ? MoscaroTokens.auroraBlue : Colors.white70,
+                color: isSelected ? MoscaroTokens.auroraBlue : textSecondary,
               ),
               const SizedBox(width: 4),
               Text(
                 label,
                 style: TextStyle(
-                  color: isSelected ? Colors.white : Colors.white60,
+                  color: isSelected ? textPrimary : textSecondary,
                   fontSize: 11.5,
                   fontWeight: isSelected ? FontWeight.w600 : FontWeight.w400,
                 ),

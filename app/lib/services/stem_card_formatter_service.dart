@@ -105,28 +105,101 @@ class StemCardFormatterService {
     return 'Trecho Extraído (Pág. $pageNumber)';
   }
 
-  /// Verifica se o texto é predominantemente uma fórmula matemática/química
+  /// Verifica se o texto é predominantemente uma fórmula matemática/química isolada (sem prosa).
   bool _isPredominantlyFormula(String text) {
     final clean = text.trim();
     if (clean.length < 4) return false;
 
-    // Sinais matemáticos fortes
+    // Se começa com numeração de questão, exercício ou comandos de enunciado, NUNCA é fórmula pura!
+    final isEnunciado = RegExp(
+      r'^(?:\d+[\.\)]|Quest[aã]o|Exerc[ií]cio|Exemplo|Problema|Item|Calcule|Determine|Encontre|Mostre|Demonstre|Considere|Seja|Verifique|Avalie|Dada|Dado)',
+      caseSensitive: false,
+    ).hasMatch(clean);
+    if (isEnunciado) return false;
+
+    // Se contém vocabulário comum de problemas/exercícios em português, é um enunciado textual com fórmulas
+    final hasPortugueseProse = RegExp(
+      r'\b(?:onde|gr[aá]fico|segmento|extremidades|sentido|para|com|sendo|entre|sobre|dado|dados|curva|regi[aã]o|ponto|pontos|reta|plano|vetor|fun[cç][aã]o|campo|massa|for[cç]a|velocidade|tempo|percorrido)\b',
+      caseSensitive: false,
+    ).hasMatch(clean);
+    if (hasPortugueseProse) return false;
+
+    // Contagem de palavras normais em português com mais de 3 letras
+    final words = clean.split(RegExp(r'\s+')).where((w) => RegExp(r'^[a-zA-ZÀ-ÿ]{3,}$').hasMatch(w)).toList();
+    if (words.length >= 3) return false;
+
+    // Sinais matemáticos fortes para equações puras (sem prosa)
     final hasEquals = clean.contains('=');
     final hasMathSymbols = RegExp(r'[+\-*/^√∫∑∏±≤≥≠≈→∞∂∆∇]').hasMatch(clean);
     final hasLaTeXCommands = RegExp(r'\\[a-zA-Z]+').hasMatch(clean);
     final hasSuperOrSub = RegExp(r'[⁰¹²³⁴⁵⁶⁷⁸⁹⁺⁻⁼⁽⁾₀₁₂₃₄₅₆₇₈₉₊₋₌₍₎]').hasMatch(clean);
 
-    // Razão de letras vs símbolos
     final letterCount = RegExp(r'[a-zA-ZÀ-ÿ]').allMatches(clean).length;
     final totalLen = clean.replaceAll(RegExp(r'\s+'), '').length;
 
     if (hasLaTeXCommands || (hasEquals && hasMathSymbols)) {
-      if (totalLen > 0 && letterCount / totalLen < 0.65) return true;
+      if (totalLen > 0 && letterCount / totalLen < 0.45) return true;
     }
 
-    if (hasSuperOrSub && hasEquals) return true;
+    if (hasSuperOrSub && hasEquals && letterCount / (totalLen > 0 ? totalLen : 1) < 0.45) return true;
 
     return false;
+  }
+
+  /// Converte trechos matemáticos de um enunciado para notação LaTeX inline ($...$) perfeitamente renderizável.
+  static String _formatStatementWithInlineMath(String text) {
+    if (text.isEmpty) return text;
+
+    String formatted = text;
+
+    // 1. Converte integrais soltas com diferenciais em bloco inline math $...$
+    // Ex: \int_\gamma 6x^2ydx + xydy -> $\int_\gamma 6x^2y \, dx + xy \, dy$
+    formatted = formatted.replaceAllMapped(
+      RegExp(r'(?<!\$)\\int(?:_[a-zA-Z0-9\\\{\}]+)?\s*[^,\.;\n]+?d[xytz](?!\$)'),
+      (m) {
+        var expr = m[0]!;
+        expr = expr.replaceAllMapped(RegExp(r'([a-zA-Z0-9_\^])\s*d([xytz])'), (dm) => '${dm[1]} \\, d${dm[2]}');
+        return '\$$expr\$';
+      },
+    );
+
+    // 2. Converte equações com sinal de igual (ex: y = x^3 + 1, E(x,y) = ...)
+    formatted = formatted.replaceAllMapped(
+      RegExp(r'(?<!\$)\b([a-zA-Z]\w*)\s*=\s*([a-zA-Z0-9\+\-\*\/\^\(\)\s\\_]+?)(?=[,\.;\)]|\s+de\b|\s+a\b|\s+para\b|$)'),
+      (m) {
+        final fullEq = '${m[1]} = ${m[2]?.trim()}';
+        return '\$$fullEq\$';
+      },
+    );
+
+    // 3. Converte coordenadas numéricas ou vetores pontuais (ex: (-1, 0), (1, 2, 1), (0, 0, 0))
+    formatted = formatted.replaceAllMapped(
+      RegExp(r'(?<!\$)\(\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)(?:\s*,\s*(-?\d+(?:\.\d+)?))?\s*\)(?!\$)'),
+      (m) {
+        final third = m[3] != null ? ', ${m[3]}' : '';
+        return '\$(${m[1]}, ${m[2]}$third)\$';
+      },
+    );
+
+    // 4. Converte letras gregas isoladas como \gamma, \alpha, \beta, \theta, \lambda em $\gamma$
+    formatted = formatted.replaceAllMapped(
+      RegExp(r'(?<!\$)\\(gamma|alpha|beta|theta|lambda|pi|sigma|omega|Delta|Omega)\b(?!\$)'),
+      (m) => '\$\\${m[1]}\$',
+    );
+
+    // 5. Converte vetores como \vec{E}, \vec{i}, \vec{j}, \vec{k}
+    formatted = formatted.replaceAllMapped(
+      RegExp(r'(?<!\$)\\vec\{[a-zA-Z0-9]+\}(?!\$)'),
+      (m) => '\$${m[0]}\$',
+    );
+
+    // 6. Limpa eventuais duplicações acidentais de delimitadores de dólar
+    formatted = formatted.replaceAllMapped(
+      RegExp(r'\${2,}(.*?)\${2,}'),
+      (m) => '\$${m[1]}\$',
+    );
+
+    return formatted;
   }
 
   /// Monta o corpo em formato Callout Moscaro v2 com KaTeX e rodapé de proveniência.
@@ -138,11 +211,9 @@ class StemCardFormatterService {
   }) {
     final buffer = StringBuffer();
 
-    // Callout header
-    buffer.writeln('> [!NOTE]');
-
     if (isPureFormula) {
-      // Bloco KaTeX destacado dentro do callout
+      // Bloco KaTeX puro destacado dentro do callout
+      buffer.writeln('> [!THEOREM] FÓRMULA MATEMÁTICA');
       buffer.writeln(r'> $$\begin{aligned}');
       for (final line in text.split('\n')) {
         final trimmed = line.trim();
@@ -152,8 +223,20 @@ class StemCardFormatterService {
       }
       buffer.writeln(r'> \end{aligned}$$');
     } else {
-      // Texto com formatação de citação
-      for (final line in text.split('\n')) {
+      // Enunciado / Questão com notação inline matemática limpa
+      final isQuestion = RegExp(
+        r'^(?:\d+[\.\)]|Quest[aã]o|Exerc[ií]cio|Exemplo|Problema|Calcule|Determine|Encontre)',
+        caseSensitive: false,
+      ).hasMatch(text);
+
+      if (isQuestion) {
+        buffer.writeln('> [!NOTE] ENUNCIADO DA QUESTÃO');
+      } else {
+        buffer.writeln('> [!NOTE] TRECHO DESTACADO');
+      }
+
+      final formatted = _formatStatementWithInlineMath(text);
+      for (final line in formatted.split('\n')) {
         final trimmed = line.trim();
         if (trimmed.isNotEmpty) {
           buffer.writeln('> $trimmed');

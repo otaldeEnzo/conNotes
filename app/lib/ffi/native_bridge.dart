@@ -130,13 +130,14 @@ class ConnotesNativeBridge {
     try {
       if (Platform.isWindows) {
         final exeDir = File(Platform.resolvedExecutable).parent.path;
-        final onnxCandidates = [
+        final onnxCandidates = <String>[
           '$exeDir\\onnxruntime.dll',
-          'onnxruntime.dll',
-          '../connotes_core/target/release/onnxruntime.dll',
-          '../connotes_core/target/debug/onnxruntime.dll',
-          'connotes_core/target/release/onnxruntime.dll',
-          'connotes_core/target/debug/onnxruntime.dll',
+          if (kDebugMode) ...[
+            '../connotes_core/target/release/onnxruntime.dll',
+            '../connotes_core/target/debug/onnxruntime.dll',
+            'connotes_core/target/release/onnxruntime.dll',
+            'connotes_core/target/debug/onnxruntime.dll',
+          ],
         ];
         for (final onnxCand in onnxCandidates) {
           if (File(onnxCand).existsSync()) {
@@ -147,13 +148,14 @@ class ConnotesNativeBridge {
           }
         }
 
-        final candidates = [
+        final candidates = <String>[
           '$exeDir\\connotes_core.dll',
-          'connotes_core.dll',
-          '../connotes_core/target/release/connotes_core.dll',
-          '../connotes_core/target/debug/connotes_core.dll',
-          'connotes_core/target/release/connotes_core.dll',
-          'connotes_core/target/debug/connotes_core.dll',
+          if (kDebugMode) ...[
+            '../connotes_core/target/release/connotes_core.dll',
+            '../connotes_core/target/debug/connotes_core.dll',
+            'connotes_core/target/release/connotes_core.dll',
+            'connotes_core/target/debug/connotes_core.dll',
+          ],
         ];
         ffi.DynamicLibrary? loadedLib;
         for (final cand in candidates) {
@@ -164,7 +166,7 @@ class ConnotesNativeBridge {
             } catch (_) {}
           }
         }
-        _dylib = loadedLib ?? ffi.DynamicLibrary.open('connotes_core.dll');
+        _dylib = loadedLib ?? ffi.DynamicLibrary.open('$exeDir\\connotes_core.dll');
         _processLib = ffi.DynamicLibrary.process();
       } else if (Platform.isAndroid) {
         _dylib = ffi.DynamicLibrary.open('libconnotes_core.so');
@@ -229,76 +231,89 @@ class ConnotesNativeBridge {
     if (!_isAvailable) return null;
     final ptr = _createDocument();
     if (ptr == ffi.nullptr) return null;
-    final str = ptr.toDartString();
-    _freeString(ptr);
-    return str;
+    try {
+      return ptr.toDartString();
+    } finally {
+      _freeString(ptr);
+    }
   }
 
   String? addStroke(String docId, List<dynamic> points, {required double r, required double g, required double b, required double a, required double strokeWidth}) {
     if (!_isAvailable || points.isEmpty) return null;
     final docIdPtr = docId.toNativeUtf8();
     final pointsPtr = calloc<NativeStrokePoint>(points.length);
-    for (int i = 0; i < points.length; i++) {
-      final p = points[i];
-      pointsPtr[i].x = p.point.dx;
-      pointsPtr[i].y = p.point.dy;
-      pointsPtr[i].pressure = p.pressure;
-      pointsPtr[i].timestamp = 0;
+    ffi.Pointer<Utf8> resultPtr = ffi.nullptr;
+    try {
+      for (int i = 0; i < points.length; i++) {
+        final p = points[i];
+        pointsPtr[i].x = (p.point.dx as num).toDouble();
+        pointsPtr[i].y = (p.point.dy as num).toDouble();
+        pointsPtr[i].pressure = (p.pressure as num).toDouble();
+        pointsPtr[i].timestamp = 0;
+      }
+
+      resultPtr = _addStroke(docIdPtr, pointsPtr, points.length, r, g, b, a, strokeWidth);
+      if (resultPtr == ffi.nullptr) return null;
+      return resultPtr.toDartString();
+    } finally {
+      calloc.free(docIdPtr);
+      calloc.free(pointsPtr);
+      if (resultPtr != ffi.nullptr) {
+        _freeString(resultPtr);
+      }
     }
-
-    final resultPtr = _addStroke(docIdPtr, pointsPtr, points.length, r, g, b, a, strokeWidth);
-    calloc.free(docIdPtr);
-    calloc.free(pointsPtr);
-
-    if (resultPtr == ffi.nullptr) return null;
-    final strokeId = resultPtr.toDartString();
-    _freeString(resultPtr);
-    return strokeId;
   }
 
   void destroyDocument(String docId) {
     if (!_isAvailable) return;
     final docIdPtr = docId.toNativeUtf8();
-    _destroyDocument(docIdPtr);
-    calloc.free(docIdPtr);
+    try {
+      _destroyDocument(docIdPtr);
+    } finally {
+      calloc.free(docIdPtr);
+    }
   }
 
   List<String> duplicateStrokes(String docId, List<String> ids, double dx, double dy) {
     if (!_isAvailable) return [];
     final docIdPtr = docId.toNativeUtf8();
     final idsJsonPtr = jsonEncode(ids).toNativeUtf8();
-
-    final resultPtr = _duplicateStrokes(docIdPtr, idsJsonPtr, dx, dy);
-
-    calloc.free(docIdPtr);
-    calloc.free(idsJsonPtr);
-
-    if (resultPtr == ffi.nullptr) return [];
-    final jsonStr = resultPtr.toDartString();
-    _freeString(resultPtr);
-
+    ffi.Pointer<Utf8> resultPtr = ffi.nullptr;
     try {
+      resultPtr = _duplicateStrokes(docIdPtr, idsJsonPtr, dx, dy);
+      if (resultPtr == ffi.nullptr) return [];
+      final jsonStr = resultPtr.toDartString();
       final list = jsonDecode(jsonStr) as List<dynamic>;
       return list.cast<String>();
     } catch (_) {
       return [];
+    } finally {
+      calloc.free(docIdPtr);
+      calloc.free(idsJsonPtr);
+      if (resultPtr != ffi.nullptr) {
+        _freeString(resultPtr);
+      }
     }
   }
 
   bool undo(String docId) {
     if (!_isAvailable) return false;
     final docIdPtr = docId.toNativeUtf8();
-    final res = _undo(docIdPtr);
-    calloc.free(docIdPtr);
-    return res;
+    try {
+      return _undo(docIdPtr);
+    } finally {
+      calloc.free(docIdPtr);
+    }
   }
 
   bool redo(String docId) {
     if (!_isAvailable) return false;
     final docIdPtr = docId.toNativeUtf8();
-    final res = _redo(docIdPtr);
-    calloc.free(docIdPtr);
-    return res;
+    try {
+      return _redo(docIdPtr);
+    } finally {
+      calloc.free(docIdPtr);
+    }
   }
 
   /// Recupera o estado em tempo real da caneta via Win32.

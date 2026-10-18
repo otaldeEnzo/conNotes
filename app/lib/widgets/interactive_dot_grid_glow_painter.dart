@@ -28,7 +28,7 @@ class InteractiveDotGridGlowPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     if (glowRadius <= 0) return;
-    if (backgroundType == CanvasBackgroundType.emBranco) return;
+    if (backgroundType != CanvasBackgroundType.dotGrid) return;
 
     // 1. Determinação do espaçamento em coordenadas de mundo (idêntico ao CanvasDotGridPainter)
     double spacing = gridSpacing;

@@ -1,6 +1,7 @@
 import 'dart:math' as math;
 import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
+import 'package:flutter/gestures.dart';
 import '../services/diagnostics_override_controller.dart';
 import '../theme/moscaro_v2_tokens.dart';
 import '../theme/moscaro_v2_extension.dart';
@@ -340,20 +341,24 @@ class _CanvasCardWidgetState extends State<CanvasCardWidget> {
 
   Offset? _currentDelta;
 
-  void _onHeaderPanStart(DragStartDetails details) {
+  int? _activeDragPointerId;
+
+  void _startDragAt(Offset globalPosition) {
     if (_isEditingTitle) return;
     widget.onSelectCard(widget.card.id);
     if (widget.card.isPinned) return;
+
     final pan = widget.panNotifier?.value ?? Offset.zero;
     final zoom = _currentZoom;
-    final startCanvasPoint = (details.globalPosition - pan) / zoom;
-    _dragStartPos = details.globalPosition;
-    _currentMouseGlobalPos = details.globalPosition;
+    final startCanvasPoint = (globalPosition - pan) / zoom;
+    _dragStartPos = globalPosition;
+    _currentMouseGlobalPos = globalPosition;
     _initialCardX = widget.card.x;
     _initialCardY = widget.card.y;
     _grabOffset = startCanvasPoint - Offset(widget.card.x, widget.card.y);
     _dragOffsetNotifier.value = Offset.zero;
     _currentDelta = Offset.zero;
+
     CardsTelemetryController.instance.startCardDrag(cardId: widget.card.id);
     widget.panNotifier?.addListener(_onCanvasTransformDuringDrag);
     widget.zoomNotifier?.addListener(_onCanvasTransformDuringDrag);
@@ -364,10 +369,53 @@ class _CanvasCardWidgetState extends State<CanvasCardWidget> {
     }
   }
 
-  void _onHeaderPanUpdate(DragUpdateDetails details) {
+  void _updateDragAt(Offset globalPosition) {
     if (_isEditingTitle || widget.card.isPinned || _dragStartPos == null) return;
-    _currentMouseGlobalPos = details.globalPosition;
+    _currentMouseGlobalPos = globalPosition;
     _updateCardDragPosition();
+  }
+
+  void _onHeaderPointerDown(PointerDownEvent event) {
+    if ((event.buttons & kPrimaryMouseButton) == 0) return;
+    _activeDragPointerId = event.pointer;
+    _startDragAt(event.position);
+  }
+
+  void _onHeaderPointerMove(PointerMoveEvent event) {
+    if (_dragStartPos == null || _activeDragPointerId != event.pointer) return;
+    _updateDragAt(event.position);
+  }
+
+  void _onHeaderPointerUp(PointerUpEvent event) {
+    if (_dragStartPos == null) return;
+    if (_activeDragPointerId == event.pointer || (event.buttons & kPrimaryMouseButton) == 0) {
+      _finishHeaderDrag();
+      _activeDragPointerId = null;
+    }
+  }
+
+  void _onHeaderPointerCancel(PointerCancelEvent event) {
+    if (_dragStartPos == null) return;
+    if (_activeDragPointerId == event.pointer) {
+      _finishHeaderDrag();
+      _activeDragPointerId = null;
+    }
+  }
+
+  void _onHeaderPanStart(DragStartDetails details) {
+    _startDragAt(details.globalPosition);
+  }
+
+  void _onHeaderPanUpdate(DragUpdateDetails details) {
+    _updateDragAt(details.globalPosition);
+  }
+
+  void _onHeaderPanEnd(DragEndDetails details) {
+    _finishHeaderDrag();
+  }
+
+  void _onHeaderPanCancel() {
+    _finishHeaderDrag();
   }
 
   void _onCanvasTransformDuringDrag() {
@@ -409,7 +457,8 @@ class _CanvasCardWidgetState extends State<CanvasCardWidget> {
     CardsTelemetryController.instance.updateCardDragDelta(delta);
   }
 
-  void _onHeaderPanEnd(DragEndDetails details) {
+  void _finishHeaderDrag() {
+    if (_dragStartPos == null) return;
     widget.panNotifier?.removeListener(_onCanvasTransformDuringDrag);
     widget.zoomNotifier?.removeListener(_onCanvasTransformDuringDrag);
 
@@ -454,10 +503,12 @@ class _CanvasCardWidgetState extends State<CanvasCardWidget> {
       _currentDelta = null;
       _initialCardX = null;
       _initialCardY = null;
+      _activeDragPointerId = null;
     }
   }
 
-  void _onHeaderPanCancel() {
+  void _abortHeaderDrag() {
+    if (_dragStartPos == null) return;
     widget.panNotifier?.removeListener(_onCanvasTransformDuringDrag);
     widget.zoomNotifier?.removeListener(_onCanvasTransformDuringDrag);
     try {
@@ -473,6 +524,7 @@ class _CanvasCardWidgetState extends State<CanvasCardWidget> {
       _currentDelta = null;
       _initialCardX = null;
       _initialCardY = null;
+      _activeDragPointerId = null;
     }
   }
 
@@ -990,23 +1042,24 @@ class _CanvasCardWidgetState extends State<CanvasCardWidget> {
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
               // Cabecalho de Arraste do PDF (Vidro Liquido Moscaro v2 com Blur)
-              GestureDetector(
-                behavior: HitTestBehavior.opaque,
-                onTap: () => widget.onSelectCard(widget.card.id),
-                onDoubleTap: () {
-                  widget.onSelectCard(widget.card.id);
-                  globalIsEditingText = true;
-                  setState(() {
-                    _isEditingTitle = true;
-                    _titleController.text = _displayPdfTitle;
-                  });
-                  _titleFocusNode.requestFocus();
-                },
-                onPanStart: _onHeaderPanStart,
-                onPanUpdate: _onHeaderPanUpdate,
-                onPanEnd: _onHeaderPanEnd,
-                onPanCancel: _onHeaderPanCancel,
-                child: MouseRegion(
+              Listener(
+                onPointerDown: _onHeaderPointerDown,
+                onPointerMove: _onHeaderPointerMove,
+                onPointerUp: _onHeaderPointerUp,
+                onPointerCancel: _onHeaderPointerCancel,
+                child: GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: () => widget.onSelectCard(widget.card.id),
+                  onDoubleTap: () {
+                    widget.onSelectCard(widget.card.id);
+                    globalIsEditingText = true;
+                    setState(() {
+                      _isEditingTitle = true;
+                      _titleController.text = _displayPdfTitle;
+                    });
+                    _titleFocusNode.requestFocus();
+                  },
+                  child: MouseRegion(
                   cursor: SystemMouseCursors.move,
                   child: Builder(
                     builder: (context) {
@@ -1111,6 +1164,7 @@ class _CanvasCardWidgetState extends State<CanvasCardWidget> {
               ),
             ),
           ),
+        ),
 
               // Corpo do PDF com as paginas renderizadas com largura completa
               child,
@@ -1133,23 +1187,24 @@ class _CanvasCardWidgetState extends State<CanvasCardWidget> {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               // Cabecalho de Arraste da Midia (Vidro Liquido Moscaro v2)
-              GestureDetector(
-                behavior: HitTestBehavior.opaque,
-                onTap: () => widget.onSelectCard(widget.card.id),
-                onDoubleTap: () {
-                  widget.onSelectCard(widget.card.id);
-                  globalIsEditingText = true;
-                  setState(() {
-                    _isEditingTitle = true;
-                    _titleController.text = widget.card.title;
-                  });
-                  _titleFocusNode.requestFocus();
-                },
-                onPanStart: _onHeaderPanStart,
-                onPanUpdate: _onHeaderPanUpdate,
-                onPanEnd: _onHeaderPanEnd,
-                onPanCancel: _onHeaderPanCancel,
-                child: MouseRegion(
+              Listener(
+                onPointerDown: _onHeaderPointerDown,
+                onPointerMove: _onHeaderPointerMove,
+                onPointerUp: _onHeaderPointerUp,
+                onPointerCancel: _onHeaderPointerCancel,
+                child: GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: () => widget.onSelectCard(widget.card.id),
+                  onDoubleTap: () {
+                    widget.onSelectCard(widget.card.id);
+                    globalIsEditingText = true;
+                    setState(() {
+                      _isEditingTitle = true;
+                      _titleController.text = widget.card.title;
+                    });
+                    _titleFocusNode.requestFocus();
+                  },
+                  child: MouseRegion(
                   cursor: SystemMouseCursors.move,
                   child: Container(
                     height: 28,
@@ -1205,6 +1260,7 @@ class _CanvasCardWidgetState extends State<CanvasCardWidget> {
                   ),
                 ),
               ),
+            ),
 
               // Corpo da Mídia: NUNCA seleciona o card ao clicar na imagem (seleção exclusiva pelo cabeçalho)
               Expanded(
@@ -1235,23 +1291,24 @@ class _CanvasCardWidgetState extends State<CanvasCardWidget> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             // Cabeçalho de Arraste e Título do Card
-            GestureDetector(
-              behavior: HitTestBehavior.opaque,
-              onTap: () => widget.onSelectCard(widget.card.id),
-              onDoubleTap: () {
-                widget.onSelectCard(widget.card.id);
-                globalIsEditingText = true;
-                setState(() {
-                  _isEditingTitle = true;
-                  _titleController.text = widget.card.title;
-                });
-                _titleFocusNode.requestFocus();
-              },
-              onPanStart: _onHeaderPanStart,
-              onPanUpdate: _onHeaderPanUpdate,
-              onPanEnd: _onHeaderPanEnd,
-              onPanCancel: _onHeaderPanCancel,
-              child: Container(
+            Listener(
+              onPointerDown: _onHeaderPointerDown,
+              onPointerMove: _onHeaderPointerMove,
+              onPointerUp: _onHeaderPointerUp,
+              onPointerCancel: _onHeaderPointerCancel,
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: () => widget.onSelectCard(widget.card.id),
+                onDoubleTap: () {
+                  widget.onSelectCard(widget.card.id);
+                  globalIsEditingText = true;
+                  setState(() {
+                    _isEditingTitle = true;
+                    _titleController.text = widget.card.title;
+                  });
+                  _titleFocusNode.requestFocus();
+                },
+                child: Container(
                 height: 36,
                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                 decoration: BoxDecoration(
@@ -1309,6 +1366,7 @@ class _CanvasCardWidgetState extends State<CanvasCardWidget> {
                 ),
               ),
             ),
+          ),
 
             // Corpo do Card (Blocos de Conteúdo passado como child para evitar rebuild no resize)
             if (!isCollapsed) Expanded(child: child),

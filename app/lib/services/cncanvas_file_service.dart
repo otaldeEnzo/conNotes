@@ -9,7 +9,7 @@ import '../models/canvas_card_model.dart';
 class CncanvasFileService {
   CncanvasFileService._();
 
-  /// Salva um NoteDocument no disco no formato híbrido .cncanvas com visualizador Web Reader embutido
+  /// Salva um NoteDocument no disco no formato híbrido .cncanvas com escrita atômica e visualizador Web Reader embutido
   static Future<void> saveToCnCanvasFile(NoteDocument doc, String targetPath) async {
     final file = File(targetPath);
     final parentDir = file.parent;
@@ -18,10 +18,24 @@ class CncanvasFileService {
     }
 
     final jsonMap = doc.toCnCanvasMap();
-    final jsonStr = const JsonEncoder.withIndent('  ').convert(jsonMap);
-    final htmlContent = _generateStandaloneHtmlContent(doc, jsonStr);
+    // Escapa '</' como '<\/' (válido na RFC 8259) para impedir que '</script>' no conteúdo quebre o bloco HTML
+    final rawJsonStr = jsonEncode(jsonMap).replaceAll('</', r'<\/');
+    final htmlContent = _generateStandaloneHtmlContent(doc, rawJsonStr);
 
-    await file.writeAsString(htmlContent, flush: true);
+    final tmpPath = '$targetPath.tmp';
+    final tmpFile = File(tmpPath);
+    await tmpFile.writeAsString(htmlContent, flush: true);
+
+    if (tmpFile.existsSync() && tmpFile.lengthSync() > 0) {
+      try {
+        await tmpFile.rename(targetPath);
+      } on FileSystemException {
+        await tmpFile.copy(targetPath);
+        try {
+          await tmpFile.delete();
+        } catch (_) {}
+      }
+    }
     doc.filePath = targetPath;
   }
 
@@ -44,7 +58,19 @@ class CncanvasFileService {
         try {
           final jsonString = content.substring(jsonStart, endIndex).trim();
           jsonMap = jsonDecode(jsonString) as Map<String, dynamic>;
-        } catch (_) {}
+        } catch (_) {
+          // Recuperação resiliente caso notas antigas contenham '</script>' literal dentro do JSON
+          const motorMarker = '<!-- MOTOR OFFLINE DE PAN & ZOOM';
+          final motorIdx = content.indexOf(motorMarker, jsonStart);
+          final searchLimit = motorIdx != -1 ? motorIdx : content.length;
+          final fallbackEndIdx = content.lastIndexOf(endTag, searchLimit);
+          if (fallbackEndIdx > jsonStart) {
+            try {
+              final recoveredJson = content.substring(jsonStart, fallbackEndIdx).trim();
+              jsonMap = jsonDecode(recoveredJson) as Map<String, dynamic>;
+            } catch (_) {}
+          }
+        }
       }
     }
 
@@ -76,6 +102,7 @@ class CncanvasFileService {
 <html lang="pt-BR">
 <head>
   <meta charset="utf-8"/>
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src data: blob:; connect-src 'none';"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, user-scalable=yes"/>
   <meta name="connotes-doc-type" content="canvas"/>
   <meta name="connotes-schema-version" content="1"/>

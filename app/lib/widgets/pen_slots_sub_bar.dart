@@ -5,6 +5,7 @@ import '../theme/moscaro_v2_extension.dart';
 import '../theme/stem_ink_theme_adapter.dart';
 import 'ink_models.dart';
 import 'precision_color_picker.dart';
+import 'svg_icon.dart';
 
 /// Sub-Barra Flutuante de Slots de Canetas Vivas.
 /// Agora super compacta e minimalista (sem nomes de texto), com suporte a Drag & Drop para reordenar slots.
@@ -37,6 +38,14 @@ class PenSlotsSubBar extends StatefulWidget {
 class _PenSlotsSubBarState extends State<PenSlotsSubBar> {
   final ScrollController _scrollController = ScrollController();
   OverlayEntry? _editorOverlay;
+
+  @override
+  void didUpdateWidget(covariant PenSlotsSubBar oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!widget.isVisible && oldWidget.isVisible) {
+      _closeEditor();
+    }
+  }
 
   @override
   void dispose() {
@@ -105,6 +114,8 @@ class _PenSlotsSubBarState extends State<PenSlotsSubBar> {
 
   @override
   Widget build(BuildContext context) {
+    final isLight = MoscaroTokens.isLight;
+
     return IgnorePointer(
       ignoring: !widget.isVisible,
       child: AnimatedSlide(
@@ -177,11 +188,15 @@ class _PenSlotsSubBarState extends State<PenSlotsSubBar> {
                     ),
                   ),
                   const SizedBox(width: 4),
-                  Container(width: 1, height: 18, color: Colors.white24),
+                  Container(
+                    width: 1,
+                    height: 18,
+                    color: isLight ? Colors.black12 : Colors.white24,
+                  ),
                   const SizedBox(width: 4),
                   // Botão Adicionar Novo Slot
                   IconButton(
-                    icon: Icon(Icons.add, size: 18, color: MoscaroTokens.auroraBlue),
+                    icon: SvgIcon(name: 'plus', size: 16, color: MoscaroTokens.auroraBlue),
                     onPressed: widget.onAddNewSlot,
                     tooltip: 'Novo Slot de Caneta',
                     padding: EdgeInsets.zero,
@@ -213,13 +228,9 @@ class _PenSlotsSubBarState extends State<PenSlotsSubBar> {
               final offset = box.localToGlobal(Offset.zero);
               _openSlotEditor(context, preset, offset);
             } else {
+              _closeEditor();
               widget.onSelectPreset(preset);
             }
-          },
-          onDoubleTap: () {
-            final RenderBox box = slotContext.findRenderObject() as RenderBox;
-            final offset = box.localToGlobal(Offset.zero);
-            _openSlotEditor(context, preset, offset);
           },
           child: Container(
             margin: const EdgeInsets.symmetric(horizontal: 3, vertical: 3),
@@ -240,10 +251,10 @@ class _PenSlotsSubBarState extends State<PenSlotsSubBar> {
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                // Ícone da ferramenta adaptado harmonicamente ao tema ativo
-                Icon(
-                  _getToolIcon(preset.toolType),
-                  size: 16,
+                // Ícone SVG da ferramenta adaptado harmonicamente ao tema ativo
+                SvgIcon(
+                  name: _getToolIconName(preset.toolType),
+                  size: 15,
                   color: displayColor,
                 ),
                 const SizedBox(width: 6),
@@ -264,16 +275,16 @@ class _PenSlotsSubBarState extends State<PenSlotsSubBar> {
     );
   }
 
-  IconData _getToolIcon(InkToolType type) {
+  String _getToolIconName(InkToolType type) {
     switch (type) {
       case InkToolType.technical:
-        return Icons.edit;
+        return 'pen';
       case InkToolType.fountain:
-        return Icons.brush;
+        return 'edit';
       case InkToolType.pencil:
-        return Icons.create;
+        return 'pen';
       case InkToolType.highlighter:
-        return Icons.highlight;
+        return 'highlighter';
     }
   }
 }

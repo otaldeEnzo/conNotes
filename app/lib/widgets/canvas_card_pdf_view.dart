@@ -776,6 +776,7 @@ class _CanvasCardPdfViewState extends State<CanvasCardPdfView> {
       originalAspectRatio: cropAspect,
       lockAspectRatio: true,
       mediaData: base64Image,
+      invertLuminance: widget.card.invertLuminance,
     );
 
     widget.onDuplicateCard?.call(newCard);
@@ -822,6 +823,7 @@ class _CanvasCardPdfViewState extends State<CanvasCardPdfView> {
       originalAspectRatio: cropAspect,
       lockAspectRatio: true,
       mediaData: base64Image,
+      invertLuminance: widget.card.invertLuminance,
     );
 
     widget.onDuplicateCard?.call(newCard);

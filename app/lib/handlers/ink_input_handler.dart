@@ -1,4 +1,6 @@
 import 'dart:async';
+import 'dart:ffi' as ffi;
+import 'dart:io';
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -8,17 +10,61 @@ import '../widgets/smart_shapes.dart';
 import '../widgets/stem_ruler_model.dart';
 import '../widgets/stem_protractor_model.dart';
 
+typedef _GetAsyncKeyStateNative = ffi.Int16 Function(ffi.Int32 vKey);
+typedef _GetAsyncKeyStateDart = int Function(int vKey);
+
 class InkInputHandler {
+  static _GetAsyncKeyStateDart? _win32GetAsyncKeyState;
+  static bool _win32InitAttempted = false;
+
+  static bool _isWin32VirtualKeyPressed(int vKey) {
+    if (!Platform.isWindows) return false;
+    if (!_win32InitAttempted) {
+      _win32InitAttempted = true;
+      try {
+        final user32 = ffi.DynamicLibrary.open('user32.dll');
+        _win32GetAsyncKeyState = user32
+            .lookupFunction<_GetAsyncKeyStateNative, _GetAsyncKeyStateDart>('GetAsyncKeyState');
+      } catch (_) {}
+    }
+    final fn = _win32GetAsyncKeyState;
+    if (fn == null) return false;
+    return (fn(vKey) & 0x8000) != 0;
+  }
+
+  /// Verifica se Shift está pressionado (compatível com teclado físico e ExpressKeys/Stylus em mesas digitalizadoras)
+  static bool isShiftModifierPressed() {
+    if (HardwareKeyboard.instance.isShiftPressed) return true;
+    // VK_SHIFT = 0x10, VK_LSHIFT = 0xA0, VK_RSHIFT = 0xA1
+    return _isWin32VirtualKeyPressed(0x10) ||
+        _isWin32VirtualKeyPressed(0xA0) ||
+        _isWin32VirtualKeyPressed(0xA1);
+  }
+
+  /// Verifica se Ctrl está pressionado (compatível com teclado físico e ExpressKeys/Stylus em mesas digitalizadoras)
+  static bool isCtrlModifierPressed() {
+    if (HardwareKeyboard.instance.isControlPressed) return true;
+    // VK_CONTROL = 0x11, VK_LCONTROL = 0xA2, VK_RCONTROL = 0xA3
+    return _isWin32VirtualKeyPressed(0x11) ||
+        _isWin32VirtualKeyPressed(0xA2) ||
+        _isWin32VirtualKeyPressed(0xA3);
+  }
+
   final ValueNotifier<int> activeStrokeUpdateNotifier;
   final VoidCallback onInteracting;
 
   bool isDrawing = false;
   InkStroke? activeStroke;
   Timer? drawAndHoldTimer;
+  Offset? _holdAnchorPoint;
 
   bool isSmartShapeSnapped = false;
   ShapeType? snappedShapeType;
+  ShapeType? activeModifierShapeType;
   Offset? smartShapeStartPoint;
+  Offset? smartShapeInitialEndPoint;
+  Offset? smartShapeSnapCursorPos;
+  List<StrokePoint>? smartShapeOriginalPoints;
   Rect? smartShapeInitialBounds;
   Offset? smartShapeCenter;
   Offset? shapeDragStartPoint;
@@ -31,6 +77,8 @@ class InkInputHandler {
   void cancelActiveStroke() {
     isDrawing = false;
     activeStroke = null;
+    activeModifierShapeType = null;
+    _holdAnchorPoint = null;
     drawAndHoldTimer?.cancel();
     activeStrokeUpdateNotifier.value++;
   }
@@ -49,7 +97,11 @@ class InkInputHandler {
     onInteracting();
     isSmartShapeSnapped = false;
     snappedShapeType = null;
+    activeModifierShapeType = null;
     smartShapeStartPoint = canvasPoint;
+    smartShapeInitialEndPoint = null;
+    smartShapeSnapCursorPos = null;
+    smartShapeOriginalPoints = null;
     smartShapeInitialBounds = null;
     smartShapeCenter = null;
 
@@ -59,15 +111,17 @@ class InkInputHandler {
             ? protractorState.snapPoint(canvasPoint)
             : null);
     final effectiveStartPoint = snapped ?? canvasPoint;
+    smartShapeStartPoint = effectiveStartPoint;
     _smoothedCursorPos = effectiveStartPoint;
     _smoothedPressure = pressure;
 
     isDrawing = true;
-    final isShift = HardwareKeyboard.instance.isShiftPressed;
-    final isCtrl = HardwareKeyboard.instance.isControlPressed;
+    final isShift = isShiftModifierPressed();
+    final isCtrl = isCtrlModifierPressed();
 
     if (isShift || isCtrl) {
       final shapeType = isCtrl ? ShapeType.arrow : ShapeType.line;
+      activeModifierShapeType = shapeType;
       final initialPath = SmartShapeEngine.generateShapePath(
         shapeType,
         effectiveStartPoint,
@@ -99,7 +153,8 @@ class InkInputHandler {
     );
     activeStrokeUpdateNotifier.value++;
 
-    _scheduleDrawAndHold(drawAndHoldDurationMs, preset, pressure);
+    _holdAnchorPoint = null;
+    drawAndHoldTimer?.cancel();
   }
 
   void _scheduleDrawAndHold(int durationMs, PenSlotPreset preset, double pressure) {
@@ -108,12 +163,22 @@ class InkInputHandler {
       if (isDrawing && activeStroke != null && activeStroke!.points.length >= 14 && !isSmartShapeSnapped) {
         final recognized = SmartShapeEngine.recognizeDrawnShape(activeStroke!.points);
         if (recognized != null) {
+          final originalPts = List<StrokePoint>.from(activeStroke!.points);
           isSmartShapeSnapped = true;
           snappedShapeType = recognized;
+          smartShapeOriginalPoints = originalPts;
+          smartShapeStartPoint = originalPts.first.point;
+          smartShapeSnapCursorPos = originalPts.last.point;
+
+          if (recognized == ShapeType.arrow || recognized == ShapeType.doubleArrow) {
+            smartShapeInitialEndPoint = SmartShapeEngine.findArrowTipPoint(originalPts);
+          } else {
+            smartShapeInitialEndPoint = originalPts.last.point;
+          }
 
           double minX = double.infinity, minY = double.infinity;
           double maxX = double.negativeInfinity, maxY = double.negativeInfinity;
-          for (final p in activeStroke!.points) {
+          for (final p in originalPts) {
             if (p.point.dx < minX) minX = p.point.dx;
             if (p.point.dy < minY) minY = p.point.dy;
             if (p.point.dx > maxX) maxX = p.point.dx;
@@ -125,7 +190,7 @@ class InkInputHandler {
 
           final shapePath = SmartShapeEngine.generateRecognizedPath(
             recognized,
-            activeStroke!.points,
+            originalPts,
             drawnBounds,
           );
           final shapePoints = SmartShapeEngine.samplePathPoints(shapePath, pressure: pressure);
@@ -156,13 +221,18 @@ class InkInputHandler {
   }) {
     if (!isDrawing || activeStroke == null) return;
 
-    // 1. Teclas Modificadoras: Shift = Linha Reta, Ctrl = Seta STEM
-    final isShift = HardwareKeyboard.instance.isShiftPressed;
-    final isCtrl = HardwareKeyboard.instance.isControlPressed;
+    // 1. Teclas Modificadoras: Shift = Linha Reta, Ctrl = Seta STEM (suporta mouse e mesa digitalizadora)
+    final isShift = isShiftModifierPressed();
+    final isCtrl = isCtrlModifierPressed();
 
-    if (isShift || isCtrl) {
+    if (isShift || isCtrl || activeModifierShapeType != null) {
       drawAndHoldTimer?.cancel();
-      final shapeType = isCtrl ? ShapeType.arrow : ShapeType.line;
+      if (isCtrl) {
+        activeModifierShapeType = ShapeType.arrow;
+      } else if (isShift) {
+        activeModifierShapeType = ShapeType.line;
+      }
+      final shapeType = activeModifierShapeType!;
       final startPoint = smartShapeStartPoint ?? activeStroke!.points.first.point;
       final shapePath = SmartShapeEngine.generateShapePath(shapeType, startPoint, canvasPoint);
       final shapePoints = SmartShapeEngine.samplePathPoints(shapePath, pressure: pressure);
@@ -181,23 +251,40 @@ class InkInputHandler {
       return;
     }
 
-    // 2. Se já fez o snap do Smart Shape, o arraste redimensiona a forma a partir do centro
+    // 2. Se já fez o snap do Smart Shape, o arraste redimensiona/orienta a forma suavemente
     if (isSmartShapeSnapped && snappedShapeType != null && smartShapeStartPoint != null) {
       final recognized = snappedShapeType!;
-      final Rect newBounds;
-      if (smartShapeInitialBounds != null && smartShapeCenter != null) {
-        final initBounds = smartShapeInitialBounds!;
-        final center = smartShapeCenter!;
-        final delta = canvasPoint - smartShapeStartPoint!;
+      final Path shapePath;
 
-        final newWidth = math.max(12.0, initBounds.width + delta.dx * 2);
-        final newHeight = math.max(12.0, initBounds.height + delta.dy * 2);
-        newBounds = Rect.fromCenter(center: center, width: newWidth, height: newHeight);
+      if (recognized == ShapeType.line ||
+          recognized == ShapeType.arrow ||
+          recognized == ShapeType.doubleArrow) {
+        final snapOrigin = smartShapeSnapCursorPos ?? canvasPoint;
+        final initialEnd = smartShapeInitialEndPoint ?? snapOrigin;
+        final dragDelta = canvasPoint - snapOrigin;
+        final newEnd = initialEnd + dragDelta;
+        shapePath = SmartShapeEngine.generateShapePath(recognized, smartShapeStartPoint!, newEnd);
       } else {
-        newBounds = Rect.fromPoints(smartShapeStartPoint!, canvasPoint);
+        final Rect newBounds;
+        if (smartShapeInitialBounds != null && smartShapeCenter != null) {
+          final initBounds = smartShapeInitialBounds!;
+          final center = smartShapeCenter!;
+          final snapOrigin = smartShapeSnapCursorPos ?? smartShapeStartPoint!;
+          final delta = canvasPoint - snapOrigin;
+
+          final newWidth = math.max(12.0, initBounds.width + delta.dx * 2);
+          final newHeight = math.max(12.0, initBounds.height + delta.dy * 2);
+          newBounds = Rect.fromCenter(center: center, width: newWidth, height: newHeight);
+        } else {
+          newBounds = Rect.fromPoints(smartShapeStartPoint!, canvasPoint);
+        }
+        shapePath = SmartShapeEngine.generateRecognizedPath(
+          recognized,
+          smartShapeOriginalPoints ?? activeStroke!.points,
+          newBounds,
+        );
       }
 
-      final shapePath = SmartShapeEngine.generateRecognizedPath(recognized, activeStroke!.points, newBounds);
       final shapePoints = SmartShapeEngine.samplePathPoints(shapePath, pressure: pressure);
 
       activeStroke = InkStroke(
@@ -258,9 +345,20 @@ class InkInputHandler {
       activeStroke!.cachedPath = null;
       activeStrokeUpdateNotifier.value++;
 
-      if (distSq < 16.0) {
-        _scheduleDrawAndHold(drawAndHoldDurationMs, preset, _smoothedPressure);
+      if (pts.length >= 12) {
+        if (_holdAnchorPoint == null) {
+          _holdAnchorPoint = effectivePoint;
+          _scheduleDrawAndHold(drawAndHoldDurationMs, preset, _smoothedPressure);
+        } else {
+          final movedDist = (effectivePoint - _holdAnchorPoint!).distance;
+          if (movedDist > 5.0) {
+            _holdAnchorPoint = effectivePoint;
+            drawAndHoldTimer?.cancel();
+            _scheduleDrawAndHold(drawAndHoldDurationMs, preset, _smoothedPressure);
+          }
+        }
       } else {
+        _holdAnchorPoint = null;
         drawAndHoldTimer?.cancel();
       }
     }
@@ -327,6 +425,7 @@ class InkInputHandler {
 
   InkStroke? finishStroke() {
     drawAndHoldTimer?.cancel();
+    _holdAnchorPoint = null;
     shapeDragStartPoint = null;
     if (!isDrawing || activeStroke == null) return null;
 
@@ -356,6 +455,7 @@ class InkInputHandler {
 
   void cancel() {
     drawAndHoldTimer?.cancel();
+    _holdAnchorPoint = null;
     isDrawing = false;
     activeStroke = null;
     isSmartShapeSnapped = false;

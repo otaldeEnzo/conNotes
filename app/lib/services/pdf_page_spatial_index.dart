@@ -678,9 +678,71 @@ class PdfPageSpatialIndex {
     // 0.2 Remoção de caracteres de controle e glifos invisíveis que viram tofu-boxes ([]):
     cleaned = cleaned.replaceAll(RegExp(r'[\u0000-\u0008\u000b\u000c\u000e-\u001f\u00ad\uFFFD]'), '');
 
-    // 0.3 Converte quebras de linha duras no meio de frases em espaços para fluxo de leitura natural:
+    // 0.3 Reconstituição de Acentuação Portuguesa & Diacríticos Decompostos (LaTeX / Computer Modern Fonts):
+    // Resolve artefatos onde o acento foi extraído como caractere separado (ex: "e´" -> "é", "gr´afico" -> "gráfico")
+    cleaned = cleaned
+        .replaceAll(RegExp(r'a[´\u00B4\u0301]'), 'á')
+        .replaceAll(RegExp(r'e[´\u00B4\u0301]'), 'é')
+        .replaceAll(RegExp(r'i[´\u00B4\u0301]'), 'í')
+        .replaceAll(RegExp(r'o[´\u00B4\u0301]'), 'ó')
+        .replaceAll(RegExp(r'u[´\u00B4\u0301]'), 'ú')
+        .replaceAll(RegExp(r'A[´\u00B4\u0301]'), 'Á')
+        .replaceAll(RegExp(r'E[´\u00B4\u0301]'), 'É')
+        .replaceAll(RegExp(r'I[´\u00B4\u0301]'), 'Í')
+        .replaceAll(RegExp(r'O[´\u00B4\u0301]'), 'Ó')
+        .replaceAll(RegExp(r'U[´\u00B4\u0301]'), 'Ú')
+        .replaceAll(RegExp(r'[´\u00B4\u0301]a'), 'á')
+        .replaceAll(RegExp(r'[´\u00B4\u0301]e'), 'é')
+        .replaceAll(RegExp(r'[´\u00B4\u0301]i'), 'í')
+        .replaceAll(RegExp(r'[´\u00B4\u0301]o'), 'ó')
+        .replaceAll(RegExp(r'[´\u00B4\u0301]u'), 'ú')
+        .replaceAll(RegExp(r'[´\u00B4\u0301]A'), 'Á')
+        .replaceAll(RegExp(r'[´\u00B4\u0301]E'), 'É')
+        .replaceAll(RegExp(r'[´\u00B4\u0301]I'), 'Í')
+        .replaceAll(RegExp(r'[´\u00B4\u0301]O'), 'Ó')
+        .replaceAll(RegExp(r'[´\u00B4\u0301]U'), 'Ú')
+        .replaceAll(RegExp(r'a[\^]'), 'â')
+        .replaceAll(RegExp(r'e[\^]'), 'ê')
+        .replaceAll(RegExp(r'o[\^]'), 'ô')
+        .replaceAll(RegExp(r'[\^]a'), 'â')
+        .replaceAll(RegExp(r'[\^]e'), 'ê')
+        .replaceAll(RegExp(r'[\^]o'), 'ô')
+        .replaceAll(RegExp(r'a[~]'), 'ã')
+        .replaceAll(RegExp(r'o[~]'), 'õ')
+        .replaceAll(RegExp(r'[~]a'), 'ã')
+        .replaceAll(RegExp(r'[~]o'), 'õ')
+        .replaceAll(RegExp(r'a[`]'), 'à')
+        .replaceAll(RegExp(r'[`]a'), 'à')
+        .replaceAll(RegExp(r'c[¸,]'), 'ç')
+        .replaceAll(RegExp(r'C[¸,]'), 'Ç');
+
+    // 0.4 Reconstrução de Símbolos Matemáticos em Fontes TeX/Computer Modern (ex: Z -> \int quando seguido de diferencial ou caminho):
     cleaned = cleaned.replaceAllMapped(
-      RegExp(r'([^\.\!\?\:\n])\r?\n\s*([a-zA-ZÀ-ÿ\u00C0-\u017F0-9])'),
+      RegExp(r'(?:^|(?<=\s))Z(?=\s*\\?[a-zA-Z0-9_\^]+\s*d[xytz]|\\gamma)'),
+      (m) => r'\int',
+    );
+
+    // Conecta subscritos verticais da integral que caíram em linhas separadas (ex: "\int ... \n\gamma" -> "\int_\gamma ...")
+    cleaned = cleaned.replaceAllMapped(
+      RegExp(r'\\int\s*([0-9a-zA-Z\^\+\-\s]+d[xytz][^\n]*)\r?\n\s*\\(gamma|alpha|beta|theta|C|L|S)\b'),
+      (m) => r'\int_{\' '${m[2]}} ${m[1]}',
+    );
+
+    // Conecta subscrito imediato se gamma estiver logo após a integral
+    cleaned = cleaned.replaceAllMapped(
+      RegExp(r'\\int\s*\\(gamma|alpha|beta|theta)\b'),
+      (m) => r'\int_{\' '${m[1]}}',
+    );
+
+    // 0.5 Restauração de Expoentes Polinomiais Comuns em Fórmulas Matemáticas (ex: 6x2y -> 6x^2y, x3 + 1 -> x^3 + 1):
+    cleaned = cleaned.replaceAllMapped(
+      RegExp(r'(?<=[0-9\+\-\*\/\=\(\s]|^)([xyzrtuvw])([2-9])(?=[xyzrtuvw\s\+\-\*\/\=\,\)\;]|$)'),
+      (m) => '${m[1]}^${m[2]}',
+    );
+
+    // 0.6 Converte quebras de linha duras no meio de frases em espaços para fluxo de leitura natural:
+    cleaned = cleaned.replaceAllMapped(
+      RegExp(r'([^\.\!\?\:\n])\r?\n\s*([a-zA-ZÀ-ÿ\u00C0-\u017F0-9\\\(])'),
       (m) => '${m[1]} ${m[2]}',
     );
 

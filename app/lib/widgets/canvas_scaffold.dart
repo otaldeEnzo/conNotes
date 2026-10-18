@@ -397,13 +397,30 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
           _selectedNoteId = target.id;
           _panNotifier.value = Offset(target.panX, target.panY);
           _zoomNotifier.value = target.zoomScale;
+          _currentBackground = target.backgroundType;
+          _aiMessages
+            ..clear()
+            ..addAll(target.aiChatHistory);
         } else if (defaultNote != null) {
           _notes.clear();
           _notes.add(defaultNote);
           _activeNoteIds.clear();
           _activeNoteIds.add(defaultNote.id);
           _selectedNoteId = defaultNote.id;
+          _currentBackground = defaultNote.backgroundType;
+          _aiMessages
+            ..clear()
+            ..addAll(defaultNote.aiChatHistory);
         }
+        final savedEraserMode = EraserMode.values.firstWhere(
+          (m) => m.name == loaded.lastEraserMode,
+          orElse: () => EraserMode.stroke,
+        );
+        _eraserConfig = EraserConfig(
+          mode: savedEraserMode,
+          radius: loaded.lastEraserRadius,
+          eraseHighlighterOnly: loaded.lastEraseHighlighterOnly,
+        );
         _settings = loaded;
       });
     }
@@ -499,6 +516,32 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
   @override
   void initState() {
     super.initState();
+    if (widget.initialNote != null) {
+      _currentBackground = widget.initialNote!.backgroundType;
+    }
+    final initialSettings = SettingsService.instance.currentSettings;
+    final initialEraserMode = EraserMode.values.firstWhere(
+      (m) => m.name == initialSettings.lastEraserMode,
+      orElse: () => EraserMode.stroke,
+    );
+    _eraserConfig = EraserConfig(
+      mode: initialEraserMode,
+      radius: initialSettings.lastEraserRadius,
+      eraseHighlighterOnly: initialSettings.lastEraseHighlighterOnly,
+    );
+    _panNotifier.addListener(() {
+      final note = _currentNote;
+      if (note != null) {
+        note.panX = _panNotifier.value.dx;
+        note.panY = _panNotifier.value.dy;
+      }
+    });
+    _zoomNotifier.addListener(() {
+      final note = _currentNote;
+      if (note != null) {
+        note.zoomScale = _zoomNotifier.value;
+      }
+    });
     _loadSavedSettings();
 
     _laserEngine.init(this);
@@ -545,6 +588,12 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
   }
 
   void _switchToNote(NoteDocument targetNote) {
+    if (_currentNote != null) {
+      _currentNote!.aiChatHistory
+        ..clear()
+        ..addAll(_aiMessages);
+      WorkspaceStorageService.instance.scheduleAutoSave(_currentNote!);
+    }
     if (!_notes.any((n) => n.id == targetNote.id)) {
       _notes.add(targetNote);
     }
@@ -558,6 +607,9 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
     _panNotifier.value = Offset(targetNote.panX, targetNote.panY);
     _zoomNotifier.value = targetNote.zoomScale;
     _currentBackground = targetNote.backgroundType;
+    _aiMessages
+      ..clear()
+      ..addAll(targetNote.aiChatHistory);
     _strokesVersion++;
     _committedStrokesNotifier.value++;
     _selectionUpdateNotifier.value++;
@@ -567,17 +619,20 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
   @override
   void didUpdateWidget(covariant CanvasHomeScreen oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (widget.initialOpenNoteIds != null && widget.initialOpenNoteIds!.isNotEmpty) {
-      for (final id in widget.initialOpenNoteIds!) {
-        if (!_activeNoteIds.contains(id)) {
-          _activeNoteIds.add(id);
-        }
-      }
+    if (widget.initialOpenNoteIds != null) {
+      _activeNoteIds
+        ..clear()
+        ..addAll(widget.initialOpenNoteIds!);
     }
-    if (widget.initialNote != null && widget.initialNote?.id != _selectedNoteId) {
-      setState(() {
-        _switchToNote(widget.initialNote!);
-      });
+    if (widget.initialNote != null) {
+      if (!_activeNoteIds.contains(widget.initialNote!.id)) {
+        _activeNoteIds.add(widget.initialNote!.id);
+      }
+      if (widget.initialNote?.id != _selectedNoteId) {
+        setState(() {
+          _switchToNote(widget.initialNote!);
+        });
+      }
     }
   }
 
@@ -2166,6 +2221,9 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
                                 }
                                 _selectionState = SelectionState.empty();
                               });
+                              if (_activeNoteIds.isEmpty) {
+                                widget.onBackToHome?.call(_activeNoteIds);
+                              }
                             },
                             onAddNote: () {
                               _addNewNote("Nova Nota ${_notes.length + 1}");
@@ -2179,7 +2237,7 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
               ),
 
               // 4.1 HUD de Zoom no Topo Superior Direito
-              if (!_isSettingsOpen)
+              if (!_isSettingsOpen && !_isAIOpen)
                 Positioned(
                   top: 48,
                   right: 24,
@@ -2313,17 +2371,23 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
                               onSelectMode: (mode) {
                                 setState(() {
                                   _eraserConfig = _eraserConfig.copyWith(mode: mode);
+                                  _settings = _settings.copyWith(lastEraserMode: mode.name);
                                 });
+                                SettingsService.instance.saveSettings(_settings);
                               },
                               onChangeRadius: (rad) {
                                 setState(() {
                                   _eraserConfig = _eraserConfig.copyWith(radius: rad);
+                                  _settings = _settings.copyWith(lastEraserRadius: rad);
                                 });
+                                SettingsService.instance.saveSettings(_settings);
                               },
                               onToggleHighlighterOnly: (val) {
                                 setState(() {
                                   _eraserConfig = _eraserConfig.copyWith(eraseHighlighterOnly: val);
+                                  _settings = _settings.copyWith(lastEraseHighlighterOnly: val);
                                 });
+                                SettingsService.instance.saveSettings(_settings);
                               },
                             ),
 
@@ -2573,6 +2637,11 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
               NoteSidebar(
                 isOpen: _isSidebarOpen,
                 selectedNoteId: _selectedNoteId,
+                onClose: () {
+                  setState(() {
+                    _isSidebarOpen = false;
+                  });
+                },
                 onSelectNote: (selectedNote) {
                   setState(() {
                     _switchToNote(selectedNote);
@@ -2616,7 +2685,11 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
                 onClearChat: () {
                   setState(() {
                     _aiMessages.clear();
+                    _currentNote?.aiChatHistory.clear();
                   });
+                  if (_currentNote != null) {
+                    WorkspaceStorageService.instance.scheduleAutoSave(_currentNote!);
+                  }
                 },
                 onInsertIntoCanvas: (msg) {
                   _handleInsertAiMessageIntoCanvas(msg);
@@ -2700,23 +2773,32 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
     if (selectedStrokes.isEmpty) return null;
 
     final bounds = _selectionState.bounds!;
-    const padding = 24.0;
+    const padding = 28.0;
     final paddedBounds = bounds.inflate(padding);
-    final width = math.max(160.0, math.min(1024.0, paddedBounds.width));
-    final height = math.max(160.0, math.min(1024.0, paddedBounds.height));
+
+    const maxDimension = 1600.0;
+    final maxPadded = math.max(paddedBounds.width, paddedBounds.height);
+    final scale = maxPadded > maxDimension ? maxDimension / maxPadded : 1.0;
+
+    final targetWidth = math.max(200.0, (paddedBounds.width * scale).roundToDouble());
+    final targetHeight = math.max(200.0, (paddedBounds.height * scale).roundToDouble());
 
     final recorder = ui.PictureRecorder();
-    final canvas = Canvas(recorder, Rect.fromLTWH(0, 0, width, height));
+    final canvas = Canvas(recorder, Rect.fromLTWH(0, 0, targetWidth, targetHeight));
 
-    // Fundo contrastante para reconhecimento de visão computacional / OCR
-    canvas.drawRect(Rect.fromLTWH(0, 0, width, height), Paint()..color = const Color(0xFF0D0E15));
+    // Modo Documento de Alto Contraste: Fundo Branco (#FFFFFF) com traços escuros nítidos para OCR/Visão da IA
+    canvas.drawRect(Rect.fromLTWH(0, 0, targetWidth, targetHeight), Paint()..color = Colors.white);
+    canvas.scale(scale, scale);
     canvas.translate(-paddedBounds.left, -paddedBounds.top);
 
     for (final stroke in selectedStrokes) {
       if (stroke.points.isEmpty) continue;
+      final strokeColor = (stroke.color.computeLuminance() > 0.5)
+          ? const Color(0xFF111111)
+          : stroke.color;
       final strokePaint = Paint()
-        ..color = stroke.color == Colors.black ? Colors.white : stroke.color
-        ..strokeWidth = math.max(3.0, stroke.strokeWidth)
+        ..color = strokeColor
+        ..strokeWidth = math.max(3.2, stroke.strokeWidth * 1.3)
         ..strokeCap = StrokeCap.round
         ..strokeJoin = StrokeJoin.round
         ..style = PaintingStyle.stroke;
@@ -2734,7 +2816,7 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
     }
 
     final picture = recorder.endRecording();
-    final img = await picture.toImage(width.round(), height.round());
+    final img = await picture.toImage(targetWidth.round(), targetHeight.round());
     final byteData = await img.toByteData(format: ui.ImageByteFormat.png);
     if (byteData == null) return null;
     return base64Encode(byteData.buffer.asUint8List());
@@ -2760,23 +2842,33 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
     }
 
     final rawBounds = Rect.fromLTRB(minX, minY, maxX, maxY);
-    const padding = 32.0;
+    const padding = 36.0;
     final paddedBounds = rawBounds.inflate(padding);
-    final width = math.max(200.0, math.min(1280.0, paddedBounds.width));
-    final height = math.max(200.0, math.min(1280.0, paddedBounds.height));
+
+    // Escala proporcional com limite de até 1920px no maior eixo para que nenhum traço seja cortado fora
+    const maxDimension = 1920.0;
+    final maxPadded = math.max(paddedBounds.width, paddedBounds.height);
+    final scale = maxPadded > maxDimension ? maxDimension / maxPadded : 1.0;
+
+    final targetWidth = math.max(240.0, (paddedBounds.width * scale).roundToDouble());
+    final targetHeight = math.max(240.0, (paddedBounds.height * scale).roundToDouble());
 
     final recorder = ui.PictureRecorder();
-    final canvas = Canvas(recorder, Rect.fromLTWH(0, 0, width, height));
+    final canvas = Canvas(recorder, Rect.fromLTWH(0, 0, targetWidth, targetHeight));
 
-    // Fundo contrastante escuro para reconhecimento nítido da caligrafia pelo Gemini
-    canvas.drawRect(Rect.fromLTWH(0, 0, width, height), Paint()..color = const Color(0xFF0D0E15));
+    // Modo Documento de Alto Contraste: Fundo Branco (#FFFFFF) com traços escuros nítidos para OCR/Visão da IA
+    canvas.drawRect(Rect.fromLTWH(0, 0, targetWidth, targetHeight), Paint()..color = Colors.white);
+    canvas.scale(scale, scale);
     canvas.translate(-paddedBounds.left, -paddedBounds.top);
 
     for (final stroke in note.strokes) {
       if (stroke.points.isEmpty) continue;
+      final strokeColor = (stroke.color.computeLuminance() > 0.5)
+          ? const Color(0xFF111111)
+          : stroke.color;
       final strokePaint = Paint()
-        ..color = stroke.color == Colors.black ? Colors.white : stroke.color
-        ..strokeWidth = math.max(2.5, stroke.strokeWidth)
+        ..color = strokeColor
+        ..strokeWidth = math.max(3.0, stroke.strokeWidth * 1.25)
         ..strokeCap = StrokeCap.round
         ..strokeJoin = StrokeJoin.round
         ..style = PaintingStyle.stroke;
@@ -2794,19 +2886,23 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
     }
 
     final picture = recorder.endRecording();
-    final img = await picture.toImage(width.round(), height.round());
+    final img = await picture.toImage(targetWidth.round(), targetHeight.round());
     final byteData = await img.toByteData(format: ui.ImageByteFormat.png);
     if (byteData == null) return null;
     return base64Encode(byteData.buffer.asUint8List());
   }
 
-  Future<void> _handleSubmitAiPrompt(String promptText, [String? userAttachedImageBase64]) async {
-    if (promptText.trim().isEmpty && (userAttachedImageBase64 == null || userAttachedImageBase64.isEmpty)) return;
+  Future<void> _handleSubmitAiPrompt(String promptText, [List<String>? userAttachedImagesBase64]) async {
+    if (promptText.trim().isEmpty && (userAttachedImagesBase64 == null || userAttachedImagesBase64.isEmpty)) return;
 
     final userMsg = AiMessage(
       id: DateTime.now().millisecondsSinceEpoch.toString(),
       role: AiMessageRole.user,
-      content: promptText.trim().isNotEmpty ? promptText.trim() : '(Imagem enviada para análise)',
+      content: promptText.trim().isNotEmpty
+          ? promptText.trim()
+          : (userAttachedImagesBase64 != null && userAttachedImagesBase64.length > 1
+              ? '(${userAttachedImagesBase64.length} imagens enviadas para análise)'
+              : '(Imagem enviada para análise)'),
       timestamp: DateTime.now(),
     );
 
@@ -2829,9 +2925,9 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
     // Constrói o contexto com base nos elementos selecionados, notas mencionadas (@) e grau de consciência ativo
     String scopeContext = '';
     final imagesList = <String>[];
-    if (userAttachedImageBase64 != null && userAttachedImageBase64.isNotEmpty) {
-      imagesList.add(userAttachedImageBase64);
-      scopeContext += 'Imagem enviada pelo usuário em anexo para análise.\n';
+    if (userAttachedImagesBase64 != null && userAttachedImagesBase64.isNotEmpty) {
+      imagesList.addAll(userAttachedImagesBase64);
+      scopeContext += '${userAttachedImagesBase64.length} imagem(ns) enviada(s) pelo usuário em anexo para análise.\n';
     }
 
     final note = _currentNote;
@@ -2877,8 +2973,39 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
     } else if (_activeAiScope == AiScopeType.activeNote && note != null) {
       scopeContext += '\n--- NOTA ATIVA ATUAL: [${note.title}] ---\n';
       if (note.cards.isNotEmpty) {
-        final cardTexts = note.cards.map((c) => 'Card [${c.title}]:\n${c.content}').join('\n---\n');
-        scopeContext += 'Cards e anotações no Canvas:\n$cardTexts\n';
+        final deepContextEnabled = SettingsService.instance.settings.enableDeepNoteContext;
+        for (final c in note.cards) {
+          if (c.cardType == CardType.pdf && c.pdfPath != null) {
+            scopeContext += '\n[Documento PDF: ${c.title}]\n';
+            if (deepContextEnabled) {
+              try {
+                final totalPages = math.min(c.totalPdfPages, 20);
+                for (int p = 1; p <= totalPages; p++) {
+                  final pageText = await PdfDocumentService.instance.loadPageText(c.pdfPath!, p);
+                  if (pageText != null && pageText.fullText.trim().isNotEmpty) {
+                    scopeContext += 'Página $p:\n${pageText.fullText}\n';
+                  }
+                }
+              } catch (e) {
+                debugPrint('[DeepContext] Erro ao extrair texto do PDF: $e');
+              }
+            } else {
+              try {
+                final pageText = await PdfDocumentService.instance.loadPageText(c.pdfPath!, c.currentPdfPage);
+                if (pageText != null && pageText.fullText.trim().isNotEmpty) {
+                  scopeContext += 'Página atual (${c.currentPdfPage}):\n${pageText.fullText}\n';
+                }
+              } catch (_) {}
+            }
+          } else if (c.cardType == CardType.media && c.mediaData != null && c.mediaData!.isNotEmpty) {
+            if (deepContextEnabled && !imagesList.contains(c.mediaData!)) {
+              imagesList.add(c.mediaData!);
+              scopeContext += '\n[Card de Imagem/Mídia anexado ao Canvas incluído para análise visual]\n';
+            }
+          } else if (c.content.isNotEmpty) {
+            scopeContext += '\nCard [${c.title}]:\n${c.content}\n';
+          }
+        }
       }
       if (note.strokes.isNotEmpty) {
         final strokeImg = await _renderNoteStrokesToBase64(note);
@@ -2912,11 +3039,12 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
       model: _activeAiModel,
       scopeContext: scopeContext,
       imagesBase64: imagesList,
+      conversationHistory: _aiMessages.where((m) => m.id != assistantMsgId && m.id != userMsg.id).toList(),
     ).listen(
       (chunk) {
         buffer.write(chunk);
         final now = DateTime.now().millisecondsSinceEpoch;
-        if (now - lastUiUpdate > 35) {
+        if (now - lastUiUpdate > 80) {
           lastUiUpdate = now;
           setState(() {
             final index = _aiMessages.indexWhere((m) => m.id == assistantMsgId);
@@ -2940,6 +3068,12 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
           }
           _isAiStreaming = false;
         });
+        if (_currentNote != null) {
+          _currentNote!.aiChatHistory
+            ..clear()
+            ..addAll(_aiMessages);
+          WorkspaceStorageService.instance.scheduleAutoSave(_currentNote!);
+        }
       },
       onDone: () {
         setState(() {
@@ -2952,6 +3086,12 @@ class _CanvasHomeScreenState extends State<CanvasHomeScreen> with TickerProvider
           }
           _isAiStreaming = false;
         });
+        if (_currentNote != null) {
+          _currentNote!.aiChatHistory
+            ..clear()
+            ..addAll(_aiMessages);
+          WorkspaceStorageService.instance.scheduleAutoSave(_currentNote!);
+        }
       },
     );
   }

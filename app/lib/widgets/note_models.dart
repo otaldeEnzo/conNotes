@@ -5,6 +5,7 @@ import 'spatial_index.dart';
 import 'selection_models.dart';
 import 'canvas_layers.dart';
 import '../models/canvas_card_model.dart';
+import '../models/ai_message_model.dart';
 import 'undo_commands.dart';
 import 'canvas_dot_grid_painter.dart';
 
@@ -89,6 +90,7 @@ class NoteDocument {
   double zoomScale;
   String? nativeDocId;
   final List<CanvasCardModel> cards;
+  final List<AiMessage> aiChatHistory;
   String? aiSummary;
   DateTime? summaryUpdatedAt;
 
@@ -104,6 +106,7 @@ class NoteDocument {
     List<NoteDocument>? children,
     List<InkStroke>? strokes,
     List<CanvasCardModel>? cards,
+    List<AiMessage>? aiChatHistory,
     this.panX = 0.0,
     this.panY = 0.0,
     this.zoomScale = 1.0,
@@ -116,6 +119,7 @@ class NoteDocument {
         children = children ?? [],
         _strokesList = strokes ?? [],
         cards = cards ?? [],
+        aiChatHistory = aiChatHistory ?? [],
         createdAt = createdAt ?? DateTime.now(),
         updatedAt = updatedAt ?? DateTime.now() {
     // Inicializar mapa e índice se houver traços prévios
@@ -295,8 +299,15 @@ class NoteDocument {
         'cards': cards.map((c) => c.toMap()).toList(),
         'historyData': AppUndoManager.instance.serializeHistory(id, maxCommands: 50),
       },
+      'aiChatHistory': aiChatHistory.map((m) => m.toJson()).toList(),
       'childrenSubnotes': children.map((c) => c.toCnCanvasMap()).toList(),
     };
+  }
+
+  Map<String, dynamic> toJson() => toCnCanvasMap();
+
+  factory NoteDocument.fromJson(Map<String, dynamic> json, {String? filePath}) {
+    return NoteDocument.fromCnCanvasMap(json, filePath: filePath);
   }
 
   /// Reconstrói o NoteDocument a partir do mapa JSON do .cncanvas
@@ -339,6 +350,13 @@ class NoteDocument {
         .map((c) => CanvasCardModel.fromMap(c as Map<String, dynamic>))
         .toList();
 
+    final rawAiChat = (map['aiChatHistory'] as List<dynamic>?) ??
+        (metadata['aiChatHistory'] as List<dynamic>?) ??
+        [];
+    final List<AiMessage> parsedAiChatHistory = rawAiChat
+        .map((m) => AiMessage.fromJson(Map<String, dynamic>.from(m as Map)))
+        .toList();
+
     final rawChildren = (map['childrenSubnotes'] as List<dynamic>?) ?? (map['children'] as List<dynamic>?) ?? [];
     final List<NoteDocument> children = rawChildren
         .map((c) => NoteDocument.fromCnCanvasMap(c as Map<String, dynamic>))
@@ -373,6 +391,7 @@ class NoteDocument {
       zoomScale: zoomScale,
       strokes: strokes,
       cards: parsedCards,
+      aiChatHistory: parsedAiChatHistory,
       children: children,
       aiSummary: metadata['aiSummary'] as String?,
       summaryUpdatedAt: metadata['summaryUpdatedAt'] != null ? parseDate(metadata['summaryUpdatedAt']) : null,

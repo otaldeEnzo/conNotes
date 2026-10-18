@@ -13,10 +13,11 @@ import 'svg_icon.dart';
 
 /// Caixa de Prompt de IA com suporte a Anexo de Imagens, Seleção de Área do Canvas, Menções @notas, Borda Aurora e Moscaro v2
 class PromptInputBox extends StatefulWidget {
-  final void Function(String prompt, String? attachedImageBase64) onSubmit;
+  final void Function(String prompt, List<String> attachedImagesBase64) onSubmit;
   final VoidCallback? onSelectCanvasArea;
   final List<String> availableNoteTitles;
   final double width;
+  final bool isActive;
 
   const PromptInputBox({
     super.key,
@@ -24,6 +25,7 @@ class PromptInputBox extends StatefulWidget {
     this.onSelectCanvasArea,
     this.availableNoteTitles = const [],
     this.width = 540,
+    this.isActive = true,
   });
 
   @override
@@ -35,12 +37,25 @@ class PromptInputBoxState extends State<PromptInputBox> with SingleTickerProvide
   final TextEditingController _textController = TextEditingController();
   final FocusNode _focusNode = FocusNode();
 
-  String? _attachedImageBase64;
-  Uint8List? _attachedImageBytes;
+  final List<({Uint8List bytes, String base64})> _attachedImages = [];
   String? _attachedTextReference;
 
+  /// Solicita foco imediato para digitação no campo de prompt
+  void focus() {
+    if (!_focusNode.hasFocus) {
+      _focusNode.requestFocus();
+    }
+  }
+
+  void unfocus() {
+    if (_focusNode.hasFocus) {
+      _focusNode.unfocus();
+    }
+    globalIsEditingText = false;
+  }
+
   /// Permite que chamadores externos (ex: Captura de Área do Canvas ou Card de Mídia)
-  /// anexem uma imagem diretamente ao prompt box com foco.
+  /// anexem uma imagem diretamente ao prompt box com foco, anexando à lista de imagens.
   void attachImage({
     required Uint8List bytes,
     required String base64,
@@ -48,8 +63,7 @@ class PromptInputBoxState extends State<PromptInputBox> with SingleTickerProvide
     bool clearPrompt = false,
   }) {
     setState(() {
-      _attachedImageBytes = bytes;
-      _attachedImageBase64 = base64;
+      _attachedImages.add((bytes: bytes, base64: base64));
       if (clearPrompt) {
         _textController.clear();
       } else if (defaultPrompt != null && _textController.text.trim().isEmpty) {
@@ -64,6 +78,9 @@ class PromptInputBoxState extends State<PromptInputBox> with SingleTickerProvide
   void attachTextReference(String text, {String? defaultPrompt}) {
     setState(() {
       _attachedTextReference = text.trim();
+      if (defaultPrompt != null && _textController.text.trim().isEmpty) {
+        _textController.text = defaultPrompt;
+      }
     });
     _focusNode.requestFocus();
   }
@@ -79,7 +96,10 @@ class PromptInputBoxState extends State<PromptInputBox> with SingleTickerProvide
     _auroraController = AnimationController(
       vsync: this,
       duration: const Duration(seconds: 4),
-    )..repeat();
+    );
+    if (widget.isActive) {
+      _auroraController.repeat();
+    }
 
     _focusNode.onKeyEvent = (node, event) {
       if (event is KeyDownEvent &&
@@ -91,9 +111,29 @@ class PromptInputBoxState extends State<PromptInputBox> with SingleTickerProvide
     };
 
     _textController.addListener(_handleTextChange);
-    _focusNode.addListener(() {
-      globalIsEditingText = _focusNode.hasFocus;
-    });
+    _focusNode.addListener(_syncFocusState);
+  }
+
+  void _syncFocusState() {
+    globalIsEditingText = _focusNode.hasFocus;
+  }
+
+  @override
+  void didUpdateWidget(covariant PromptInputBox oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.isActive != oldWidget.isActive) {
+      if (widget.isActive) {
+        if (!_auroraController.isAnimating) {
+          _auroraController.repeat();
+        }
+      } else {
+        _auroraController.stop();
+        if (_showMentionMenu) {
+          setState(() => _showMentionMenu = false);
+        }
+        unfocus();
+      }
+    }
   }
 
   void _handleTextChange() {
@@ -163,20 +203,36 @@ class PromptInputBoxState extends State<PromptInputBox> with SingleTickerProvide
 
   Future<void> _pickImage() async {
     try {
-      final result = await FilePickerPlatform.instance.pickFiles(
+      final files = await FilePicker.pickFiles(
         type: FileType.custom,
         allowedExtensions: ['png', 'jpg', 'jpeg', 'webp', 'bmp'],
+        allowMultiple: true,
       );
 
-      if (result.isNotEmpty) {
-        final path = result.first.path;
-        if (path != null) {
-          final file = File(path);
-          final bytes = await file.readAsBytes();
-          setState(() {
-            _attachedImageBytes = bytes;
-            _attachedImageBase64 = base64Encode(bytes);
-          });
+      if (files.isNotEmpty) {
+        for (final file in files) {
+          Uint8List? bytes;
+          final path = file.path;
+          if (path != null && path.isNotEmpty) {
+            final f = File(path);
+            if (await f.exists()) {
+              bytes = await f.readAsBytes();
+            }
+          }
+          if (bytes == null) {
+            try {
+              bytes = await file.readAsBytes();
+            } catch (_) {}
+          }
+
+          if (bytes != null && bytes.isNotEmpty) {
+            setState(() {
+              _attachedImages.add((
+                bytes: bytes!,
+                base64: base64Encode(bytes),
+              ));
+            });
+          }
         }
       }
     } catch (_) {}
@@ -187,8 +243,10 @@ class PromptInputBoxState extends State<PromptInputBox> with SingleTickerProvide
       final bytes = await Pasteboard.image;
       if (bytes != null && bytes.isNotEmpty) {
         setState(() {
-          _attachedImageBytes = bytes;
-          _attachedImageBase64 = base64Encode(bytes);
+          _attachedImages.add((
+            bytes: bytes,
+            base64: base64Encode(bytes),
+          ));
         });
       }
     } catch (_) {}
@@ -196,7 +254,7 @@ class PromptInputBoxState extends State<PromptInputBox> with SingleTickerProvide
 
   void _handleSend() {
     final text = _textController.text.trim();
-    if (text.isEmpty && _attachedImageBase64 == null && _attachedTextReference == null) return;
+    if (text.isEmpty && _attachedImages.isEmpty && _attachedTextReference == null) return;
 
     final String promptToSend;
     if (_attachedTextReference != null && _attachedTextReference!.isNotEmpty) {
@@ -209,11 +267,11 @@ class PromptInputBoxState extends State<PromptInputBox> with SingleTickerProvide
       promptToSend = text;
     }
 
-    widget.onSubmit(promptToSend, _attachedImageBase64);
+    final imagesToSend = _attachedImages.map((e) => e.base64).toList();
+    widget.onSubmit(promptToSend, imagesToSend);
     _textController.clear();
     setState(() {
-      _attachedImageBase64 = null;
-      _attachedImageBytes = null;
+      _attachedImages.clear();
       _attachedTextReference = null;
       _showMentionMenu = false;
     });
@@ -221,6 +279,10 @@ class PromptInputBoxState extends State<PromptInputBox> with SingleTickerProvide
 
   @override
   void dispose() {
+    if (_focusNode.hasFocus) {
+      globalIsEditingText = false;
+    }
+    _focusNode.removeListener(_syncFocusState);
     _focusNode.dispose();
     _auroraController.dispose();
     _textController.removeListener(_handleTextChange);
@@ -232,6 +294,8 @@ class PromptInputBoxState extends State<PromptInputBox> with SingleTickerProvide
   Widget build(BuildContext context) {
     final theme = MoscaroThemeController.instance.currentTheme;
     final accent = theme.accentPrimary;
+    final textPrimary = MoscaroTokens.textPrimary;
+    final textSecondary = MoscaroTokens.textSecondary;
 
     final filteredNotes = widget.availableNoteTitles.where((title) {
       if (_mentionQuery.isEmpty) return true;
@@ -264,8 +328,8 @@ class PromptInputBoxState extends State<PromptInputBox> with SingleTickerProvide
                           const SizedBox(width: 8),
                           Text(
                             '@$noteTitle',
-                            style: const TextStyle(
-                              color: Colors.white,
+                            style: TextStyle(
+                              color: textPrimary,
                               fontSize: 12,
                               fontWeight: FontWeight.w600,
                             ),
@@ -285,46 +349,89 @@ class PromptInputBoxState extends State<PromptInputBox> with SingleTickerProvide
             ),
           ),
 
-        // Miniatura da Imagem Anexada
-        if (_attachedImageBytes != null)
+        // Miniaturas das Imagens Anexadas (Múltiplas Imagens)
+        if (_attachedImages.isNotEmpty)
           Padding(
             padding: const EdgeInsets.only(bottom: 8),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(6),
-                  child: Image.memory(
-                    _attachedImageBytes!,
-                    width: 38,
-                    height: 38,
-                    fit: BoxFit.cover,
-                  ),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+              child: SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: List.generate(_attachedImages.length, (index) {
+                    final img = _attachedImages[index];
+                    return Padding(
+                      padding: EdgeInsets.only(
+                        top: 4,
+                        right: index < _attachedImages.length - 1 ? 10 : 4,
+                      ),
+                      child: Stack(
+                        clipBehavior: Clip.none,
+                        children: [
+                          Container(
+                            decoration: BoxDecoration(
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(
+                                color: accent.withValues(alpha: 0.4),
+                                width: 1,
+                              ),
+                            ),
+                            child: ClipRRect(
+                              borderRadius: BorderRadius.circular(7),
+                              child: Image.memory(
+                                img.bytes,
+                                width: 42,
+                                height: 42,
+                                fit: BoxFit.cover,
+                              ),
+                            ),
+                          ),
+                          Positioned(
+                            top: -4,
+                            right: -4,
+                            child: MouseRegion(
+                              cursor: SystemMouseCursors.click,
+                              child: GestureDetector(
+                                behavior: HitTestBehavior.opaque,
+                                onTap: () {
+                                  setState(() {
+                                    _attachedImages.removeAt(index);
+                                  });
+                                },
+                                child: Container(
+                                  width: 18,
+                                  height: 18,
+                                  decoration: BoxDecoration(
+                                    color: theme.backgroundSurface.withValues(alpha: 0.95),
+                                    shape: BoxShape.circle,
+                                    border: Border.all(
+                                      color: accent.withValues(alpha: 0.6),
+                                      width: 1.2,
+                                    ),
+                                  ),
+                                  child: Center(
+                                    child: SvgIcon(
+                                      assetName: 'close',
+                                      color: MoscaroTokens.textPrimary,
+                                      size: 10,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    );
+                  }),
                 ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    'Imagem anexada para análise multimodal',
-                    style: TextStyle(color: MoscaroTokens.textSecondary, fontSize: 11),
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
-                IconButton(
-                  tooltip: 'Remover imagem',
-                  icon: SvgIcon(assetName: 'close', color: MoscaroTokens.textMuted, size: 14),
-                  onPressed: () {
-                    setState(() {
-                      _attachedImageBase64 = null;
-                      _attachedImageBytes = null;
-                    });
-                  },
-                ),
-              ],
+              ),
             ).moscaroV2(
               backgroundColor: theme.backgroundSurface.withValues(alpha: 0.32),
               borderColor: accent.withValues(alpha: 0.45),
               borderRadius: 10,
-              padding: const EdgeInsets.all(6),
+              padding: EdgeInsets.zero,
               enableBlur: true,
             ),
           ),
@@ -362,7 +469,7 @@ class PromptInputBoxState extends State<PromptInputBox> with SingleTickerProvide
                       Text(
                         _attachedTextReference!.replaceAll('\n', ' '),
                         style: TextStyle(
-                          color: MoscaroTokens.textSecondary,
+                          color: textSecondary,
                           fontSize: 11,
                           fontStyle: FontStyle.italic,
                         ),
@@ -420,12 +527,15 @@ class PromptInputBoxState extends State<PromptInputBox> with SingleTickerProvide
                             child: TextField(
                               controller: _textController,
                               focusNode: _focusNode,
-                              style: const TextStyle(color: Colors.white, fontSize: 13),
-                              decoration: const InputDecoration(
+                              style: TextStyle(color: textPrimary, fontSize: 13),
+                              decoration: InputDecoration(
                                 hintText: 'Pergunte à IA (use @ para citar notas)...',
-                                hintStyle: TextStyle(color: Colors.white54, fontSize: 12),
+                                hintStyle: TextStyle(
+                                  color: textSecondary.withValues(alpha: 0.65),
+                                  fontSize: 12,
+                                ),
                                 border: InputBorder.none,
-                                contentPadding: EdgeInsets.symmetric(horizontal: 4, vertical: 10),
+                                contentPadding: const EdgeInsets.symmetric(horizontal: 4, vertical: 10),
                               ),
                               onSubmitted: (_) => _handleSend(),
                             ),

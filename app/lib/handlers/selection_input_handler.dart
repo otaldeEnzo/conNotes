@@ -186,7 +186,13 @@ class SelectionInputHandler {
 
           final newStrokeWidth = (s.strokeWidth * geomScale).clamp(0.5, 50.0);
           final Path newCachedPath;
-          if (s.toolType == InkToolType.fountain || s.enablePressure) {
+          if (s.isShape && s.cachedPath != null) {
+            final matrix = Matrix4.identity()
+              ..translateByDouble(newBounds.left, newBounds.top, 0.0, 1.0)
+              ..scaleByDouble(scaleX, scaleY, 1.0, 1.0)
+              ..translateByDouble(-originalBounds.left + s.transform.dx, -originalBounds.top + s.transform.dy, 0.0, 1.0);
+            newCachedPath = s.cachedPath!.transform(matrix.storage);
+          } else if (s.toolType == InkToolType.fountain || s.enablePressure) {
             newCachedPath = FreehandOutlineRenderer.generateOutlinePath(
               newPoints,
               baseWidth: newStrokeWidth,
@@ -203,6 +209,7 @@ class SelectionInputHandler {
             strokeWidth: newStrokeWidth,
             toolType: s.toolType,
             enablePressure: s.enablePressure,
+            isShape: s.isShape,
             transform: Offset.zero,
             boundingBox: SelectionGeometry.computePointsBounds(newPoints, newStrokeWidth),
             cachedPath: newCachedPath,
@@ -263,7 +270,9 @@ class SelectionInputHandler {
           )).toList();
 
           final Path newCachedPath;
-          if (s.toolType == InkToolType.fountain || s.enablePressure) {
+          if (s.isShape && s.cachedPath != null) {
+            newCachedPath = s.cachedPath!.shift(s.transform + offset);
+          } else if (s.toolType == InkToolType.fountain || s.enablePressure) {
             newCachedPath = FreehandOutlineRenderer.generateOutlinePath(
               newPoints,
               baseWidth: s.strokeWidth,
@@ -280,6 +289,7 @@ class SelectionInputHandler {
             strokeWidth: s.strokeWidth,
             toolType: s.toolType,
             enablePressure: s.enablePressure,
+            isShape: s.isShape,
             transform: Offset.zero,
             boundingBox: SelectionGeometry.computePointsBounds(newPoints, s.strokeWidth),
             cachedPath: newCachedPath,

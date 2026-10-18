@@ -21,6 +21,7 @@ class PdfDocumentService {
   @visibleForTesting
   static set instance(PdfDocumentService testInstance) => _instance = testInstance;
 
+  static const int _maxCachedDocuments = 8;
   final Map<String, PdfDocument> _documentCache = <String, PdfDocument>{};
   final Map<String, Map<int, PdfPageText>> _pageTextCache = <String, Map<int, PdfPageText>>{};
   final Map<String, List<PdfOutlineNode>> _outlineCache = <String, List<PdfOutlineNode>>{};
@@ -44,13 +45,20 @@ class PdfDocumentService {
     _isInitialized = true;
   }
 
-  /// Opens and caches a PdfDocument from a local filesystem path.
+  /// Opens and caches a PdfDocument from a local filesystem path with bounded LRU eviction.
   Future<PdfDocument> loadDocument(String filePath, {PdfPasswordProvider? passwordProvider}) async {
     await initialize();
 
-    final cached = _documentCache[filePath];
+    final cached = _documentCache.remove(filePath);
     if (cached != null) {
+      // Re-insert at the end to maintain LRU order
+      _documentCache[filePath] = cached;
       return cached;
+    }
+
+    while (_documentCache.length >= _maxCachedDocuments) {
+      final oldestKey = _documentCache.keys.first;
+      disposeDocument(oldestKey);
     }
 
     final doc = await PdfDocument.openFile(filePath, passwordProvider: passwordProvider);
@@ -236,7 +244,19 @@ class PdfDocumentService {
     final pdfBytes = await pdfDoc.save();
     final outputFile = File(outputPath);
     await outputFile.parent.create(recursive: true);
-    await outputFile.writeAsBytes(pdfBytes);
+
+    final tmpFile = File('$outputPath.tmp');
+    await tmpFile.writeAsBytes(pdfBytes, flush: true);
+    if (tmpFile.existsSync() && tmpFile.lengthSync() > 0) {
+      try {
+        await tmpFile.rename(outputPath);
+      } on FileSystemException {
+        await tmpFile.copy(outputPath);
+        try {
+          await tmpFile.delete();
+        } catch (_) {}
+      }
+    }
   }
 
   /// Paints a single InkStroke on a Canvas during export flattening.
@@ -270,6 +290,7 @@ class PdfDocumentService {
     final doc = _documentCache.remove(filePath);
     doc?.dispose();
     _pageTextCache.remove(filePath);
+    _outlineCache.remove(filePath);
   }
 
   /// Disposes all cached documents and text fragments.
@@ -279,5 +300,6 @@ class PdfDocumentService {
     }
     _documentCache.clear();
     _pageTextCache.clear();
+    _outlineCache.clear();
   }
 }

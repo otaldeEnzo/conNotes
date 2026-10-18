@@ -164,7 +164,7 @@ class CanvasLayerStack extends StatelessWidget {
         ),
 
         // Camada 1.5: Efeito de Brilho Orgânico e Vivo dos Pontos do Dot Grid (O(K) acelerado)
-        if (settings?.enableMouseGlow ?? true)
+        if ((settings?.enableMouseGlow ?? true) && backgroundType == CanvasBackgroundType.dotGrid)
           ValueListenableBuilder<Offset?>(
             valueListenable: mousePosNotifier,
             builder: (context, mousePos, _) {

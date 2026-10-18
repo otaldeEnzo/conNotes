@@ -100,23 +100,22 @@ class _HomeNoteCardState extends State<HomeNoteCard> {
                   child: Container(
                     padding: const EdgeInsets.all(12),
                     decoration: BoxDecoration(
-                      color: theme.backgroundSurface.withValues(alpha: 0.92),
+                      color: MoscaroTokens.glassTint,
                       borderRadius: BorderRadius.circular(16),
                       border: Border.all(
-                        color: theme.accentPrimary.withValues(alpha: 0.6),
-                        width: 1.2,
+                        color: MoscaroTokens.isLight
+                            ? MoscaroTokens.borderSubtle
+                            : MoscaroTokens.borderGlow,
+                        width: 1.0,
                       ),
                       boxShadow: [
                         BoxShadow(
-                          color: Colors.black.withValues(alpha: 0.6),
+                          color: Colors.black.withValues(
+                            alpha: MoscaroTokens.isLight ? 0.14 : 0.55,
+                          ),
                           blurRadius: 28,
-                          spreadRadius: 4,
+                          spreadRadius: 2,
                           offset: const Offset(0, 10),
-                        ),
-                        BoxShadow(
-                          color: theme.accentPrimary.withValues(alpha: 0.25),
-                          blurRadius: 16,
-                          spreadRadius: -2,
                         ),
                       ],
                     ),
@@ -430,25 +429,21 @@ class _HomeNoteCardState extends State<HomeNoteCard> {
                                 value: 'pin',
                                 label: widget.note.isFavorite ? 'Desafixar' : 'Fixar no topo',
                                 svgIconName: widget.note.isFavorite ? 'star_filled' : 'star',
-                                color: accent,
                               ),
-                              MoscaroGlassMenuItem<String>(
+                              const MoscaroGlassMenuItem<String>(
                                 value: 'summarize_ai',
                                 label: 'Gerar Resumo por IA',
                                 svgIconName: 'ai',
-                                color: MoscaroTokens.auroraBlue,
                               ),
-                              MoscaroGlassMenuItem<String>(
+                              const MoscaroGlassMenuItem<String>(
                                 value: 'rename',
                                 label: 'Renomear',
                                 svgIconName: 'edit',
-                                color: accent,
                               ),
-                              MoscaroGlassMenuItem<String>(
+                              const MoscaroGlassMenuItem<String>(
                                 value: 'duplicate',
                                 label: 'Duplicar',
                                 svgIconName: 'copy',
-                                color: accent,
                               ),
                               const MoscaroGlassMenuItem<String>.divider(value: 'div'),
                               const MoscaroGlassMenuItem<String>(

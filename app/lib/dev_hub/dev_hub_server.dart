@@ -90,6 +90,15 @@ class DevHubServer {
       
       _server!.listen((HttpRequest request) {
         if (request.uri.path == '/ws') {
+          final origin = request.headers.value('origin') ?? '';
+          final isAllowedOrigin = origin.isEmpty ||
+              origin.startsWith('http://localhost:') ||
+              origin.startsWith('http://127.0.0.1:');
+          if (!isAllowedOrigin) {
+            request.response.statusCode = HttpStatus.forbidden;
+            request.response.close();
+            return;
+          }
           WebSocketTransformer.upgrade(request).then((WebSocket socket) {
             _clients.add(socket);
             socket.listen(
@@ -119,11 +128,11 @@ class DevHubServer {
 
   void openInBrowser() {
     if (Platform.isWindows) {
-      Process.run('cmd', ['/c', 'start', 'http://localhost:9876']);
+      Process.run('explorer.exe', ['http://localhost:9876'], runInShell: false);
     } else if (Platform.isMacOS) {
-      Process.run('open', ['http://localhost:9876']);
+      Process.run('open', ['http://localhost:9876'], runInShell: false);
     } else if (Platform.isLinux) {
-      Process.run('xdg-open', ['http://localhost:9876']);
+      Process.run('xdg-open', ['http://localhost:9876'], runInShell: false);
     }
   }
 
@@ -184,7 +193,7 @@ class DevHubServer {
         );
 
         _jankHistory.insert(0, jank);
-        if (_jankHistory.length > 100) {
+        if (jankHistory.length > 100) {
           _jankHistory.removeLast();
         }
       }
@@ -220,6 +229,8 @@ class DevHubServer {
       }
     }
   }
+
+  List<JankRecord> get jankHistory => _jankHistory;
 
   void _broadcastTelemetry() {
     if (_clients.isEmpty) return;
@@ -260,7 +271,7 @@ class DevHubServer {
       final data = jsonDecode(message.toString());
       final action = data['action'];
       if (action == 'inject_strokes') {
-        final count = (data['count'] as num?)?.toInt() ?? 1000;
+        final count = ((data['count'] as num?)?.toInt() ?? 1000).clamp(1, 25000);
         logAction('Injeção de $count traços via DevHub');
         onInjectStrokes?.call(count);
       } else if (action == 'force_gc') {
@@ -287,11 +298,11 @@ class DevHubServer {
     final estimatedVram = gpuTexturesCount * 4;
 
     final buffer = StringBuffer();
-    buffer.writeln('# 📊 Relatório de Diagnóstico de Desempenho — conNotes Engine');
+    buffer.writeln('# Relatório de Diagnóstico de Desempenho — conNotes Engine');
     buffer.writeln('**Data da Extração:** ${DateTime.now().toIso8601String()}');
     buffer.writeln('**Duração da Sessão:** ${uptimeMinutes}m ${uptimeSeconds}s\n');
 
-    buffer.writeln('## ⚡ 1. Resumo Geral de Telemetria');
+    buffer.writeln('## 1. Resumo Geral de Telemetria');
     buffer.writeln('| Métrica | Valor Atual / Média |');
     buffer.writeln('|---|---|');
     buffer.writeln('| **Taxa de Quadros (FPS)** | `${currentFps.toStringAsFixed(0)} FPS` |');

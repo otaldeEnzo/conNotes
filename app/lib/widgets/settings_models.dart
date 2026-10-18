@@ -238,9 +238,12 @@ class AppSettingsState {
   final bool enableNativeRendering;
   final AppStartupBehavior startupBehavior;
 
-  // Presets de Caneta do Usuário
+  // Presets de Caneta e Borracha do Usuário
   final List<PenSlotPreset> penSlots;
   final String? activePenSlotId;
+  final double lastEraserRadius;
+  final String lastEraserMode;
+  final bool lastEraseHighlighterOnly;
 
   static List<PenSlotPreset> get defaultPenSlots => const [
     PenSlotPreset(id: '1', name: 'Branco Técnico', color: Colors.white, strokeWidth: 2.5, toolType: InkToolType.technical, enablePressure: true),
@@ -299,6 +302,9 @@ class AppSettingsState {
   final NoteSummaryEngine noteSummaryEngine;
 
   final bool enableCloudAiFeatures;
+  final bool enableDeepNoteContext;
+  final double aiSidebarWidth;
+  final double aiSidebarFontSize;
   final bool enablePdfAiActions;
   final bool enablePdfAiSummarize;
   final bool enablePdfAiExtractLatex;
@@ -323,6 +329,9 @@ class AppSettingsState {
     this.startupBehavior = AppStartupBehavior.lastOpenedNote,
     this.penSlots = const [],
     this.activePenSlotId,
+    this.lastEraserRadius = 24.0,
+    this.lastEraserMode = 'stroke',
+    this.lastEraseHighlighterOnly = false,
     this.gridSpacing = 28.0,
     this.enableMouseGlow = true,
     this.mouseGlowRadius = 120.0,
@@ -353,6 +362,9 @@ class AppSettingsState {
     this.enableAiMermaidDiagrams = true,
     this.enableAiHandwritingOcr = true,
     this.enableCloudAiFeatures = true,
+    this.enableDeepNoteContext = true,
+    this.aiSidebarWidth = 480.0,
+    this.aiSidebarFontSize = 15.0,
     this.enablePdfAiActions = true,
     this.enablePdfAiSummarize = true,
     this.enablePdfAiExtractLatex = true,
@@ -381,6 +393,9 @@ class AppSettingsState {
     AppStartupBehavior? startupBehavior,
     List<PenSlotPreset>? penSlots,
     String? activePenSlotId,
+    double? lastEraserRadius,
+    String? lastEraserMode,
+    bool? lastEraseHighlighterOnly,
     double? gridSpacing,
     bool? enableMouseGlow,
     double? mouseGlowRadius,
@@ -411,6 +426,9 @@ class AppSettingsState {
     bool? enableAiMermaidDiagrams,
     bool? enableAiHandwritingOcr,
     bool? enableCloudAiFeatures,
+    bool? enableDeepNoteContext,
+    double? aiSidebarWidth,
+    double? aiSidebarFontSize,
     bool? enablePdfAiActions,
     bool? enablePdfAiSummarize,
     bool? enablePdfAiExtractLatex,
@@ -436,12 +454,15 @@ class AppSettingsState {
       startupBehavior: startupBehavior ?? this.startupBehavior,
       penSlots: penSlots ?? this.penSlots,
       activePenSlotId: activePenSlotId ?? this.activePenSlotId,
+      lastEraserRadius: (lastEraserRadius ?? this.lastEraserRadius).clamp(8.0, 64.0),
+      lastEraserMode: lastEraserMode ?? this.lastEraserMode,
+      lastEraseHighlighterOnly: lastEraseHighlighterOnly ?? this.lastEraseHighlighterOnly,
       gridSpacing: (gridSpacing ?? this.gridSpacing).clamp(16.0, 48.0),
       enableMouseGlow: enableMouseGlow ?? this.enableMouseGlow,
       mouseGlowRadius: (mouseGlowRadius ?? this.mouseGlowRadius).clamp(60.0, 240.0),
       rdpSmoothingTolerance: (rdpSmoothingTolerance ?? this.rdpSmoothingTolerance).clamp(0.1, 0.8),
       pressureSensitivity: (pressureSensitivity ?? this.pressureSensitivity).clamp(0.5, 2.0),
-      drawAndHoldDurationMs: (drawAndHoldDurationMs ?? this.drawAndHoldDurationMs).clamp(250, 750),
+      drawAndHoldDurationMs: (drawAndHoldDurationMs ?? this.drawAndHoldDurationMs).clamp(100, 1000),
       stylusPrimaryBarrelAction: stylusPrimaryBarrelAction ?? this.stylusPrimaryBarrelAction,
       stylusPrimaryTriggerMode: stylusPrimaryTriggerMode ?? this.stylusPrimaryTriggerMode,
       stylusSecondaryBarrelAction: stylusSecondaryBarrelAction ?? this.stylusSecondaryBarrelAction,
@@ -466,6 +487,9 @@ class AppSettingsState {
       enableAiMermaidDiagrams: enableAiMermaidDiagrams ?? this.enableAiMermaidDiagrams,
       enableAiHandwritingOcr: enableAiHandwritingOcr ?? this.enableAiHandwritingOcr,
       enableCloudAiFeatures: enableCloudAiFeatures ?? this.enableCloudAiFeatures,
+      enableDeepNoteContext: enableDeepNoteContext ?? this.enableDeepNoteContext,
+      aiSidebarWidth: (aiSidebarWidth ?? this.aiSidebarWidth).clamp(360.0, 840.0),
+      aiSidebarFontSize: (aiSidebarFontSize ?? this.aiSidebarFontSize).clamp(12.0, 20.0),
       enablePdfAiActions: enablePdfAiActions ?? this.enablePdfAiActions,
       enablePdfAiSummarize: enablePdfAiSummarize ?? this.enablePdfAiSummarize,
       enablePdfAiExtractLatex: enablePdfAiExtractLatex ?? this.enablePdfAiExtractLatex,
@@ -494,6 +518,9 @@ class AppSettingsState {
       'startupBehavior': startupBehavior.name,
       'penSlots': effectivePenSlots.map((s) => s.toJson()).toList(),
       'activePenSlotId': activePenSlotId,
+      'lastEraserRadius': lastEraserRadius,
+      'lastEraserMode': lastEraserMode,
+      'lastEraseHighlighterOnly': lastEraseHighlighterOnly,
       'gridSpacing': gridSpacing,
       'enableMouseGlow': enableMouseGlow,
       'mouseGlowRadius': mouseGlowRadius,
@@ -524,6 +551,9 @@ class AppSettingsState {
       'enableAiMermaidDiagrams': enableAiMermaidDiagrams,
       'enableAiHandwritingOcr': enableAiHandwritingOcr,
       'enableCloudAiFeatures': enableCloudAiFeatures,
+      'enableDeepNoteContext': enableDeepNoteContext,
+      'aiSidebarWidth': aiSidebarWidth,
+      'aiSidebarFontSize': aiSidebarFontSize,
       'enablePdfAiActions': enablePdfAiActions,
       'enablePdfAiSummarize': enablePdfAiSummarize,
       'enablePdfAiExtractLatex': enablePdfAiExtractLatex,
@@ -618,6 +648,9 @@ class AppSettingsState {
       startupBehavior: startupBehavior,
       penSlots: parsedPenSlots,
       activePenSlotId: json['activePenSlotId'] as String?,
+      lastEraserRadius: ((json['lastEraserRadius'] as num?)?.toDouble() ?? 24.0).clamp(8.0, 64.0),
+      lastEraserMode: json['lastEraserMode'] as String? ?? 'stroke',
+      lastEraseHighlighterOnly: json['lastEraseHighlighterOnly'] as bool? ?? false,
       gridSpacing: (json['gridSpacing'] as num?)?.toDouble() ?? 28.0,
       enableMouseGlow: json['enableMouseGlow'] as bool? ?? true,
       mouseGlowRadius: (json['mouseGlowRadius'] as num?)?.toDouble() ?? 120.0,
@@ -648,6 +681,9 @@ class AppSettingsState {
       enableAiMermaidDiagrams: json['enableAiMermaidDiagrams'] as bool? ?? true,
       enableAiHandwritingOcr: json['enableAiHandwritingOcr'] as bool? ?? true,
       enableCloudAiFeatures: json['enableCloudAiFeatures'] as bool? ?? true,
+      enableDeepNoteContext: json['enableDeepNoteContext'] as bool? ?? true,
+      aiSidebarWidth: ((json['aiSidebarWidth'] as num?)?.toDouble() ?? 480.0).clamp(360.0, 840.0),
+      aiSidebarFontSize: ((json['aiSidebarFontSize'] as num?)?.toDouble() ?? 15.0).clamp(12.0, 20.0),
       enablePdfAiActions: json['enablePdfAiActions'] as bool? ?? true,
       enablePdfAiSummarize: json['enablePdfAiSummarize'] as bool? ?? true,
       enablePdfAiExtractLatex: json['enablePdfAiExtractLatex'] as bool? ?? true,

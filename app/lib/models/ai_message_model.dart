@@ -24,6 +24,22 @@ class AiDynamicAction {
     required this.label,
     required this.iconName,
   });
+
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'label': label,
+      'iconName': iconName,
+    };
+  }
+
+  factory AiDynamicAction.fromJson(Map<String, dynamic> json) {
+    return AiDynamicAction(
+      id: json['id'] as String? ?? '',
+      label: json['label'] as String? ?? '',
+      iconName: json['iconName'] as String? ?? '',
+    );
+  }
 }
 
 /// Modelo de mensagem no histórico do chat da IA
@@ -93,8 +109,10 @@ class AiMessage {
       'role': role.name,
       'content': content,
       'timestamp': timestamp.toIso8601String(),
+      'isStreaming': isStreaming,
       'modelName': modelName,
       'errorMessage': errorMessage,
+      'dynamicActions': dynamicActions.map((a) => a.toJson()).toList(),
     };
   }
 
@@ -109,8 +127,13 @@ class AiMessage {
       timestamp: json['timestamp'] != null
           ? DateTime.tryParse(json['timestamp'] as String) ?? DateTime.now()
           : DateTime.now(),
+      isStreaming: json['isStreaming'] as bool? ?? false,
       modelName: json['modelName'] as String?,
       errorMessage: json['errorMessage'] as String?,
+      dynamicActions: (json['dynamicActions'] as List<dynamic>?)
+              ?.map((a) => AiDynamicAction.fromJson(Map<String, dynamic>.from(a as Map)))
+              .toList() ??
+          const [],
     );
   }
 }

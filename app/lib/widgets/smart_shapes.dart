@@ -160,14 +160,34 @@ class SmartShapeEngine {
     return points;
   }
 
+  /// Localiza a ponta real do eixo da seta (o ponto mais distante da origem do traço)
+  static Offset findArrowTipPoint(List<StrokePoint> strokePoints) {
+    if (strokePoints.isEmpty) return Offset.zero;
+    final start = strokePoints.first.point;
+    Offset furthest = strokePoints.last.point;
+    double maxDistSq = -1.0;
+    for (final p in strokePoints) {
+      final dSq = (p.point - start).distanceSquared;
+      if (dSq > maxDistSq) {
+        maxDistSq = dSq;
+        furthest = p.point;
+      }
+    }
+    return furthest;
+  }
+
   /// Gera o Path perfeito para uma forma reconhecida a partir do traço livre e de sua orientação original
   static Path generateRecognizedPath(ShapeType type, List<StrokePoint> strokePoints, Rect bounds) {
     if (strokePoints.isEmpty) {
       return generateShapePath(type, bounds.topLeft, bounds.bottomRight);
     }
 
-    if (type == ShapeType.line || type == ShapeType.arrow || type == ShapeType.doubleArrow) {
+    if (type == ShapeType.line) {
       return generateShapePath(type, strokePoints.first.point, strokePoints.last.point);
+    }
+
+    if (type == ShapeType.arrow || type == ShapeType.doubleArrow) {
+      return generateShapePath(type, strokePoints.first.point, findArrowTipPoint(strokePoints));
     }
 
     final rawOffsets = strokePoints.map((p) => p.point).toList();
@@ -323,6 +343,14 @@ class SmartShapeEngine {
 
     // 3.1 Zero ou 1 canto -> Círculo ou Elipse Suave
     if (cornerCount <= 1) {
+      // Validação anti-rabisco: O perímetro de um círculo/elipse deve ser proporcional à bounding box.
+      // Em rabiscos caóticos no mesmo lugar, pathLength é excessivamente longo.
+      final maxDim = math.max(bounds.width, bounds.height);
+      final approxPerimeter = math.pi * maxDim;
+      if (maxDim < 8.0 || pathLength > approxPerimeter * 2.6 || pathLength < approxPerimeter * 0.45) {
+        return null; // Rabisco ou traço convoluto, não é círculo/elipse
+      }
+
       final ratio = bounds.width / (bounds.height + 0.001);
       if (ratio >= 0.80 && ratio <= 1.25) {
         return ShapeType.circle;
