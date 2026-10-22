@@ -12,6 +12,14 @@ class SvgIcon extends StatelessWidget {
   String get iconKey => name ?? assetName ?? 'file';
 
   static const Map<String, String> _builtinSvgStrings = {
+    'drag_handle': '''<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+  <circle cx="9" cy="6" r="1.2" fill="currentColor"/>
+  <circle cx="15" cy="6" r="1.2" fill="currentColor"/>
+  <circle cx="9" cy="12" r="1.2" fill="currentColor"/>
+  <circle cx="15" cy="12" r="1.2" fill="currentColor"/>
+  <circle cx="9" cy="18" r="1.2" fill="currentColor"/>
+  <circle cx="15" cy="18" r="1.2" fill="currentColor"/>
+</svg>''',
     'card': '''<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
   <rect width="18" height="18" x="3" y="3" rx="3"/>
   <path d="M7 8h10"/>

@@ -544,6 +544,11 @@ class _AiMessageBubbleViewState extends State<AiMessageBubbleView> {
 
         final code = codeLines.join('\n');
 
+        // Se o bloco estiver vazio e não estiver em streaming (ou já foi fechado vazio), ignora para evitar retângulos pretos vazios
+        if (code.trim().isEmpty && (!isStreaming || isCodeClosed)) {
+          continue;
+        }
+
         // Renderizador especializado para Diagramas Mermaid
         if (lang.toLowerCase() == 'mermaid') {
           if (code.trim().isEmpty) {
@@ -752,27 +757,43 @@ class _AiMessageBubbleViewState extends State<AiMessageBubbleView> {
         }
 
         commitBlock(
-          Container(
-            margin: const EdgeInsets.symmetric(vertical: 6),
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-            decoration: BoxDecoration(
-              color: calloutColor.withValues(alpha: 0.08),
-              borderRadius: BorderRadius.circular(10),
-              border: Border(
-                left: BorderSide(color: calloutColor, width: 3.5),
-                top: BorderSide(color: calloutColor.withValues(alpha: 0.25), width: 1.0),
-                right: BorderSide(color: calloutColor.withValues(alpha: 0.25), width: 1.0),
-                bottom: BorderSide(color: calloutColor.withValues(alpha: 0.25), width: 1.0),
-              ),
-              boxShadow: [
-                BoxShadow(
-                  color: calloutColor.withValues(alpha: 0.08),
-                  blurRadius: 10,
-                  offset: const Offset(0, 2),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(10),
+            child: Container(
+              margin: const EdgeInsets.symmetric(vertical: 6),
+              decoration: BoxDecoration(
+                color: calloutColor.withValues(alpha: 0.08),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(
+                  color: calloutColor.withValues(alpha: 0.25),
+                  width: 1.0,
                 ),
-              ],
-            ),
-            child: Column(
+                boxShadow: [
+                  BoxShadow(
+                    color: calloutColor.withValues(alpha: 0.08),
+                    blurRadius: 10,
+                    offset: const Offset(0, 2),
+                  ),
+                ],
+              ),
+              child: IntrinsicHeight(
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Container(
+                      width: 4.0,
+                      decoration: BoxDecoration(
+                        color: calloutColor,
+                        borderRadius: const BorderRadius.only(
+                          topLeft: Radius.circular(10),
+                          bottomLeft: Radius.circular(10),
+                        ),
+                      ),
+                    ),
+                    Expanded(
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                        child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Row(
@@ -822,9 +843,15 @@ class _AiMessageBubbleViewState extends State<AiMessageBubbleView> {
               ],
             ),
           ),
-          i,
-          isComplete: i < rawLines.length,
-        );
+        ),
+      ],
+    ),
+  ),
+),
+),
+i,
+isComplete: i < rawLines.length,
+);
         continue;
       }
 

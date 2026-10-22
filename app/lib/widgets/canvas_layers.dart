@@ -68,7 +68,6 @@ class TileSubChunk {
       _pendingAppendStroke = null;
       final recorder = ui.PictureRecorder();
       final canvas = Canvas(recorder);
-      canvas.clipRect(const Rect.fromLTWH(0, 0, StrokePictureCache.tileSize, StrokePictureCache.tileSize));
       canvas.drawPicture(picture!);
       canvas.translate(-tileX * StrokePictureCache.tileSize, -tileY * StrokePictureCache.tileSize);
       StrokePictureCache.drawSingleStroke(canvas, stroke, reusablePaint);
@@ -92,7 +91,6 @@ class TileSubChunk {
 
     final recorder = ui.PictureRecorder();
     final canvas = Canvas(recorder);
-    canvas.clipRect(const Rect.fromLTWH(0, 0, StrokePictureCache.tileSize, StrokePictureCache.tileSize));
     canvas.translate(-tileX * StrokePictureCache.tileSize, -tileY * StrokePictureCache.tileSize);
 
     // 1. Marca-textos primeiro (para ficarem "atrás" de traços normais)
@@ -119,7 +117,6 @@ class TileSubChunk {
     if (strokes.isEmpty) return;
 
     canvas.save();
-    canvas.clipRect(const Rect.fromLTWH(0, 0, StrokePictureCache.tileSize, StrokePictureCache.tileSize));
 
     // Se algum traço deste chunk estiver oculto (ex: sendo movido ou apagado), usa cache secundário filtrado
     if (hiddenIds != null && strokes.any((s) => hiddenIds.contains(s.id))) {
@@ -134,7 +131,6 @@ class TileSubChunk {
         _filteredPicture?.dispose();
         final recorder = ui.PictureRecorder();
         final recCanvas = Canvas(recorder);
-        recCanvas.clipRect(const Rect.fromLTWH(0, 0, StrokePictureCache.tileSize, StrokePictureCache.tileSize));
         recCanvas.translate(-tileX * StrokePictureCache.tileSize, -tileY * StrokePictureCache.tileSize);
 
         final paint = reusablePaint ?? Paint();

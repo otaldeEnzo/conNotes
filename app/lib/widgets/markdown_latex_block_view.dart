@@ -59,6 +59,8 @@ class MarkdownLatexBlockView extends StatefulWidget {
   final VoidCallback? onJumpToSource;
   final bool isSelected;
 
+  static MarkdownLatexBlockViewState? activeBlockViewState;
+
   const MarkdownLatexBlockView({
     super.key,
     required this.card,
@@ -239,6 +241,9 @@ class MarkdownLatexBlockViewState extends State<MarkdownLatexBlockView> {
 
   @override
   void dispose() {
+    if (MarkdownLatexBlockView.activeBlockViewState == this) {
+      MarkdownLatexBlockView.activeBlockViewState = null;
+    }
     _blockController.removeListener(_handleControllerChange);
     _blockController.dispose();
     _blockFocusNode.dispose();
@@ -329,6 +334,7 @@ class MarkdownLatexBlockViewState extends State<MarkdownLatexBlockView> {
       return;
     }
     globalIsEditingText = true;
+    MarkdownLatexBlockView.activeBlockViewState = this;
     _lastSelection = const TextSelection.collapsed(offset: -1);
     setState(() {
       _editingBlockIndex = block.index;
@@ -411,6 +417,9 @@ class MarkdownLatexBlockViewState extends State<MarkdownLatexBlockView> {
   void commitBlockEdit() {
     if (_editingBlockIndex == null) return;
     _syncBlockContent();
+    if (MarkdownLatexBlockView.activeBlockViewState == this) {
+      MarkdownLatexBlockView.activeBlockViewState = null;
+    }
     setState(() {
       _editingBlockIndex = null;
       _showSlashMenu = false;

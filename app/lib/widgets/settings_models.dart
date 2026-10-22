@@ -111,7 +111,7 @@ enum StylusBarrelAction {
       case StylusBarrelAction.pixelEraser:
         return 'eraser';
       case StylusBarrelAction.selectionLasso:
-        return 'lasso';
+        return 'select_lasso';
       case StylusBarrelAction.selectionRect:
         return 'select';
       case StylusBarrelAction.colorPicker:
